@@ -35,6 +35,7 @@ from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"definite.jo" import (dg_tests)
+from p"node_store.dewy" import (node_sval node_with_op node_with_sval)
 
 ProgramWord:type=int64<overflow='wrap'>
 # if __test_begin(name): body; __test_end()   (the body in a process of its own, where it can be)
@@ -58,7 +59,7 @@ synth_call=(name:string args:array<int64> pos:ProgramWord):>int64=>$unsafe {
 }
 synth_str=(s:string pos:ProgramWord):>int64=>$unsafe {
     let n=mk('str_lit' pos)
-    nodes.ptr[n].sval=int32(intern(s))
+    nodes.ptr[n].op_ext=node_with_sval(nodes.ptr[n].op_ext (int32(intern(s))))
     n
 }
 program_name_default=(main_path:string):>void=>{
@@ -183,7 +184,7 @@ program_tests=(mainm:ProgramWord main_path:string):>void=>$unsafe {
         let computed:array<int64>=[]
         loop d in test_decls {
             let pos=nodes.ptr[d].pos
-            let nm=name_of(ProgramWord(nodes.ptr[d].sval))
+            let nm=name_of(ProgramWord(node_sval(nodes.ptr[d].op_ext)))
             if nodes.ptr[d].aux =? 1 {
                 # (Dewy's `$test` function: called once, or once per case as name[i])
                 if nodes.ptr[d].a not=? 0 {
@@ -238,7 +239,7 @@ program_game=(mainm:ProgramWord has_upd:bool has_drw:bool):>void=>$unsafe {
     # (before the program's own code: it is a game, so a texture made at the top opens the
     # window; a script's opens none)
     let isg=mk('assign' 0)
-    nodes.ptr[isg].op=int32(47)
+    nodes.ptr[isg].op_ext=node_with_op(nodes.ptr[isg].op_ext (int32(47)))
     let isgl=mk('ident' 0)
     nodes.ptr[isgl].name=int32(intern("__is_game"))
     nodes.ptr[isg].a=int32(isgl)

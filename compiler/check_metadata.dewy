@@ -10,6 +10,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"lexer_helpers.dewy" import (tok_text)
 from p"util.jo" import (name_of pos_in_lib)
 from p"source_warnings.dewy" import (warn)
+from p"node_store.dewy" import (node_sval)
 
 MetadataWord:type=int64<overflow='wrap'>
 # Dewy's name for a builtin type Sloppy spells w ("" when w is not one).
@@ -26,7 +27,7 @@ dewy_type_word=(w:string):>string=>{
 fixed_size_arg=(tn:MetadataWord):>bool=>$unsafe {
     if nkids(tn) not=? 1 {return false}
     let a=kid(tn 0)
-    if nodes.ptr[a].kind not=? 'tname' or nodes.ptr[a].nlist >? 0 or nodes.ptr[a].sval not=? 0 {return false}
+    if nodes.ptr[a].kind not=? 'tname' or nodes.ptr[a].nlist >? 0 or node_sval(nodes.ptr[a].op_ext) not=? 0 {return false}
     let s=lookup(MetadataWord(nodes.ptr[a].name))
     s not=? 0 and binding_const_init(syms.ptr[s].kind MetadataWord(syms.ptr[s].ref) nodes.ptr[tn].pos) not=? 0
 }
@@ -37,7 +38,7 @@ no_web_check=(decl:MetadataWord use_pos:MetadataWord):>void=>$unsafe {
         let at=kid(ab i)
         if name_of(MetadataWord(nodes.ptr[at].name)) not=? "no_web" or nodes.ptr[at].a =? 0 or nodes.ptr[MetadataWord(nodes.ptr[at].a)].kind not=? 'str_lit' {continue}
         no_web_warned[use_pos]=true
-        warn(use_pos "{name_of(MetadataWord(nodes.ptr[decl].name))} {name_of(MetadataWord(nodes.ptr[MetadataWord(nodes.ptr[at].a)].sval))}");
+        warn(use_pos "{name_of(MetadataWord(nodes.ptr[decl].name))} {name_of(MetadataWord(node_sval(nodes.ptr[MetadataWord(nodes.ptr[at].a)].op_ext)))}");
     }
 }
 # an operator as the source at pos spells it (Dewy's comparisons end in `?`)

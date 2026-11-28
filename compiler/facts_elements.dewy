@@ -46,6 +46,7 @@ from p"util.jo" import (files pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_unknown)
+from p"node_store.dewy" import (node_op)
 
 ElementWord:type=int64<overflow='wrap'>
 # Optional/union coercions wrap an already requested boundary in place.
@@ -191,7 +192,7 @@ fact_index_carried=(body:ElementWord l:ElementWord):>array<int64>=>$unsafe {
             let value=ElementWord(nodes.ptr[e].b)
             # (a value-preserving integer conversion, `best=i` into an `int`, or an `int?`)
             loop nodes.ptr[value].kind =? 'conv' and (nodes.ptr[value].aux =? int32(int64(CV.int_)) or nodes.ptr[value].aux =? int32(int64(CV.opt))) {value=ElementWord(nodes.ptr[value].a)}
-            if nodes.ptr[e].op =? int32(47) and nodes.ptr[value].kind =? 'ident' and nodes.ptr[value].aux =? int32(1) {stores.push([target ElementWord(nodes.ptr[value].sym)])}
+            if node_op(nodes.ptr[e].op_ext) =? int32(47) and nodes.ptr[value].kind =? 'ident' and nodes.ptr[value].aux =? int32(1) {stores.push([target ElementWord(nodes.ptr[value].sym)])}
             else {bad[target]=true}
         }
         if k =? 'addr' and nodes.ptr[ElementWord(nodes.ptr[e].a)].kind =? 'ident' {bad[ElementWord(nodes.ptr[ElementWord(nodes.ptr[e].a)].sym)]=true}

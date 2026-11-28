@@ -21,7 +21,7 @@ DRIVER = '''main = ():
     f = node_mk(nodes, .lambda, 0)
     node_set_list2(nodes, lists, f, [21, 22])
     assert(lambda_captures(f) == [21, 22])
-    nodes[f].flags = 64; nodes[f].d = i32(body)
+    nodes[f].flags = 64; nodes[f].op_ext = node_with_d(nodes[f].op_ext, i32(i32(body)))
     assert(lambda_captures(f) == [11, 12])
     empty = node_mk(nodes, .call, 0)
     assert(written_args(empty) == [] and not spreads_rest(empty))

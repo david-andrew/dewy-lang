@@ -11,7 +11,7 @@ from p"expr.jo" import (AUX2_PARTIAL last_checked)
 from p"numeric_library_types.dewy" import (bundled_bigint_type is_nd)
 from p"checks_call_hints.dewy" import (a_type)
 from p"lexer_helpers.dewy" import (is_ident_char)
-from p"node_store.dewy" import (NK Node)
+from p"node_store.dewy" import (NK Node node_aux2 node_sval node_with_aux2 node_with_op)
 from p"types.jo" import (fields is_union prune structs tkind types union_members)
 from p"type_ops.dewy" import (dt)
 from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
@@ -40,7 +40,7 @@ juxt_text=(h:JuxtWord):>string=>$unsafe {
         if base not=? "(...)" {return "{base}.{name_of(JuxtWord(nodes.ptr[h].name))}"}
     }
     if k =? 'int_lit' {return "{nodes.ptr[h].ival}"}
-    if k =? 'float_lit' and nodes.ptr[h].sval not=? 0 {return name_of(JuxtWord(nodes.ptr[h].sval))}
+    if k =? 'float_lit' and node_sval(nodes.ptr[h].op_ext) not=? 0 {return name_of(JuxtWord(node_sval(nodes.ptr[h].op_ext)))}
     if (k =? 'call' or k =? 'index') and nkids(h) <=? 2 {
         let base=juxt_text(JuxtWord(nodes.ptr[h].a))
         if base not=? "(...)" and nodes.ptr[JuxtWord(nodes.ptr[h].a)].kind not=? 'call' and nodes.ptr[JuxtWord(nodes.ptr[h].a)].kind not=? 'index' {
@@ -156,7 +156,7 @@ juxt_chain_numeric=(c:JuxtWord):>bool=>$unsafe {
 # The one value call c's parentheses hold as a factor.
 juxt_factor=(c:JuxtWord):>JuxtWord=>$unsafe {
     let h=JuxtWord(nodes.ptr[c].a)
-    if nodes.ptr[c].aux2 =? int32(AUX2_PARTIAL) {fatal(nodes.ptr[c].pos "partial application requires a callable: `{juxt_text(h)}` is a number, and `{juxt_text(h)}(...)` multiplies")}
+    if node_aux2(nodes.ptr[c].op_ext) =? int32(AUX2_PARTIAL) {fatal(nodes.ptr[c].pos "partial application requires a callable: `{juxt_text(h)}` is a number, and `{juxt_text(h)}(...)` multiplies")}
     if nkids(c) not=? 1 or nodes.ptr[kid(c 0)].kind =? 'namedarg' or has_flag(kid(c 0) NF_SPREAD) {
         let product=juxt_texts(kids(c) " * ")
         if nkids(c) <? 2 or product =? "(...)" {product="x * y"}
@@ -169,14 +169,14 @@ juxt_product=(n:JuxtWord):>void=>$unsafe {
     let factor=juxt_factor(n)
     let head=nodes.ptr[n].a
     nodes.ptr[n].kind='binary'
-    nodes.ptr[n].op=int32(60)
+    nodes.ptr[n].op_ext=node_with_op(nodes.ptr[n].op_ext (int32(60)))
     nodes.ptr[n].a=head
     nodes.ptr[n].b=int32(factor)
     nodes.ptr[n].list=0
     nodes.ptr[n].nlist=0
     nodes.ptr[n].sym=0
     nodes.ptr[n].aux=0
-    nodes.ptr[n].aux2=0
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
     add_flag(n NF_JUXT)
 }
 # `a(x)^e` with a numeric head: the power takes the last factor, `a*(x^e)`; power call p
@@ -189,7 +189,7 @@ juxt_power=(p:JuxtWord):>void=>$unsafe {
     set_kid(p 0 factor)
     let power=nodes.length
     nodes.push(nodes.ptr[p])
-    nodes.ptr[p]=Node(kind='binary' pos=nodes.ptr[p].pos op=int32(60) a=nodes.ptr[c].a b=int32(power))
+    nodes.ptr[p]=Node(kind='binary' pos=nodes.ptr[p].pos op_ext=uint32(60) a=nodes.ptr[c].a b=int32(power))
     add_flag(p NF_JUXT)
 }
 # Call n's head was checked (type t) and is not callable: a group head multiplies; a call

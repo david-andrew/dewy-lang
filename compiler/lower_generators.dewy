@@ -19,6 +19,7 @@ from p"type_constructors.dewy" import (tb_generators_seen)
 from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_NEVER T_VOID align_up fields ptr_size prune structs talign targ telem tkind tsize types)
 from p"type_ops.dewy" import (fixed_len is_managed layout)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_aux2)
 
 LGnWord:type=int64<overflow='wrap'>
 LGnI32:type=int32<overflow='wrap'>
@@ -1183,7 +1184,7 @@ helper_gen_step=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
             let ct=prune(ntype(LGnWord(nodes.ptr[st.node].a)))
             let ch=e_load(VI frame coff ptr_size)
             let step_fn=e_load(VI ch 0 ptr_size)
-            let widen=LGnWord(nodes.ptr[st.node].aux2)
+            let widen=LGnWord(node_aux2(nodes.ptr[st.node].op_ext))
             if widen =? 0 {
                 let has=e_calli(step_fn [ch out_v] VI false)
                 iff(e_bin('ne' VI has e_iconst(0)));

@@ -19,12 +19,13 @@ from p"util.jo" import (files name_of pos_in_lib)
 from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (pos_str)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_aux2 node_mod node_sval)
 
 ImportWord:type=int64<overflow='wrap'>
 bind_from_imports=(start:ImportWord=0):>void=>$unsafe {
     loop di in [start..from_imports.length) {
         let d=from_imports[di]
-        let m=ImportWord(nodes.ptr[d].mod)
+        let m=ImportWord(node_mod(nodes.ptr[d].op_ext))
         let im=ImportWord(nodes.ptr[d].sym)
         if nodes.ptr[d].aux =? 3 {
             bind_splat(d m im)
@@ -50,7 +51,7 @@ bind_from_imports=(start:ImportWord=0):>void=>$unsafe {
                 if not modules[im].is_prelude {
                     loop [k v] in modules[im].names {cands.push(k)}
                 }
-                fatal(nodes.ptr[id].pos "'{name_of(ImportWord(nodes.ptr[d].sval))}' has no '{name_of(nm)}'{suggestion(name_of(nm) cands)}")
+                fatal(nodes.ptr[id].pos "'{name_of(ImportWord(node_sval(nodes.ptr[d].op_ext)))}' has no '{name_of(nm)}'{suggestion(name_of(nm) cands)}")
             }
             if files[ImportWord(modules[m].file)].is_dewy {rational_one_spelling(im nm nodes.ptr[id].pos "drop `{name_of(nm)}` from the import and ")}
             if ide_on {
@@ -63,7 +64,7 @@ bind_from_imports=(start:ImportWord=0):>void=>$unsafe {
             if files[ImportWord(modules[m].file)].is_dewy {
                 let ex=modules[m].names.get(alias)
                 if ex not=? none {
-                    if syms.ptr[ex].decl not=? 0 and ImportWord(nodes.ptr[ImportWord(syms.ptr[ex].decl)].mod) =? m {dewy_own=ex}
+                    if syms.ptr[ex].decl not=? 0 and ImportWord(node_mod(nodes.ptr[ImportWord(syms.ptr[ex].decl)].op_ext)) =? m {dewy_own=ex}
                 }
             }
             if dewy_own not=? 0 {
@@ -106,7 +107,7 @@ sym_home=(s:ImportWord):>ImportWord=>$unsafe {
     let k=syms.ptr[s].kind
     if k =? 'global' or k =? 'const_' {return ImportWord(globals.ptr[ImportWord(syms.ptr[s].ref)].mod)}
     if k =? 'module' or syms.ptr[s].decl =? 0 {return -1}
-    ImportWord(nodes.ptr[ImportWord(syms.ptr[s].decl)].mod)
+    ImportWord(node_mod(nodes.ptr[ImportWord(syms.ptr[s].decl)].op_ext))
 }
 sym_file_name=(s:ImportWord):>string=>{
     let h=sym_home(s)
@@ -122,7 +123,7 @@ import_owned=(s:ImportWord im:ImportWord):>array<[int64 int64]>=>$unsafe {
         let o=s
         loop o not=? 0 {
             let d=ImportWord(syms.ptr[o].decl)
-            if d not=? 0 and ImportWord(nodes.ptr[d].mod) =? im {out.push([ImportWord(syms.ptr[o].ref) d])}
+            if d not=? 0 and ImportWord(node_mod(nodes.ptr[d].op_ext)) =? im {out.push([ImportWord(syms.ptr[o].ref) d])}
             o=ImportWord(syms.ptr[o].next)
         }
     }
@@ -159,8 +160,8 @@ binds_all=(ex:ImportWord owned:array<[int64 int64]>):>bool=>$unsafe {
 dewy_import_clash=(m:ImportWord name:ImportWord s:ImportWord owned:array<[int64 int64]> d:ImportWord pos:ImportWord):>ImportWord=>$unsafe {
     let ex=modules[m].names[name]
     if binds_all(ex owned) {return 1}
-    let rel=name_of(ImportWord(nodes.ptr[d].sval))
-    let spell=if nodes.ptr[d].aux2 =? 1 {"p\"{rel}\""} else {rel}
+    let rel=name_of(ImportWord(node_sval(nodes.ptr[d].op_ext)))
+    let spell=if node_aux2(nodes.ptr[d].op_ext) =? 1 {"p\"{rel}\""} else {rel}
     let fix="import the module under a name (`import {spell} as name`) or select the names you need (`from {spell} import (...)`)"
     if nodes.ptr[d].aux =? 2 {fix="import it with another name: {name_of(name)} as ..."}
     let mine=shadowable_decls.has(ImportWord(syms.ptr[s].decl))
@@ -213,12 +214,12 @@ splat_shadow_warning=(d:ImportWord m:ImportWord im:ImportWord name:ImportWord):>
     if from_ =? "" and (universe.get(name) not=? none or intrinsic_of(name) >=? 0) {from_="built in"}
     if from_ =? "" {return}
     loop d2 in from_imports {
-        if d2 =? d or ImportWord(nodes.ptr[d2].mod) not=? m or ImportWord(nodes.ptr[d2].sym) not=? im or nodes.ptr[d2].aux =? 3 {continue}
+        if d2 =? d or ImportWord(node_mod(nodes.ptr[d2].op_ext)) not=? m or ImportWord(nodes.ptr[d2].sym) not=? im or nodes.ptr[d2].aux =? 3 {continue}
         loop i in [0..nkids(d2)) {
             if ImportWord(nodes.ptr[kid(d2 i)].name) =? name {return}
         }
     }
-    let shown=name_of(ImportWord(nodes.ptr[d].sval))
+    let shown=name_of(ImportWord(node_sval(nodes.ptr[d].op_ext)))
     let stem=name_of(ImportWord(nodes.ptr[d].name))
     let nm=name_of(name)
     warn(nodes.ptr[d].pos "`{nm}` from the splat import of {shown} shadows the prelude's `{nm}` ({from_}): select it, `from p\"{shown}\" import {nm}`, or import the module under a name, `import p\"{shown}\" as {stem}`")

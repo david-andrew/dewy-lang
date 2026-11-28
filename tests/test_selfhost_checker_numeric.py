@@ -44,16 +44,16 @@ int_lit = (v: int, dewy: bool = false, flags: int = 256) -> int:
     if dewy: nodes[n].pos = DEWY + n
     n
 float_lit = (v: f64) -> int:
-    n = node(.float_lit); nodes[n].fval = v; nodes[n].flags = i32(256); nodes[n].type = i32(T_FLOAT); n
+    n = node(.float_lit); nodes[n].op_ext = node_with_fval(nodes[n].op_ext, v); nodes[n].flags = i32(256); nodes[n].type = i32(T_FLOAT); n
 value = (t: int, k: NK = .ident, dewy: bool = false) -> int:
     n = node(k); nodes[n].type = i32(t)
     if dewy: nodes[n].pos = DEWY + n
     n
 run = (op: Tok, a: int, b: int, dewy: bool = false, cmp: bool = false):
-    n = node(.binary, a); nodes[n].b = i32(b); nodes[n].op = i32(int(op))
+    n = node(.binary, a); nodes[n].b = i32(b); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op))))
     if dewy: nodes[n].pos = DEWY + n
     t = xw_numeric(n, i32(int(op)), a, b, int(nodes[a].type), int(nodes[b].type), cmp)
-    print("{n}:{t}:{int(nodes[n].kind)}:{nodes[n].ival}:{nodes[n].fval}:{nodes[n].type}:{int(nodes[n].flags)}:{nodes[a].type}:{nodes[b].type}:{int(nodes[a].flags)}")
+    print("{n}:{t}:{int(nodes[n].kind)}:{nodes[n].ival}:{node_fval(nodes[n].op_ext)}:{nodes[n].type}:{int(nodes[n].flags)}:{nodes[a].type}:{nodes[b].type}:{int(nodes[a].flags)}")
 prepare_numeric = ():
     prepare()
     files.push(SrcFile(is_dewy = true))
@@ -95,10 +95,10 @@ main = ():
     run(.plus, value(T_I32), value(T_INT), true)
     run(.plus, value(T_NEVER), value(T_NEVER), true)
     run(.amp, value(T_I8), value(T_I8))
-    a = node(.binary, value(T_INT)); nodes[a].op = i32(int(Tok.slash)); nodes[a].type = i32(T_INT)
+    a = node(.binary, value(T_INT)); nodes[a].op_ext = node_with_op(nodes[a].op_ext, i32(i32(int(Tok.slash)))); nodes[a].type = i32(T_INT)
     run(.star, a, int_lit(100, false, 0))
     xw_library = true
-    a = node(.binary, value(T_INT)); nodes[a].op = i32(int(Tok.slash)); nodes[a].type = i32(T_INT)
+    a = node(.binary, value(T_INT)); nodes[a].op_ext = node_with_op(nodes[a].op_ext, i32(i32(int(Tok.slash)))); nodes[a].type = i32(T_INT)
     run(.star, a, int_lit(100, false, 0))
     print(events)
     print("ok")

@@ -109,9 +109,9 @@ DEWY = 1 << 40
 operand = (t: int, k: NK = .ident) -> int:
     n = node(k); nodes[n].type = i32(t); n
 less = () -> int:
-    n = node(.binary, operand(T_INT)); nodes[n].op = i32(int(Tok.lt)); nodes[n].b = i32(operand(T_INT)); n
+    n = node(.binary, operand(T_INT)); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(Tok.lt)))); nodes[n].b = i32(operand(T_INT)); n
 is_none = (op: Tok) -> int:
-    n = node(.binary, operand(T_INT)); nodes[n].op = i32(int(op)); nodes[n].b = i32(operand(T_NONE, .none_lit)); n
+    n = node(.binary, operand(T_INT)); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].b = i32(operand(T_NONE, .none_lit)); n
 type_test = (aux: int, dewy: bool = false) -> int:
     n = node(.istype, operand(T_INT)); nodes[n].aux = i32(aux)
     if dewy: nodes[n].pos = DEWY + n
@@ -131,7 +131,7 @@ call_stmt = (ends: bool) -> int:
     if ends: nodes[s].ival = 1
     s
 branch = (cond: int, b: int, c: int = 0, stmt: bool = false, aux2: int = 0) -> int:
-    n = node(.if_, cond); nodes[n].b = i32(b); nodes[n].c = i32(c); nodes[n].aux2 = i32(aux2)
+    n = node(.if_, cond); nodes[n].b = i32(b); nodes[n].c = i32(c); nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(i32(aux2)))
     if stmt: nodes[n].flags = i32(16)
     n
 run = (n: int, ex: int = 0):

@@ -18,6 +18,7 @@ from p"type_ops.dewy" import (zonk)
 from p"checker_expr.dewy" import (lookup)
 from p"place_routes.dewy" import (place_project)
 from p"refine_metadata.dewy" import (representation_type)
+from p"node_store.dewy" import (node_sval)
 # Effect row resolution and matching; shared state has one owner in effects.jo.
 ContractWord:type=int64<overflow='wrap'>
 # Rows occupy kind-checked specialization slots, never runtime values.
@@ -46,7 +47,7 @@ effect_subst=(contract:int64 args:array<int64> zoning:bool=false):>int64=>$unsaf
     return effect_intern(atoms exclusions variables open)
 }
 effect_contract=(decl:ContractWord params:array<int64> labels:array<int64> mask:ContractWord):>int64=>$unsafe {
-    let syntax:ContractWord=ContractWord(nodes.ptr[decl].sval)
+    let syntax:ContractWord=ContractWord(node_sval(nodes.ptr[decl].op_ext))
     if syntax =? 0 {return 0}
     let atoms:array<EffectAtom>=[]
     let exclusions:array<EffectAtom>=[]
@@ -182,7 +183,7 @@ effect_generic_argument=(tn:int64):>int64=>$unsafe {
     return resolve_type(tn)
 }
 effect_decl_contract=(decl:ContractWord params:array<int64>):>int64=>$unsafe {
-    if decl =? 0 or nodes.ptr[decl].sval =? 0 {return 0}
+    if decl =? 0 or node_sval(nodes.ptr[decl].op_ext) =? 0 {return 0}
     let labels:array<int64>=[]
     let mask:ContractWord=0
     loop i in [0..nkids(decl)) {

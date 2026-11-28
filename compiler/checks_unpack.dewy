@@ -22,6 +22,7 @@ from p"type_ops.dewy" import (dt fixed_len is_values mk_array mk_tuple)
 from p"@lib/core/str.jo" import (join)
 from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_sval node_with_aux2 node_with_op)
 
 UnpackWord:type=int64<overflow='wrap'>
 # statement calling a prelude function with the given argument nodes
@@ -39,7 +40,7 @@ unpack_binding=(e:UnpackWord t:UnpackWord bindings:array<int64> pos:UnpackWord):
     loop b in bindings {
         if nodes.ptr[b].kind =? 'tuple' {nested=true}
         if nodes.ptr[b].a not=? 0 {annotated=true}
-        if has_flag(b NF_SPREAD) or nodes.ptr[b].sval not=? 0 {special=true}
+        if has_flag(b NF_SPREAD) or node_sval(nodes.ptr[b].op_ext) not=? 0 {special=true}
     }
     if not nested and not annotated and not special and types.ptr[t].kind not=? 'array' and types.ptr[t].kind not=? 'fixed' and types.ptr[t].kind not=? 'struct_' {
         if types.ptr[t].kind =? 'tuple' and UnpackWord(types.ptr[t].nargs) not=? bindings.length {unpack_count_error(e t bindings.length false pos)}
@@ -96,7 +97,7 @@ unpack_map_literal_count=(e:UnpackWord count:UnpackWord rest:bool pos:UnpackWord
         let key=UnpackWord(nodes.ptr[pair].a)
         let kk=nodes.ptr[key].kind
         if key <=? 0 or (kk not=? 'str_lit' and kk not=? 'int_lit') {constant=false; continue}
-        keys.push("{kk} {nodes.ptr[key].ival} {nodes.ptr[key].sval}")
+        keys.push("{kk} {nodes.ptr[key].ival} {node_sval(nodes.ptr[key].op_ext)}")
     }
     let n=UnpackWord(kids(e).length)
     let fits=if n <? count {false} else if rest or not constant {true} else {keys.length =? count}
@@ -140,7 +141,7 @@ unpack_values=(e:UnpackWord t:UnpackWord bindings:array<int64> pos:UnpackWord @s
             r=i
             drop=nodes.ptr[b].kind =? 'hole'
         }
-        if nodes.ptr[b].sval not=? 0 and not is_record {fatal(nodes.ptr[b].pos "`as` renames a record's field; at a position, any name takes the value: `[a b] = values`")}
+        if node_sval(nodes.ptr[b].op_ext) not=? 0 and not is_record {fatal(nodes.ptr[b].pos "`as` renames a record's field; at a position, any name takes the value: `[a b] = values`")}
     }
     let count=bindings.length - (if r >=? 0 {1} else {0})
     let after=if r >=? 0 {bindings.length - 1 - r} else {0}
@@ -176,7 +177,7 @@ unpack_values=(e:UnpackWord t:UnpackWord bindings:array<int64> pos:UnpackWord @s
         let wanted=mk('int_lit' pos)
         nodes.ptr[wanted].ival=count
         let equal=mk('binary' pos)
-        nodes.ptr[equal].op=int32(UnpackWord(if r >=? 0 {74} else {69}))
+        nodes.ptr[equal].op_ext=node_with_op(nodes.ptr[equal].op_ext (int32(UnpackWord(if r >=? 0 {74} else {69}))))
         nodes.ptr[equal].a=int32(length)
         nodes.ptr[equal].b=int32(wanted)
         let message=synth_str("unpacking requires {exactly} {count} {elements}" pos)
@@ -235,8 +236,8 @@ unpack_values=(e:UnpackWord t:UnpackWord bindings:array<int64> pos:UnpackWord @s
         }
         else {
             if nodes.ptr[binding].kind =? 'hole' {fatal(nodes.ptr[binding].pos "record unpacking names fields; leave unwanted fields out instead of using _")}
-            if nodes.ptr[binding].kind =? 'tuple' and nodes.ptr[binding].sval =? 0 {fatal(nodes.ptr[binding].pos "record unpacking needs field names at this level: unpack a field with `as`, `[field as [a b]] = record`")}
-            nodes.ptr[value].name=if nodes.ptr[binding].sval not=? 0 {nodes.ptr[binding].sval} else {nodes.ptr[binding].name}
+            if nodes.ptr[binding].kind =? 'tuple' and node_sval(nodes.ptr[binding].op_ext) =? 0 {fatal(nodes.ptr[binding].pos "record unpacking needs field names at this level: unpack a field with `as`, `[field as [a b]] = record`")}
+            nodes.ptr[value].name=if node_sval(nodes.ptr[binding].op_ext) not=? 0 {node_sval(nodes.ptr[binding].op_ext)} else {nodes.ptr[binding].name}
             unpack_field_hint(t UnpackWord(nodes.ptr[value].name) nodes.ptr[binding].pos)
         }
         if nodes.ptr[binding].kind =? 'tuple' {
@@ -274,7 +275,7 @@ unpack_minus=(length:UnpackWord k:UnpackWord pos:UnpackWord):>UnpackWord=>$unsaf
     let amount=mk('int_lit' pos)
     nodes.ptr[amount].ival=k
     let d=mk('binary' pos)
-    nodes.ptr[d].op=int32(59)
+    nodes.ptr[d].op_ext=node_with_op(nodes.ptr[d].op_ext (int32(59)))
     nodes.ptr[d].a=int32(length)
     nodes.ptr[d].b=int32(amount)
     check_expr(d T_INT);
@@ -361,11 +362,11 @@ unpack_length_check=(src:UnpackWord k:UnpackWord exact:bool pos:UnpackWord messa
     let count=mk('int_lit' pos)
     nodes.ptr[count].ival=k
     let cmp=mk('binary' pos)
-    nodes.ptr[cmp].op=int32(UnpackWord(if exact {69} else {74}))
+    nodes.ptr[cmp].op_ext=node_with_op(nodes.ptr[cmp].op_ext (int32(UnpackWord(if exact {69} else {74}))))
     nodes.ptr[cmp].a=int32(length)
     nodes.ptr[cmp].b=int32(count)
     let guard=mk('call' pos)
-    nodes.ptr[guard].aux2=int32(UNPACK_OBLIGATION)
+    nodes.ptr[guard].op_ext=node_with_aux2(nodes.ptr[guard].op_ext (int32(UNPACK_OBLIGATION)))
     check_intrinsic(guard int64(IN.assert) [cmp synth_str(message pos)] 0);
     # (a runtime check until the facts prove it, as an index's: a body decided in another
     # process keeps it)

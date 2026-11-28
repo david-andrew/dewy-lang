@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_sval)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"checker_state.dewy" import (FnInst Local RefineBindings)
 from p"type_inference.dewy" import (tu_prune tu_unify tu_zonk)
@@ -143,14 +143,14 @@ xm_lambda=(lam:XMWord expected:XMWord):>XMWord=>$unsafe {
     xm_nodes[0][lam].sym=int32<overflow='wrap'>(f)
     let labels=if et not=? 0 {XMWord(xm_types[0].ptr[et].st)} else {xm_host[0].labels(lam)}
     let t=tb_mk_fn(zp XMWord(xm_fns[0].ptr[f].ret) mm labels 0 xm_fns[0].ptr[f].pack not=? 0 and not lang_body)
-    if xm_nodes[0].ptr[lam].sval not=? 0 {t=xm_host[0].contract(t lam zp)}
+    if node_sval(xm_nodes[0].ptr[lam].op_ext) not=? 0 {t=xm_host[0].contract(t lam zp)}
     xm_nodes[0][lam].type=int32<overflow='wrap'>(t)
     if xm_effects[0] {t=xm_host[0].effects(lam expected)}
     xm_host[0].verify(t expected lam)
     t=xm_host[0].ownership(t f)
     xm_nodes[0][lam].type=int32<overflow='wrap'>(t)
     xm_fns[0][f].fntype=int32<overflow='wrap'>(t)
-    if xm_nodes[0].ptr[lam].sval not=? 0 {
+    if node_sval(xm_nodes[0].ptr[lam].op_ext) not=? 0 {
         # Later conversions may wrap or rewrite the expression; keep the declaration
         # immutable so final verification cannot lose its effect row.
         let declaration=xm_nodes[0].length

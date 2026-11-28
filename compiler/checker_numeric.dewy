@@ -2,7 +2,7 @@ $runtime_checks
 from p"coerce_expression.dewy" import (coerce)
 from p"coercion_queries.dewy" import (join_types num_join)
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_fval node_op node_with_fval)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -162,9 +162,9 @@ xw_fold_int=(n:XWWord op:int32 a:XWWord b:XWWord):>XWWord=>$unsafe {
     XWWord(xw_nodes[0].ptr[n].type)
 }
 xw_fold_float=(n:XWWord op:int32 a:XWWord b:XWWord):>XWWord=>$unsafe {
-    let x=xw_nodes[0].ptr[a].fval
+    let x=node_fval(xw_nodes[0].ptr[a].op_ext)
     if xw_nodes[0].ptr[a].kind =? 'int_lit' {x=float64(xw_nodes[0].ptr[a].ival)}
-    let y=xw_nodes[0].ptr[b].fval
+    let y=node_fval(xw_nodes[0].ptr[b].op_ext)
     if xw_nodes[0].ptr[b].kind =? 'int_lit' {y=float64(xw_nodes[0].ptr[b].ival)}
     let v=0.0
     if op =? 58 {v=x + y}
@@ -173,7 +173,7 @@ xw_fold_float=(n:XWWord op:int32 a:XWWord b:XWWord):>XWWord=>$unsafe {
     else {v=x / y}
     # A NaN as the target's processor makes it, whatever the compiler runs on.
     if v not=? v {v=numeric_nan(v)}
-    xw_nodes[0][n]=Node[kind='float_lit' pos=xw_nodes[0].ptr[n].pos fval=v flags=384 type=int32<overflow='wrap'>(xw_float_type[0])]
+    xw_nodes[0][n]=Node[kind='float_lit' pos=xw_nodes[0].ptr[n].pos op_ext=node_with_fval(uint32(0) v) flags=384 type=int32<overflow='wrap'>(xw_float_type[0])]
     xw_float_type[0]
 }
 xw_numeric=(n:XWWord op:int32 a:XWWord b:XWWord ta:XWWord tb:XWWord is_cmp:bool):>XWWord=>$unsafe {
@@ -227,7 +227,7 @@ xw_numeric=(n:XWWord op:int32 a:XWWord b:XWWord ta:XWWord tb:XWWord is_cmp:bool)
     let j:XWWord=if ta =? tb and not a_lit and not b_lit and (tak =? 'int_' or tak =? 'float_') and ta not=? xw_never_type[0] and xw_nodes[0].ptr[a].kind not=? 'str_lit' and xw_nodes[0].ptr[b].kind not=? 'str_lit' {ta} else {xw_join(a b xw_nodes[0].ptr[n].pos)}
     if (op =? 63 or op =? 64 or op =? 65) and xw_types[0].ptr[j].kind not=? 'int_' {numeric_error(n 3)}
     # got / total * 100 with whole numbers: the division drops the fraction first.
-    if op =? 60 and xw_types[0].ptr[j].kind =? 'int_' and xw_nodes[0].ptr[a].kind =? 'binary' and xw_nodes[0].ptr[a].op =? 61 and xw_nodes[0].ptr[b].kind =? 'int_lit' and xw_nodes[0].ptr[b].ival =? 100 and not pos_in_lib(xw_nodes[0].ptr[n].pos) {
+    if op =? 60 and xw_types[0].ptr[j].kind =? 'int_' and xw_nodes[0].ptr[a].kind =? 'binary' and node_op(xw_nodes[0].ptr[a].op_ext) =? 61 and xw_nodes[0].ptr[b].kind =? 'int_lit' and xw_nodes[0].ptr[b].ival =? 100 and not pos_in_lib(xw_nodes[0].ptr[n].pos) {
         numeric_warn_percent(n a)
     }
     let res:XWWord=if is_cmp {xw_bool_type[0]} else {j}

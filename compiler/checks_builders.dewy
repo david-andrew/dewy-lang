@@ -8,6 +8,7 @@ from p"expr.jo" import (IN)
 from p"types.jo" import (T_INT T_VOID prune telem tkind types)
 from p"util.jo" import (intern)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_with_sval)
 
 BuildWord:type=int64<overflow='wrap'>
 mk_name=(name:BuildWord pos:BuildWord):>int64=>$unsafe {
@@ -77,7 +78,7 @@ bc_block=(stmts:array<int64> pos:BuildWord):>int64=>{
 }
 bc_str=(s:string pos:BuildWord):>int64=>$unsafe {
     let n=mk('str_lit' pos)
-    nodes.ptr[n].sval=int32(intern(s))
+    nodes.ptr[n].op_ext=node_with_sval(nodes.ptr[n].op_ext (int32(intern(s))))
     n
 }
 bc_if=(c:BuildWord then:array<int64> else_:array<int64> pos:BuildWord):>int64=>$unsafe {

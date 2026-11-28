@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"collection_cancellation.dewy" import (collection_value collection_array)
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_sval)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -103,7 +103,7 @@ xr_values=(t0:XRWord):>bool=>$unsafe {
 # An untyped literal's own type: decimals are rationals, the semantic integer in Dewy.
 xr_default=(n:XRWord):>XRWord=>$unsafe {
     let k=xr_nodes[0].ptr[n].kind
-    if k =? 'float_lit' and xr_nodes[0].ptr[n].sval not=? 0 {return xr_host[0].decimal(xr_nodes[0].ptr[n].pos)}
+    if k =? 'float_lit' and node_sval(xr_nodes[0].ptr[n].op_ext) not=? 0 {return xr_host[0].decimal(xr_nodes[0].ptr[n].pos)}
     if k =? 'float_lit' {return xr_float_type[0]}
     if k =? 'unary' or k =? 'conv' {return xr_default(XRWord(xr_nodes[0].ptr[n].a))}
     if k =? 'binary' {
@@ -186,7 +186,7 @@ xr_elements=(n:XRWord expected:XRWord ex:XRWord et:XRWord):>CheckerAggregateResu
         if not xr_charlike(c) {allchar=false}
         if xr_flag(c 256) {
             if xr_nodes[0].ptr[c].kind =? 'float_lit' {anyfloat=true}
-            if xr_nodes[0].ptr[c].kind =? 'float_lit' and xr_nodes[0].ptr[c].sval not=? 0 {decimal=c}
+            if xr_nodes[0].ptr[c].kind =? 'float_lit' and node_sval(xr_nodes[0].ptr[c].op_ext) not=? 0 {decimal=c}
             if xr_default(c) =? xr_u64_type[0] {anyunsigned=true}
             # `[Kind.a .b]`: the first names the enum for the rest.
             if elt =? 0 and it not=? 0 and xr_kind(it) =? 'enum_' {elt=it}

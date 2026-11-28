@@ -75,7 +75,7 @@ gread = (g: int) -> int:
     node(.ident, 0, 0, 0, g, int(SK.global), at)
 give = (target: int, value: int = 0) -> int:
     n = node(.assign, target, if value == 0: lit() else: value)
-    nodes[n].op = ASSIGN
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(ASSIGN))
     n
 gets = (l: int, value: int = 0) -> int: give(read(l), value)
 ggets = (g: int, value: int = 0) -> int: give(gread(g), value)
@@ -161,7 +161,7 @@ main = ():
     check("read in its own value", 1, [gets(1, read(1))])
     check("captured given", 1, [gets(8)])
     check("captured read", 6, [read(8), gets(6)])
-    plus = node(.assign, read(1), lit()); nodes[plus].op = PLUS
+    plus = node(.assign, read(1), lit()); nodes[plus].op_ext = node_with_op(nodes[plus].op_ext, i32(PLUS))
     check("compound", 1, [plus])
     tuple = list(.tuple, [read(1), list(.tuple, [read(2)]), node(.pwild)])
     check("unpacked", 1, [give(tuple)])
@@ -279,7 +279,7 @@ main = ():
     program("host call", [], fn(aux_call), [])
     fnref = node(.fnref); nodes[fnref].sym = i32(reads1)
     program("function value", [], fn(fnref), [])
-    partial = node(.partial, gread(2)); nodes[partial].d = i32(reads1)
+    partial = node(.partial, gread(2)); nodes[partial].op_ext = node_with_d(nodes[partial].op_ext, i32(i32(reads1)))
     program("partial", [], fn(partial), [])
     closure = node(.lambda, 0, gread(1)); nodes[closure].sym = i32(reads1)
     program("closure", [], fn(closure), [])
@@ -295,7 +295,7 @@ main = ():
     program("second list", [], fn(call(mention(second))), [])
     print(dg_mentions(fns.len() - 1))
     held = fn(call(reads1))
-    made = node(.partial); nodes[made].d = i32(held)
+    made = node(.partial); nodes[made].op_ext = node_with_d(nodes[made].op_ext, i32(i32(held)))
     aref = node(.fnref); nodes[aref].sym = i32(held)
     lam = node(.lambda); nodes[lam].sym = i32(held)
     glam = node(.lambda); nodes[glam].sym = i32(held); nodes[glam].flags = 64

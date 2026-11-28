@@ -39,6 +39,7 @@ from p"refine_metadata.dewy" import (representation_type str_set_of)
 from p"checker_values.dewy" import (values_arity values_candidate values_count values_flatten values_parts values_record values_simple)
 from p"checker_generators.dewy" import (gen_spread_fresh gen_spread_parts)
 from p"effect_contracts.dewy" import (callable_base effect_generic_argument)
+from p"node_store.dewy" import (node_aux2 node_with_aux2)
 # Demand-driven call expansion; retain arena indices across checker services.
 VCWord:type=int64<overflow='wrap'>
 values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>$unsafe {
@@ -48,7 +49,7 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
     # Settle those arguments with the same parameter hints before pack probing.
     let zero_sequence=false
     loop i in [0..n) {
-        if nodes.ptr[items[i]].kind not=? 'block' or nodes.ptr[items[i]].aux2 not=? 1796 {continue}
+        if nodes.ptr[items[i]].kind not=? 'block' or node_aux2(nodes.ptr[items[i]].op_ext) not=? 1796 {continue}
         zero_sequence=true
         let contextual=nodes.length
         nodes.push(nodes.ptr[call]);
@@ -72,7 +73,7 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
         let c=items.ptr[i]
         info.push(ValuesItem[count = 1])
         if nodes.ptr[c].kind =? 'namedarg' {continue}
-        if nodes.ptr[c].kind =? 'block' and nodes.ptr[c].aux2 =? 1796 {
+        if nodes.ptr[c].kind =? 'block' and node_aux2(nodes.ptr[c].op_ext) =? 1796 {
             # A trailing declaration sequence contributes no positional value.
             # Bind prior arguments first, before these declarations may shadow names.
             check_expr(c 0);
@@ -174,7 +175,7 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
     values_hint_mark=values_hint_pos.length
     loop i in [0..n) {
         let c=items.ptr[i]
-        if info.ptr[i].count =? 0 and nodes.ptr[c].aux2 =? 1796 {pre.push(bc_stmt(c nodes.ptr[c].pos));continue}
+        if info.ptr[i].count =? 0 and node_aux2(nodes.ptr[c].op_ext) =? 1796 {pre.push(bc_stmt(c nodes.ptr[c].pos));continue}
         if nodes.ptr[c].kind =? 'namedarg' {
             if zero_sequence and i <? last and not has_flag(unnamed(c) 1) {nodes.ptr[c].a=int32(capture_value(unnamed(c) ntype(unnamed(c)) @pre))}
             out.push(c)
@@ -328,7 +329,7 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
     if nodes.ptr[callee].kind =? 'ident' {
         let s=lookup(VCWord(nodes.ptr[callee].name))
         if s not=? 0 and syms.ptr[s].kind =? 'fns' {
-            if nodes.ptr[callee].aux2 =? 1797 {
+            if node_aux2(nodes.ptr[callee].op_ext) =? 1797 {
                 let symbol=s
                 loop symbol not=? 0 {
                     if syms.ptr[symbol].decl not=? 0 {decls.push(VCWord(syms.ptr[symbol].decl))}
@@ -432,7 +433,7 @@ values_sequence_callee=(n:VCWord @pre:array<int64>):>void=>$unsafe {
         if sk =? 'fns' or sk =? 'struct_' or sk =? 'enum_' or sk =? 'alias_' or sk =? 'type_' {
             let held=mk('ident' nodes.ptr[callee].pos)
             nodes.ptr[held].name=int32(scope_call_alias(n name binding 0))
-            if sk =? 'fns' {nodes.ptr[held].aux2=1797} # preserved named family
+            if sk =? 'fns' {nodes.ptr[held].op_ext=node_with_aux2(nodes.ptr[held].op_ext 1797)} # preserved named family
             nodes.ptr[n].a=int32(held)
             return
         }
@@ -468,7 +469,7 @@ values_call=(n:int64 expected:int64):>int64=>$unsafe {
     let callee_pre:array<int64>=[]
     if nkids(n) >? 0 {
         let last=kid(n nkids(n)-1)
-        if nodes.ptr[last].kind =? 'block' and nodes.ptr[last].aux2 =? 1796 {values_sequence_callee(n @callee_pre);callee=VCWord(nodes.ptr[n].a)}
+        if nodes.ptr[last].kind =? 'block' and node_aux2(nodes.ptr[last].op_ext) =? 1796 {values_sequence_callee(n @callee_pre);callee=VCWord(nodes.ptr[n].a)}
     }
     let some=false
     let record=values_record(callee)
@@ -487,7 +488,7 @@ values_call=(n:int64 expected:int64):>int64=>$unsafe {
         if nodes.ptr[a].kind =? 'call' and members_named(a) {members_argument(a)}
         let k=nodes.ptr[a].kind
         if named {record=0}
-        if k =? 'block' and nodes.ptr[a].aux2 =? 1796 {some=true;break}
+        if k =? 'block' and node_aux2(nodes.ptr[a].op_ext) =? 1796 {some=true;break}
         if not named and (k =? 'tuple' and nodes.ptr[a].aux =? int32(TUPLE_VALUES) or has_flag(a NF_SPREAD) or node_marked(values_hits a)) {
             some=true
             break
@@ -566,7 +567,7 @@ values_call=(n:int64 expected:int64):>int64=>$unsafe {
     pre.push(bc_stmt(v pos))
     add_flag(pre.ptr[pre.length - 1] NF_CHECKED)
     let b=bc_block(pre pos)
-    loop argument in kids(n) {let a=unnamed(argument);if nodes.ptr[a].aux2 =? 1795 or nodes.ptr[a].aux2 =? 1796 {add_flag(b 4);break}}
+    loop argument in kids(n) {let a=unnamed(argument);if node_aux2(nodes.ptr[a].op_ext) =? 1795 or node_aux2(nodes.ptr[a].op_ext) =? 1796 {add_flag(b 4);break}}
     nodes.ptr[b].type = int32(t)
     if tkind(t) not=? 'void_' {nodes.ptr[b].aux = 1}
     add_flag(b NF_CHECKED)

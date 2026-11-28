@@ -12,7 +12,7 @@ from p"checks_thin_expr.dewy" import (int_intervals)
 from p"checks_builders.dewy" import (bc_block)
 from p"int_domains.dewy" import (IntDomain INT_CAPTURE INT_DECL INT_DELTA INT_OPEN INT_POINT id_intervals id_record id_settle id_text)
 from p"intervals.dewy" import (interval_missing interval_text)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_sval node_with_sval)
 from p"refine.jo" import (str_sets)
 from p"refine_metadata.dewy" import (representation_type)
 from p"refine_rare.dewy" import (str_set_text)
@@ -28,7 +28,7 @@ from p"diagnostic_exit.dewy" import (fatal)
 DomainWord:type=int64<overflow='wrap'>
 string_domain_declare=(binding:DomainWord value:DomainWord):>void=>$unsafe {
     if value not=? 0 and nodes.ptr[value].kind =? 'str_lit' and nodes.ptr[value].aux not=? 1 {
-        string_domains[binding]=[DomainWord(nodes.ptr[value].sval)]
+        string_domains[binding]=[DomainWord(node_sval(nodes.ptr[value].op_ext))]
         statement_watch.text_domains=string_domains.length
         return
     }
@@ -80,7 +80,7 @@ string_domains_finish=():>void=>$unsafe {
         loop arm in kids(m) {
             loop p in kids(arm) {
                 if nodes.ptr[p].kind =? 'plit' and nodes.ptr[DomainWord(nodes.ptr[p].a)].kind =? 'str_lit' {
-                    covered.push(DomainWord(nodes.ptr[DomainWord(nodes.ptr[p].a)].sval))
+                    covered.push(DomainWord(node_sval(nodes.ptr[DomainWord(nodes.ptr[p].a)].op_ext)))
                 }
             }
         }
@@ -187,7 +187,7 @@ string_domains_materialize=():>void=>$unsafe {
         let items:array<int64>=[]
         loop text in texts.sorted() {
             let item=mk('str_lit' nodes.ptr[n].pos)
-            nodes.ptr[item].sval=int32(intern(text))
+            nodes.ptr[item].op_ext=node_with_sval(nodes.ptr[item].op_ext (int32(intern(text))))
             nodes.ptr[item].type=int32(T_STR)
             add_flag(item NF_CHECKED)
             items.push(item)

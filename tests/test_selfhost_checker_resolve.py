@@ -62,7 +62,7 @@ effect_arg = (n: int) -> int:
     events.push("effect:{n}")
     T_BOOL
 nominal = (t: int) -> int: t
-fixed_arg = (n: int) -> bool: nodes[n].sval == 99
+fixed_arg = (n: int) -> bool: node_sval(nodes[n].op_ext) == 99
 resolve_fixed_size_double = (n: int) -> int: 3
 fixed = (t: int, count: int, pos: int) -> int: int(tb_mk_fixed(t, count))
 instance = (d: int, ts: int[]) -> int:
@@ -145,7 +145,7 @@ main = ():
     assert(ct_resolve_type(node(.tname, 0, d2, 1, [bt])) == T_INT)
     generic = node(.struct_, 0, 0, 0, [], [it, st])
     assert(types[int(ct_resolve_type(node(.tname, 0, generic, 2, [it, st])))].kind == .tuple)
-    sized = node(.tname, 0, T_INT, 3, [it]); nodes[sized].sval = 99
+    sized = node(.tname, 0, T_INT, 3, [it]); nodes[sized].op_ext = node_with_sval(nodes[sized].op_ext, i32(99))
     assert(types[int(ct_resolve_type(sized))].bits == 3)
     kinds: NK[] = [.tarray, .topt, .tptr]
     loop kind in kinds: print(ct_resolve_type(node(kind, it)))
@@ -166,7 +166,7 @@ main = ():
     assert(pack_ok and types[result].sign)
     pack_ok = false
     nodes[it].flags = 1
-    fn = node(.tfn, pack, 0, 0, [it, st], [z, a]); nodes[fn].sval = 1
+    fn = node(.tfn, pack, 0, 0, [it, st], [z, a]); nodes[fn].op_ext = node_with_sval(nodes[fn].op_ext, i32(1))
     grow = true
     ft = int(ct_resolve_type(fn))
     assert(types[ft].kind == .fn_ and types[ft].mutmask == 1 and types[ft].sign)

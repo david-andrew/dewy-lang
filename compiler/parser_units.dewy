@@ -7,6 +7,7 @@ from p"parse.jo" import (p_toks ti)
 from p"parser_shared.dewy" import (expect)
 from p"parser_text.dewy" import (tok_src)
 from p"parser_cursor.dewy" import (advance cur_pos partner pk)
+from p"node_store.dewy" import (node_fval node_with_fval node_with_op)
 
 ParserUnitWord:type=int64<overflow='wrap'>
 # (m/s), (km/h), (m/s^2), (N*m): a parenthesized unit expression right after a number
@@ -62,18 +63,18 @@ scaled_literal=(e:ParserUnitWord scale:float64):>int64=>$unsafe {
         # [x 0](m/s): any element times the scale
         if scale =? 1.0 {return e}
         let f=mk('float_lit' nodes.ptr[e].pos)
-        nodes.ptr[f].fval=scale
+        nodes.ptr[f].op_ext=node_with_fval(nodes.ptr[f].op_ext scale)
         add_flag(f NF_LITERAL)
         let b=mk('binary' nodes.ptr[e].pos)
-        nodes.ptr[b].op=int32(60)
+        nodes.ptr[b].op_ext=node_with_op(nodes.ptr[b].op_ext (int32(60)))
         nodes.ptr[b].a=int32(e)
         nodes.ptr[b].b=int32(f)
         return b
     }
     let v=float64(nodes.ptr[e].ival)
-    if k =? 'float_lit' {v=nodes.ptr[e].fval}
+    if k =? 'float_lit' {v=node_fval(nodes.ptr[e].op_ext)}
     let n=mk('float_lit' nodes.ptr[e].pos)
-    nodes.ptr[n].fval=v * scale
+    nodes.ptr[n].op_ext=node_with_fval(nodes.ptr[n].op_ext (v * scale))
     add_flag(n NF_LITERAL)
     n
 }

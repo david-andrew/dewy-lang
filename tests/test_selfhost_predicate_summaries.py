@@ -59,7 +59,7 @@ lit = (v: int, t: int = T_INT) -> int:
 conv = (a: int, t: int = T_INT, how: int = 1) -> int:
     n = n_(.conv, a, 0, t); nodes[n].aux = i32(how); n
 binary = (op: Tok, a: int, b: int) -> int:
-    n = n_(.binary, a, b, T_BOOL); nodes[n].op = i32(int(op)); n
+    n = n_(.binary, a, b, T_BOOL); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); n
 length = (a: int) -> int:
     n = list(.intrinsic, [a]); nodes[n].aux = i32(int(IN.len)); n
 show_all = ():
@@ -130,18 +130,18 @@ main = ():
     # Value-parameter bindings lead a block.
     bind = (l: int) -> int:
         d = n_(.vardecl, 0, p(next() + 1))
-        nodes[d].aux2 = 1; nodes[d].sym = i32(l)
+        nodes[d].op_ext = node_with_aux2(nodes[d].op_ext, i32(1)); nodes[d].sym = i32(l)
         d
     summary("block empty", list(.block, []))
     summary("block", list(.block, [bind(90), p(90)]))
     summary("block unbound", list(.block, [bind(90), p(91)]))
-    plain = bind(90); nodes[plain].aux2 = 0
+    plain = bind(90); nodes[plain].op_ext = node_with_aux2(nodes[plain].op_ext, i32(0))
     summary("not a binding", list(.block, [plain, p(90)]))
     with_list = bind(90); nodes[with_list].nlist = 1
     summary("bound list", list(.block, [with_list, p(90)]))
-    other_source = n_(.vardecl, 0, lit(1)); nodes[other_source].aux2 = 1
+    other_source = n_(.vardecl, 0, lit(1)); nodes[other_source].op_ext = node_with_aux2(nodes[other_source].op_ext, i32(1))
     summary("bound literal", list(.block, [other_source, lit(1)]))
-    no_source = n_(.vardecl); nodes[no_source].aux2 = 1
+    no_source = n_(.vardecl); nodes[no_source].op_ext = node_with_aux2(nodes[no_source].op_ext, i32(1))
     summary("bound nothing", list(.block, [no_source, lit(1)]))
     outside = bind(90); nodes[nodes[outside].b].sym = 1
     summary("bound outside", list(.block, [outside, lit(1)]))

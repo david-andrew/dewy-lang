@@ -23,6 +23,7 @@ from p"types.jo" import (T_MATH_INT T_NEVER T_STR T_U8 is_int prune types)
 from p"ast.jo" import (NF_U64 has_flag kid nkids nodes)
 from p"check.jo" import (FK_NORMAL LF_ASSIGNED LF_CAPTURE LF_CAPTURED LF_SHARED LF_ADDR LF_EXPOSED LF_ALIAS LF_BYREF ctxs cx fns lib_dir locals)
 from p"expr.jo" import (CV WordFormatRequest by_types_binds format_word_defs format_word_heads format_word_inst format_word_requests)
+from p"node_store.dewy" import (node_op node_sval)
 
 FormatWordObservationsWord:type=int64<overflow='wrap'>
 
@@ -145,7 +146,7 @@ fmt_part=(part:int64 pos:int64):>void=>$unsafe {
     if dewy_at(pos) and exact_type(ntype(observed) pos) and exact_potential(observed) {exact_int_result(observed true);}
     let t=prune(ntype(FormatWordObservationsWord(nodes.ptr[part].a)))
     oom_unhandled(t pos "showing it")
-    let shown=if is_quantity(t) and nodes.ptr[part].sval <? 0 and dewy_at(pos) {quantity_display(FormatWordObservationsWord(nodes.ptr[part].a))} else {0}
+    let shown=if is_quantity(t) and node_sval(nodes.ptr[part].op_ext) <? 0 and dewy_at(pos) {quantity_display(FormatWordObservationsWord(nodes.ptr[part].a))} else {0}
     if shown not=? 0 {
         nodes[part].a = int32<overflow='wrap'>(shown)
         t=T_STR
@@ -187,12 +188,12 @@ fmt_part=(part:int64 pos:int64):>void=>$unsafe {
     if types.ptr[t].kind =? 'typeval' or types.ptr[t].kind =? 'module' {fatal(nodes.ptr[FormatWordObservationsWord(nodes.ptr[part].a)].pos "this is a type or module, not a value (a value of a type is made by calling it: `T()`)")}
     if types.ptr[t].kind =? 'ptr' or types.ptr[t].kind =? 'cfn' {fatal(nodes.ptr[FormatWordObservationsWord(nodes.ptr[part].a)].pos "a {dt(t)} is not printed: its address is `int(p as *u8)` (in hex, \"\{int(p as *u8):#x}\")")}
     let bt=mk_array(T_U8)
-    if nodes.ptr[part].sval >=? 0 {
+    if node_sval(nodes.ptr[part].op_ext) >=? 0 {
         # ({hits / shots:.1%} with whole numbers: the fraction is gone before it is shown)
         let e=FormatWordObservationsWord(nodes.ptr[part].a)
-        let spec=name_of(FormatWordObservationsWord(nodes.ptr[part].sval))
+        let spec=name_of(FormatWordObservationsWord(node_sval(nodes.ptr[part].op_ext)))
         let spec_bytes=spec as array<uint8>
-        if is_int(t) and nodes.ptr[e].kind =? 'binary' and nodes.ptr[e].op =? 61 and spec_bytes.length >? 0 and (spec_bytes[spec_bytes.length - 1] =? b'%' or spec_bytes[spec_bytes.length - 1] =? b'f' or find_byte(spec b'.') >=? 0) {
+        if is_int(t) and nodes.ptr[e].kind =? 'binary' and node_op(nodes.ptr[e].op_ext) =? 61 and spec_bytes.length >? 0 and (spec_bytes[spec_bytes.length - 1] =? b'%' or spec_bytes[spec_bytes.length - 1] =? b'f' or find_byte(spec b'.') >=? 0) {
             warn(nodes.ptr[e].pos "this divides whole numbers, dropping the fraction before it is formatted: `f64(a) / b` keeps it")
         }
         nodes[part].sym = int32<overflow='wrap'>(resolve_by_types(intern("__fmt_spec") [bt t T_STR] pos true))

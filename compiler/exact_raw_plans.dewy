@@ -11,6 +11,7 @@ from p"exact_static_widths.dewy" import (exact_type_width)
 from p"expr.jo" import (CV)
 from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"types.jo" import (T_MATH_INT is_int prune)
+from p"node_store.dewy" import (node_op)
 
 RawWord:type=int64<overflow='wrap'>
 
@@ -58,14 +59,14 @@ exact_plan_bits=(n:RawWord depth:RawWord=0):>int64=>$unsafe {
         let a=exact_plan_bits(RawWord(nodes.ptr[n].a) depth + 1)
         let b=exact_plan_bits(RawWord(nodes.ptr[n].b) depth + 1)
         if a =? 0 or b =? 0 {return 0}
-        let op=cx_token_values.ptr[RawWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[RawWord(node_op(nodes.ptr[n].op_ext))]
         if op =? 'plus' or op =? 'minus' {return max(a b) + 1}
         if op =? 'star' {return a + b}
         if op =? 'amp' or op =? 'pipe' or op =? 'caret' {return max(a b)}
     }
     if k =? 'unary' {
         let a=exact_plan_bits(RawWord(nodes.ptr[n].a) depth + 1)
-        if a >? 0 {return a + (if cx_token_values.ptr[RawWord(nodes.ptr[n].op)] =? 'minus' {1} else {0})}
+        if a >? 0 {return a + (if cx_token_values.ptr[RawWord(node_op(nodes.ptr[n].op_ext))] =? 'minus' {1} else {0})}
     }
     if k =? 'block' and nodes.ptr[n].aux not=? 0 {return exact_plan_bits(block_value(n) depth + 1)}
     if k =? 'if_' {
@@ -110,7 +111,7 @@ exact_effect_representation=(n:RawWord):>void=>$unsafe {
         let a=RawWord(nodes.ptr[n].a)
         if prune(ntype(a)) =? T_MATH_INT and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and exact_local_width(RawWord(nodes.ptr[a].sym)) >? 0 {exact_raw_tree(RawWord(nodes.ptr[n].b))}
     }
-    else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
+    else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(node_op(nodes.ptr[n].op_ext)) {
         let a=RawWord(nodes.ptr[n].a)
         let b=RawWord(nodes.ptr[n].b)
         if prune(ntype(a)) not=? T_MATH_INT and prune(ntype(b)) not=? T_MATH_INT {return}

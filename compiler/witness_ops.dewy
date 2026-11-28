@@ -53,7 +53,7 @@ wit_skip_uses=(n:WitWord f:WitWord @edges:array<int64>):>void=>$unsafe {
     let k=nodes.ptr[n].kind
     let g:WitWord=0
     if k =? 'call' and nodes.ptr[n].aux =? 0 or k =? 'fnref' and nodes.ptr[n].aux =? 0 {g=WitWord(nodes.ptr[n].sym)}
-    else if k =? 'partial' {g=WitWord(nodes.ptr[n].d)}
+    else if k =? 'partial' {g=WitWord(node_d(nodes.ptr[n].op_ext))}
     else if k =? 'lambda' {
         g=WitWord(nodes.ptr[n].sym)
         # (the closure starts from its creator's facts)
@@ -236,7 +236,7 @@ wit_operand=(e0:WitWord depth:WitWord):>string=>$unsafe {
     let text=wit_text(e0 depth)
     let e=e0
     loop e >? 0 and (nodes.ptr[e].kind =? 'narrow' or nodes.ptr[e].kind =? 'conv') {e=WitWord(nodes.ptr[e].a)}
-    if text not=? "" and e >? 0 and nodes.ptr[e].kind =? 'binary' and (nodes.ptr[e].op =? int32(58) or nodes.ptr[e].op =? int32(59)) {return "({text})"}
+    if text not=? "" and e >? 0 and nodes.ptr[e].kind =? 'binary' and (node_op(nodes.ptr[e].op_ext) =? int32(58) or node_op(nodes.ptr[e].op_ext) =? int32(59)) {return "({text})"}
     text
 }
 # Call c's argument i, the place itself for a mutable one (`@x`).
@@ -247,8 +247,8 @@ wit_lent=(c:WitWord i:WitWord):>WitWord=>$unsafe {
 }
 # A plain string literal as written, `"x"`; "" for one with escapes or interpolation.
 wit_quoted=(e:WitWord):>string=>$unsafe {
-    if nkids(e) not=? 0 or nodes.ptr[e].aux not=? 0 or nodes.ptr[e].sval <? 0 {return ""}
-    wit_quote_text(name_of(WitWord(nodes.ptr[e].sval)))
+    if nkids(e) not=? 0 or nodes.ptr[e].aux not=? 0 or node_sval(nodes.ptr[e].op_ext) <? 0 {return ""}
+    wit_quote_text(name_of(WitWord(node_sval(nodes.ptr[e].op_ext))))
 }
 # A direct call, `f(x 1)` (a method call's receiver is its first argument):
 # the callee's shown name and each argument's spelling, `...` for one that has
@@ -323,7 +323,7 @@ wit_cause=(b:FactBound n:WitWord):>void=>$unsafe {
 # Why arithmetic has no known range: a plain parameter (or else local) among its operands has no bound
 # here, which the program can state. O(1).
 wit_unsupported=(w:WitWord):>string=>$unsafe {
-    if nodes.ptr[w].kind =? 'binary' and (nodes.ptr[w].op =? int32(58) or nodes.ptr[w].op =? int32(59) or nodes.ptr[w].op =? int32(60)) {
+    if nodes.ptr[w].kind =? 'binary' and (node_op(nodes.ptr[w].op_ext) =? int32(58) or node_op(nodes.ptr[w].op_ext) =? int32(59) or node_op(nodes.ptr[w].op_ext) =? int32(60)) {
         let plain:WitWord=0
         loop operand in [WitWord(nodes.ptr[w].a) WitWord(nodes.ptr[w].b)] {
             let e=operand
@@ -751,9 +751,9 @@ wit_comparison=(c:WitWord paths:FactPaths refuted:bool):>[string string]=>$unsaf
     let missing=""
     let s=paths.no
     let reason=paths.reason
-    if paths.value >? 0 and nodes.ptr[c].kind =? 'binary' and fact_comparison_raw(nodes.ptr[c].op) {
+    if paths.value >? 0 and nodes.ptr[c].kind =? 'binary' and fact_comparison_raw(node_op(nodes.ptr[c].op_ext)) {
         let term=fact_terms[paths.value]
-        if term.op =? (cx_token_values.ptr[WitWord(nodes.ptr[c].op)]) and term.origin =? c {
+        if term.op =? (cx_token_values.ptr[WitWord(node_op(nodes.ptr[c].op_ext))]) and term.origin =? c {
             let a=wit_side(term.a WitWord(nodes.ptr[c].a))
             let b=wit_side(term.b WitWord(nodes.ptr[c].b))
             relation=wit_relation_text(term.op a b)
@@ -839,7 +839,7 @@ wit_assertion=(cond:WitWord message:WitWord paths:FactPaths entry:FactState):>vo
     if refuted {
         if wit_obligation not=? 0 and message not=? 0 {
             err_notes=[]
-            fatal(nodes.ptr[cond].pos "{name_of(WitWord(nodes.ptr[message].sval))}, and the length here is known to differ")
+            fatal(nodes.ptr[cond].pos "{name_of(WitWord(node_sval(nodes.ptr[message].op_ext)))}, and the length here is known to differ")
         }
         wit_context(0)
         wit_help(relation)
@@ -848,15 +848,15 @@ wit_assertion=(cond:WitWord message:WitWord paths:FactPaths entry:FactState):>vo
     # (an unpacking's or a spread's length: an obligation, which a scope with runtime
     # checks keeps as one)
     if wit_obligation not=? 0 and message not=? 0 {
-        let what="the length ({name_of(WitWord(nodes.ptr[message].sval))})"
+        let what="the length ({name_of(WitWord(node_sval(nodes.ptr[message].op_ext)))})"
         # (select's obligation that a wait is on is no length)
-        if starts_with(name_of(WitWord(nodes.ptr[message].sval)) "select") {what="that a wait is on ({name_of(WitWord(nodes.ptr[message].sval))})"}
+        if starts_with(name_of(WitWord(node_sval(nodes.ptr[message].op_ext))) "select") {what="that a wait is on ({name_of(WitWord(node_sval(nodes.ptr[message].op_ext)))})"}
         # (the length of an element or a temporary has no spelling: say how a
         # fixed shape states it, as a tuple type does)
-        if relation =? "" and starts_with(name_of(WitWord(nodes.ptr[message].sval)) "unpacking") {
+        if relation =? "" and starts_with(name_of(WitWord(node_sval(nodes.ptr[message].op_ext))) "unpacking") {
             wit_cause(reason cond)
             wit_context(0)
-            let words=split(name_of(WitWord(nodes.ptr[message].sval)) " ")
+            let words=split(name_of(WitWord(node_sval(nodes.ptr[message].op_ext))) " ")
             let first=if words.length >=? 5 and words[2] =? "at" {"if xs.length >=? {words[4]}"} else if words.length >=? 4 {"if xs.length =? {words[3]}"} else {"if xs.length =? 2"}
             err_notes.push([(-1) "help: give the values a fixed shape, such as a tuple type (`array<[int64 int64]>` for pairs) or a record, or test the length first (`{first}`)"])
             let why=if reason.reason =? 'missing' {"nothing establishes the length here"} else {wit_reason(reason)}
@@ -978,7 +978,7 @@ wit_key=(n:WitWord):>void=>$unsafe {
     loop receiver >? 0 and nodes.ptr[receiver].kind =? 'addr' {receiver=WitWord(nodes.ptr[receiver].a)}
     let base=wit_text(receiver)
     let e=kid(n 1)
-    let key=if nodes.ptr[e].kind =? 'str_lit' and nkids(e) =? 0 and nodes.ptr[e].sval >=? 0 {"\"{name_of(WitWord(nodes.ptr[e].sval))}\""} else {wit_text(e)}
+    let key=if nodes.ptr[e].kind =? 'str_lit' and nkids(e) =? 0 and node_sval(nodes.ptr[e].op_ext) >=? 0 {"\"{name_of(WitWord(node_sval(nodes.ptr[e].op_ext)))}\""} else {wit_text(e)}
     let relation=if base not=? "" and key not=? "" {"{key} in? {base}"} else {""}
     wit_context(0)
     wit_help(relation)
@@ -1023,8 +1023,8 @@ wit_constant_keys=(r0:WitWord):>string=>$unsafe {
         let pair=kid(init i)
         let k=WitWord(nodes.ptr[pair].a)
         loop k >? 0 and nodes.ptr[k].kind =? 'conv' {k=WitWord(nodes.ptr[k].a)}
-        if k <=? 0 or nodes.ptr[k].kind not=? 'str_lit' or nkids(k) not=? 0 or nodes.ptr[k].sval <? 0 {return ""}
-        let text=name_of(WitWord(nodes.ptr[k].sval))
+        if k <=? 0 or nodes.ptr[k].kind not=? 'str_lit' or nkids(k) not=? 0 or node_sval(nodes.ptr[k].op_ext) <? 0 {return ""}
+        let text=name_of(WitWord(node_sval(nodes.ptr[k].op_ext)))
         # (text a quoted literal type could not spell as it is)
         loop bad in ["'" "\\" "\n" "\{" "}"] {
             if contains(text bad) {return ""}
@@ -1320,3 +1320,4 @@ wit_proof=(n:WitWord s:FactState atom:RefAtom a:WitWord b:WitWord f:WitWord self
 }
 
 from p"facts_values.dewy" import (fact_place)
+from p"node_store.dewy" import (node_d node_op node_sval)

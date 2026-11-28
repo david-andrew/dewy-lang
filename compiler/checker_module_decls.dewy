@@ -25,13 +25,14 @@ from p"pkg_ops.dewy" import (pkg_main)
 from p"source_warnings.dewy" import (warn)
 from p"util.jo" import (files name_of pos_in_lib)
 from p"watch_ops.dewy" import (watch_missing_input)
+from p"node_store.dewy" import (node_aux2 node_sval node_with_mod)
 
 ModuleDeclWord:type=int64<overflow='wrap'>
 ModuleDeclI32:type=int32<overflow='wrap'>
 
 # Imports named by file, package, and bare module have different search paths.
 registration_import_path=(m:ModuleDeclWord d:ModuleDeclWord rel:string):>string=>{
-    if nodes[d].aux2 =? 1 {
+    if node_aux2(nodes[d].op_ext) =? 1 {
         let path=use_path(rel modules[m].dir lib_dir)
         let pn=package_name(rel)
         if not starts_with(rel "@lib/") and not file_exists(path) and pn not=? "" {
@@ -74,7 +75,7 @@ registration_import_path=(m:ModuleDeclWord d:ModuleDeclWord rel:string):>string=
 
 register_decls=(m:ModuleDeclWord decls:array<int64>):>void=>{
     loop d in decls {
-        nodes[d].mod=ModuleDeclI32(m)
+        nodes[d].op_ext=node_with_mod(nodes[d].op_ext (ModuleDeclI32(m)))
         if nodes[d].kind =? 'assign' and assign_declares(d m) {assign_to_decl(d)}
         let kind=nodes[d].kind
         let name=ModuleDeclWord(nodes[d].name)
@@ -88,7 +89,7 @@ register_decls=(m:ModuleDeclWord decls:array<int64>):>void=>{
                 nodes[lam].name=0
                 let assignment=bc_assign(bc_ident(name_of(name) nodes[d].pos) lam nodes[d].pos)
                 nodes[d]=nodes[assignment]
-                nodes[d].mod=ModuleDeclI32(m)
+                nodes[d].op_ext=node_with_mod(nodes[d].op_ext (ModuleDeclI32(m)))
                 modules[m].inits.push(d)
                 continue
             }
@@ -112,7 +113,7 @@ register_decls=(m:ModuleDeclWord decls:array<int64>):>void=>{
             globals.push(Global(name=ModuleDeclI32(name) decl=ModuleDeclI32(d) mod=ModuleDeclI32(m) is_const=true))
             scope_add_module(m name 'const_' ModuleDeclWord(globals.length) - 1 d);
         } else if kind =? 'import_' {
-            let rel=name_of(ModuleDeclWord(nodes[d].sval))
+            let rel=name_of(ModuleDeclWord(node_sval(nodes[d].op_ext)))
             let path=registration_import_path(m d rel)
             if path =? "{lib_dir}/bigint.dewy" and not starts_with(name_of(ModuleDeclWord(nodes[d].name)) "$") and files[ModuleDeclWord(modules[m].file)].is_dewy and not pos_in_lib(nodes[d].pos) {
                 fatal(nodes[d].pos "`bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)")

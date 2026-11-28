@@ -31,6 +31,7 @@ from p"types.jo" import (T_I32 T_INT T_MATH_INT T_U32 T_U64 prune types)
 from p"util.jo" import (err_notes)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_help wit_operand_changed wit_side wit_unsupported)
+from p"node_store.dewy" import (node_op)
 
 TransferWord:type=int64<overflow='wrap'>
 TransferUnsigned:type=uint64<overflow='wrap'>
@@ -38,7 +39,7 @@ TransferUnsigned:type=uint64<overflow='wrap'>
 exact_shift_fact=(n:TransferWord value:TransferWord s:FactState):>void=>$unsafe {
     # Tok.shl and Tok.starstar in the checked node's operator field.
     if fact_speculating >? 0 or not exact_has_node(n) {return}
-    let op=nodes.ptr[n].op
+    let op=node_op(nodes.ptr[n].op_ext)
     if op not=? 67 and op not=? 79 {return}
     let b=fact_bound(s value)
     let hi=fact_relational(s value true)
@@ -88,15 +89,15 @@ exact_fits_relation=(@s:FactState value:TransferWord t:TransferWord):>bool=>$uns
 exact_operand_guard=(n:TransferWord t:TransferWord):>string=>$unsafe {
     let k=nodes.ptr[n].kind
     let operand=TransferWord(nodes.ptr[n].a)
-    let negate=k =? 'unary' and nodes.ptr[n].op =? HOOK_TOK_MINUS
+    let negate=k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? HOOK_TOK_MINUS
     let add=false
     let step:TransferWord=0
     if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.fixed_abs)) {
         operand=kid(n 0)
         negate=true
     } else if k =? 'binary' and nodes.ptr[n].aux =? 0 {
-        add=nodes.ptr[n].op =? HOOK_TOK_PLUS
-        if not add and nodes.ptr[n].op not=? HOOK_TOK_MINUS {return ""}
+        add=node_op(nodes.ptr[n].op_ext) =? HOOK_TOK_PLUS
+        if not add and node_op(nodes.ptr[n].op_ext) not=? HOOK_TOK_MINUS {return ""}
         let right=TransferWord(nodes.ptr[n].b)
         let [known amount]=integer_constant(right)
         if not known {

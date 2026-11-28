@@ -2,7 +2,7 @@ $runtime_checks
 
 # O(executed syntax + binding/checking work), with ordinary recursion depth.
 # Scalar operations stay local; re-read arena elements after each host request.
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_op node_sval)
 from p"source_types.dewy" import SrcFile
 from p"evaluator_state.dewy" import CVal
 from p"constant_host.dewy" import ConstantHost
@@ -23,7 +23,7 @@ constant_eval=(@nodes:array<Node> @names:array<string> @files:array<SrcFile> @ho
     let k=nodes[e].kind
     if nodes[e].type not=? 0 or k =? 'call' or k =? 'index' or k =? 'field' or k =? 'unary' {return host.checked(e)}
     if k =? 'bool_lit' or k =? 'int_lit' {return CVal(is_str=false i=nodes[e].ival s="")}
-    if k =? 'str_lit' {return CVal(is_str=true i=0 s=names[int64(nodes[e].sval)])}
+    if k =? 'str_lit' {return CVal(is_str=true i=0 s=names[int64(node_sval(nodes[e].op_ext))])}
     if k =? 'ident' {
         let initial=host.binding(e)
         if initial =? 0 {host.fatal(nodes[e].pos "'{names[int64(nodes[e].name)]}' is not a compile-time constant")}
@@ -41,7 +41,7 @@ constant_eval=(@nodes:array<Node> @names:array<string> @files:array<SrcFile> @ho
     if k =? 'binary' {
         let a=constant_eval(@nodes @names @files @host int64(nodes[e].a))
         let b=constant_eval(@nodes @names @files @host int64(nodes[e].b))
-        let op=int64(nodes[e].op)
+        let op=int64(node_op(nodes[e].op_ext))
         if a.is_str or b.is_str {
             let equal=a.is_str =? b.is_str and a.s =? b.s
             if op =? CEVAL_EQ {return CVal(is_str=false i=int64(equal) s="")}

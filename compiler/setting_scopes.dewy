@@ -8,6 +8,7 @@ from p"settings.jo" import settings_path
 from p"@lib/core/os.jo" import (read_file __system_zone_name)
 from p"module_paths.dewy" import is_abs_path
 from p"util.jo" import (files intern name_of pos_file)
+from p"node_store.dewy" import (node_with_aux2)
 
 # Internal actions: a leave ends its written extent; prefixes stay on a parallel block's task.
 const SETTING_SCOPE_CLEANUP:int64=1787
@@ -77,11 +78,11 @@ dw_setting_scope=(name:string value:int64 at:int64 body:int64):>void=>$unsafe {
         before.push(bc_let(frame call at))
         let cleanup=mk('defer_' at)
         let leave=bc_stmt(bc_call("__settings_leave" [bc_ident(frame at)] at) at)
-        nodes[leave].aux2=int32(SETTING_SCOPE_CLEANUP)
+        nodes[leave].op_ext=node_with_aux2(nodes[leave].op_ext (int32(SETTING_SCOPE_CLEANUP)))
         nodes[cleanup].a=int32(leave)
         before.push(cleanup)
     }
-    loop s in before {nodes[s].aux2=int32(SETTING_SCOPE_PREFIX)}
+    loop s in before {nodes[s].op_ext=node_with_aux2(nodes[s].op_ext (int32(SETTING_SCOPE_PREFIX)))}
     loop s in kids(body) {before.push(s)}
     set_list(body before)
 }

@@ -10,6 +10,7 @@ from p"type_ops.dewy" import (type_str)
 from p"util.jo" import (name_of)
 from p"source_warnings.dewy" import (warn)
 from p"lower_races.dewy" import (in_lib)
+from p"node_store.dewy" import (node_d node_mod)
 # Node.aux retains its existing symbol-kind encoding (local 1, global 2).
 DTWord:type=int64<overflow='wrap'>
 let det_done:dict<int64 bool>=dict<int64 bool>()
@@ -37,7 +38,7 @@ det_calls=(n:DTWord):>void=>$unsafe {
     det_calls(DTWord(nodes.ptr[n].b))
     if k not=? 'for_' {
         det_calls(DTWord(nodes.ptr[n].c))
-        if k not=? 'partial' {det_calls(DTWord(nodes.ptr[n].d))}
+        if k not=? 'partial' {det_calls(DTWord(node_d(nodes.ptr[n].op_ext)))}
     }
     loop child in kids(n) {det_calls(child)}
     loop child in kids2(n) {det_calls(child)}
@@ -45,7 +46,7 @@ det_calls=(n:DTWord):>void=>$unsafe {
 det_check=(callee:DTWord args:array<int64> pos:DTWord):>void=>$unsafe {
     if in_lib(pos) {return}
     let d:DTWord=DTWord(fns.ptr[callee].decl)
-    let whose="{name_of(DTWord(modules.ptr[DTWord(nodes.ptr[d].mod)].name))}.{name_of(DTWord(nodes.ptr[d].name))}'s tick"
+    let whose="{name_of(DTWord(modules.ptr[DTWord(node_mod(nodes.ptr[d].op_ext))].name))}.{name_of(DTWord(nodes.ptr[d].name))}'s tick"
     loop a in args {if tkind(ntype(a)) =? 'fn_' {det_arg(a whose)}}
 }
 det_arg=(a:DTWord whose:string):>void=>$unsafe {
@@ -99,7 +100,7 @@ det_scan=(n:DTWord who:string):>void=>$unsafe {
     det_scan(DTWord(nodes.ptr[n].b) who)
     if k not=? 'for_' {
         det_scan(DTWord(nodes.ptr[n].c) who)
-        if k not=? 'partial' {det_scan(DTWord(nodes.ptr[n].d) who)}
+        if k not=? 'partial' {det_scan(DTWord(node_d(nodes.ptr[n].op_ext)) who)}
     }
     loop i in [0..nkids(n)) {det_scan(kid(n i) who)}
     loop i in [0..nkids2(n)) {det_scan(kid2(n i) who)}

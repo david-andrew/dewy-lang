@@ -19,6 +19,7 @@ from p"ide_ops.dewy" import (ide_emit ide_pos_str)
 from p"type_ops.dewy" import (dt mk_opt mk_union)
 from p"types.jo" import (T_NEVER T_NONE T_VOID is_union prune tkind)
 from p"util.jo" import (intern name_of pos_in_lib)
+from p"node_store.dewy" import (node_with_aux2)
 
 CoalesceWord:type=int64<overflow='wrap'>
 
@@ -118,7 +119,7 @@ coalesce_failures=(n:int64 at:int64 expected:int64):>int64=>{
             nodes[branch].a=int32(condition)
             nodes[branch].b=int32(body)
             nodes[branch].c=int32(chain)
-            if values.length >? 1 {nodes[branch].aux2= -8} # Explicit union join.
+            if values.length >? 1 {nodes[branch].op_ext=node_with_aux2(nodes[branch].op_ext (-8))} # Explicit union join.
             chain=bc_block([bc_stmt(branch pos)] pos)
         }
         j -= 1

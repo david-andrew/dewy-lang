@@ -27,7 +27,7 @@ MAIN = r'''main = ():
     fns[f].body = i32(la_node(.block, 0, 0, [decl, la_node(.lambda)]))
     find_views(f); assert(held_views.len() == 0 and int(locals[c].flags) & LF_HELDVIEW == 0)
     # Synthetic parameter bindings share the source's slot without owning it.
-    nodes[decl].aux2 = 1
+    nodes[decl].op_ext = node_with_aux2(nodes[decl].op_ext, i32(1))
     locals[r].vreg = 21; locals[r].offset = 24
     assert(param_view_decl(decl, c) and locals[c].vreg == 21 and locals[c].offset == 24)
     locals[c].flags = i32(LF_ASSIGNED)

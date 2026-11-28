@@ -163,7 +163,7 @@ main = ():
     index_run(indexed(rec, 0, true, [item(T_INT, .int_lit)]))
     index_run(indexed(rec, 0, false, [item(T_INT, .int_lit)]))
     rv_bracket = false
-    p = indexed(arr, item(T_INT, .ident)); nodes[p].sval = 7; index_run(p)
+    p = indexed(arr, item(T_INT, .ident)); nodes[p].op_ext = node_with_sval(nodes[p].op_ext, i32(7)); index_run(p)
     index_run(indexed(kind_of(.typeval), 0))
     # Sets the host does not confirm; stored ranges; n-dimensional arrays; steps; text.
     index_run(indexed(named_record("Set"), item(T_INT, .int_lit)))

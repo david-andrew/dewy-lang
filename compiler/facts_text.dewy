@@ -34,6 +34,7 @@ from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 from p"witness.jo" import (WitSide)
 from p"witness_nodes.dewy" import (wit_slice_at wit_text)
 from p"witness_ops.dewy" import (wit_fail wit_help wit_index wit_operation wit_unknown)
+from p"node_store.dewy" import (node_mod node_sval node_with_sval)
 
 TextWord:type=int64<overflow='wrap'>
 # The bundled delimiter split always appends its final part when the
@@ -137,11 +138,11 @@ fact_regex_search_result=(n:TextWord result:TextWord values:array<int64> @s:Fact
             # Interpret the library implementation, never a second regex parser.
             # Only a checked constant string enters the evaluator.
             let arg=mk('str_lit' nodes.ptr[n].pos)
-            nodes.ptr[arg].sval=int32(text)
+            nodes.ptr[arg].op_ext=node_with_sval(nodes.ptr[arg].op_ext (int32(text)))
             nodes.ptr[arg].type=int32(T_STR)
             add_flag(arg NF_CHECKED)
             let d=TextWord(fns.ptr[TextWord(nodes.ptr[n].sym)].decl)
-            let helper=module_lookup(TextWord(nodes.ptr[d].mod) intern("__re_parse"))
+            let helper=module_lookup(TextWord(node_mod(nodes.ptr[d].op_ext)) intern("__re_parse"))
             if helper =? 0 or syms.ptr[helper].kind not=? 'fns' {return}
             let f=get_fn_inst(TextWord(syms.ptr[helper].decl) [] nodes.ptr[n].pos)
             let run=mk('call' nodes.ptr[n].pos)
@@ -197,8 +198,8 @@ fact_affix_call=(n:TextWord):>bool=>$unsafe {
 # it, so each of its bytes starts a grapheme of the text; any other pattern
 # guarantees one.
 fact_affix_floor=(p:TextWord):>TextWord=>$unsafe {
-    if p <=? 0 or nodes.ptr[p].kind not=? 'str_lit' or nodes.ptr[p].aux not=? 0 or nkids(p) not=? 0 or nodes.ptr[p].sval <? 0 {return 1}
-    let text=name_of(TextWord(nodes.ptr[p].sval))
+    if p <=? 0 or nodes.ptr[p].kind not=? 'str_lit' or nodes.ptr[p].aux not=? 0 or nkids(p) not=? 0 or node_sval(nodes.ptr[p].op_ext) <? 0 {return 1}
+    let text=name_of(TextWord(node_sval(nodes.ptr[p].op_ext)))
     let bytes=text as array<uint8>
     if bytes.length =? 0 {return 1}
     loop c in bytes {
@@ -254,9 +255,9 @@ fact_byte_view=(@s:FactState text:TextWord):>TextWord=>$unsafe {
     # (or contains CR). Materialize only on byte-view demand: O(1) indexed
     # lookup and interned-string length, with no Unicode/grapheme scan.
     let n=fact_terms[text].origin
-    if view not=? 0 and n >? 0 and nodes.ptr[n].kind =? 'str_lit' and nodes.ptr[n].aux =? 0 and nkids(n) =? 0 and nodes.ptr[n].sval >=? 0 and s.projections.length <? FACT_CAP {
+    if view not=? 0 and n >? 0 and nodes.ptr[n].kind =? 'str_lit' and nodes.ptr[n].aux =? 0 and nkids(n) =? 0 and node_sval(nodes.ptr[n].op_ext) >=? 0 and s.projections.length <? FACT_CAP {
         let known=fact_projection_find(s view (-1) false)
-        if known <? 0 {fact_add_projection(@s FactProjection(view (-1) false fact_constant(@s (name_of(TextWord(nodes.ptr[n].sval)) as array<uint8>).length)))}
+        if known <? 0 {fact_add_projection(@s FactProjection(view (-1) false fact_constant(@s (name_of(TextWord(node_sval(nodes.ptr[n].op_ext))) as array<uint8>).length)))}
     }
     view
 }

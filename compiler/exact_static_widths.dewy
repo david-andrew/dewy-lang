@@ -15,6 +15,7 @@ from p"exact_count_bounds.dewy" import (exact_count_bound)
 from p"expr.jo" import (CV)
 from p"type_ops.dewy" import (int_policy)
 from p"types.jo" import (T_INT T_MATH_INT is_int types)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 # Context-free width facts are demanded only by a storage boundary. Cache one
 # signed width and a nonnegative bit per expression; 0 means not computed and
@@ -30,7 +31,7 @@ WidthU64:type=uint64<overflow='wrap'>
 const WIDTH_SK_LOCAL:int32=1
 const WIDTH_SK_GLOBAL:int32=2
 
-exact_width_op=(n:WidthWord):>Tok=>$unsafe {cx_token_values.ptr[WidthWord(nodes.ptr[n].op)]}
+exact_width_op=(n:WidthWord):>Tok=>$unsafe {cx_token_values.ptr[WidthWord(node_op(nodes.ptr[n].op_ext))]}
 
 # The significant bits of a magnitude, with at most six tests.
 exact_width_bits=(value0:WidthU64):>WidthWord=>{
@@ -89,7 +90,7 @@ exact_fold_binary=(n:WidthWord ai:WidthWord bi:WidthWord):>int64=>$unsafe {
         if y =? 0 {return 0}
         let quotient=x // y
         let remainder=x % y
-        let floor=nodes.ptr[n].aux2 =? -1
+        let floor=node_aux2(nodes.ptr[n].op_ext) =? -1
         if op =? 'slash' {
             value=quotient
             negative=an not=? bn
@@ -353,7 +354,7 @@ exact_midpoint=(n:WidthWord):>[int64 int64]=>$unsafe {
     let qop=exact_width_op(quotient)
     let divisor=WidthWord(nodes.ptr[quotient].b)
     if nodes.ptr[divisor].kind not=? 'int_lit' {return empty}
-    let half_div=qop =? 'slash' and nodes.ptr[quotient].aux2 =? -1 and nodes.ptr[divisor].ival =? 2
+    let half_div=qop =? 'slash' and node_aux2(nodes.ptr[quotient].op_ext) =? -1 and nodes.ptr[divisor].ival =? 2
     let half_shr=qop =? 'shr' and nodes.ptr[divisor].ival =? 1
     if not half_div and not half_shr {return empty}
     let difference=WidthWord(nodes.ptr[quotient].a)

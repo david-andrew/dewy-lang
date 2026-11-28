@@ -34,6 +34,7 @@ from p"watch_drive.dewy" import (w_emit wc_default)
 from p"x64.jo" import (WATCH_CODE_AT WATCH_CODE_SIZE code data_fix fn_addr fn_len)
 from p"x64_emit.dewy" import (call_fix stub_fix)
 from p"x64_module.dewy" import (stub_addr)
+from p"node_store.dewy" import (node_sval node_with_op)
 
 WatchWord:type=int64<overflow='wrap'>
 w_region=():>int64=>{
@@ -348,7 +349,7 @@ wk_init_scan=(n:WatchWord m:WatchWord h0:WatchWord @refs:array<int64> @seen:arra
         if src not=? none {h=wh_str(h src)}
     }
     if k =? 'str_lit' {
-        let nm=name_of(WatchWord(nodes.ptr[n].sval))
+        let nm=name_of(WatchWord(node_sval(nodes.ptr[n].op_ext)))
         if (nm as array<uint8>).length >? 0 and (nm as array<uint8>).length <? 400 and find_byte(nm b'\n') <? 0 {
             let p=nm
             if not starts_with(p "/") and m >=? 0 and m <? modules.length and file_exists("{modules[m].dir}/{nm}") {p="{modules[m].dir}/{nm}"}
@@ -641,7 +642,7 @@ watch_lower_inits=():>void=>$unsafe {
                     nodes.ptr[id].type=globals.ptr[g].type
                     add_flag(id NF_CHECKED)
                     let assign=mk('assign' nodes.ptr[d].pos)
-                    nodes.ptr[assign].op=int32(47)
+                    nodes.ptr[assign].op_ext=node_with_op(nodes.ptr[assign].op_ext (int32(47)))
                     nodes.ptr[assign].a=int32(id)
                     nodes.ptr[assign].b=nodes.ptr[d].b
                     d=assign

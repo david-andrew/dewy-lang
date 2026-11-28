@@ -60,13 +60,13 @@ main = ():
     # Before the pick: elementwise calls, big integer literals, partial evaluation.
     broadcast = call(3, [done(T_INT)]); nodes[broadcast].flags = 16384
     show(broadcast, T_INT)
-    big = call(3, [done(T_INT)]); nodes[big].aux2 = -1
+    big = call(3, [done(T_INT)]); nodes[big].op_ext = node_with_aux2(nodes[big].op_ext, i32(-1))
     zc_literal = int(T_MATH_INT)
     show(big)
-    big = call(3, [done(T_INT)]); nodes[big].aux2 = -1
+    big = call(3, [done(T_INT)]); nodes[big].op_ext = node_with_aux2(nodes[big].op_ext, i32(-1))
     zc_literal = -1
     show(big, T_INT)
-    partial = call(3, [done(T_INT)]); nodes[partial].aux2 = -10
+    partial = call(3, [done(T_INT)]); nodes[partial].op_ext = node_with_aux2(nodes[partial].op_ext, i32(-10))
     show(partial, T_INT)
     nodes[partial].flags = 536870912; zc_numeric = true
     show(partial, T_INT)
@@ -170,7 +170,7 @@ def test_checker_call_expr_literal_first(compiler, tmp_path):  # noqa: F811
     main = r'''
 main = ():
     prepare_expr()
-    big = call(3, [done(T_INT)]); nodes[big].aux2 = -1; nodes[big].flags = 16384
+    big = call(3, [done(T_INT)]); nodes[big].op_ext = node_with_aux2(nodes[big].op_ext, i32(-1)); nodes[big].flags = 16384
     zc_literal = -2
     check_expr(big, T_INT)
     print("unreachable")

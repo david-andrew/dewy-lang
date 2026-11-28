@@ -39,6 +39,7 @@ from p"sequence_selectors.dewy" import (fact_sequence_store fact_sequence_store_
 from p"types.jo" import (T_INT T_STR T_U64 is_int prune struct_targ tkind types)
 from p"type_ops.dewy" import (simple_enum)
 from p"util.jo" import (files intern name_of pos_file)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 ChangeWord:type=int64<overflow='wrap'>
 # Pre-kill one changing route `root.f…[i]…`. Its root gets a fresh value that
@@ -192,7 +193,7 @@ fact_pure_binary=(n:ChangeWord):>bool=>$unsafe {
     if aux =? 2 or aux >=? 7 and aux <=? 11 {return true}
     # Structural equality without member callbacks or lifecycle hooks only
     # reads its operands. The existing type-indexed helper inventory is lazy.
-    if aux not=? 1 or (nodes.ptr[n].op not=? int32(69) and nodes.ptr[n].op not=? int32(70)) {return false}
+    if aux not=? 1 or (node_op(nodes.ptr[n].op_ext) not=? int32(69) and node_op(nodes.ptr[n].op_ext) not=? int32(70)) {return false}
     let t=ntype(ChangeWord(nodes.ptr[n].a))
     helper_value_members(t).length =? 0 and (ownership_decls.length =? 0 or not ownership_fact_type(t))
 }
@@ -200,7 +201,7 @@ fact_pure_binary=(n:ChangeWord):>bool=>$unsafe {
 # need not have different lengths. Only hook-free structural arrays and text
 # qualify. Two indexed projections; existing purity and bounded relation work.
 fact_length_comparison=(n:ChangeWord):>bool=>$unsafe {
-    if n =? 0 or nodes.ptr[n].kind not=? 'binary' or (nodes.ptr[n].op not=? int32(69) and nodes.ptr[n].op not=? int32(70)) {return false}
+    if n =? 0 or nodes.ptr[n].kind not=? 'binary' or (node_op(nodes.ptr[n].op_ext) not=? int32(69) and node_op(nodes.ptr[n].op_ext) not=? int32(70)) {return false}
     if not fact_pure_binary(n) {return false}
     let a=fact_type(ntype(ChangeWord(nodes.ptr[n].a)))
     let b=fact_type(ntype(ChangeWord(nodes.ptr[n].b)))
@@ -219,7 +220,7 @@ fact_unit_erased=(from0:ChangeWord to0:ChangeWord):>bool=>$unsafe {
 # Evaluate the operand with its current facts; raw pointer and aggregate casts
 # remain opaque. No claim that an arbitrary integer names a declared variant.
 fact_enum_cast=(n:ChangeWord):>bool=>$unsafe {
-    if nodes.ptr[n].kind not=? 'cast' or nodes.ptr[n].aux2 =? 1 {return false}
+    if nodes.ptr[n].kind not=? 'cast' or node_aux2(nodes.ptr[n].op_ext) =? 1 {return false}
     let from_=representation_type(ntype(ChangeWord(nodes.ptr[n].a)))
     let to=representation_type(ntype(n))
     types.ptr[from_].kind =? 'int_' and types.ptr[to].kind =? 'enum_' and simple_enum(to)
@@ -262,7 +263,7 @@ fact_reads_only=(id:IN):>bool=>{
 # other store remain covered. No speculative source bound is used. Only visited
 # on the obligation's active slice; O(conversion depth), indexed binding access.
 fact_bounded_change=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason):>bool=>$unsafe {
-    if nodes.ptr[n].op not=? int32(47) {return false}
+    if node_op(nodes.ptr[n].op_ext) not=? int32(47) {return false}
     let target=ChangeWord(nodes.ptr[n].a)
     if nodes.ptr[target].kind not=? 'ident' {return false}
     let p=fact_place(target)
@@ -270,11 +271,11 @@ fact_bounded_change=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason):
     let rhs=fact_progress_strip(ChangeWord(nodes.ptr[n].b))
     let kind:ChangeWord=0
     let operand:ChangeWord=0
-    if nodes.ptr[rhs].kind =? 'binary' and nodes.ptr[rhs].aux =? 0 and nodes.ptr[rhs].op =? int32(62) and files[pos_file(nodes.ptr[rhs].pos)].is_dewy and is_int(ntype(rhs)) {
+    if nodes.ptr[rhs].kind =? 'binary' and nodes.ptr[rhs].aux =? 0 and node_op(nodes.ptr[rhs].op_ext) =? int32(62) and files[pos_file(nodes.ptr[rhs].pos)].is_dewy and is_int(ntype(rhs)) {
         kind=2
         operand=ChangeWord(nodes.ptr[rhs].b)
     }
-    else if nodes.ptr[rhs].kind =? 'binary' and nodes.ptr[rhs].aux =? 0 and nodes.ptr[rhs].op =? int32(63) and is_int(ntype(rhs)) {
+    else if nodes.ptr[rhs].kind =? 'binary' and nodes.ptr[rhs].aux =? 0 and node_op(nodes.ptr[rhs].op_ext) =? int32(63) and is_int(ntype(rhs)) {
         kind=4
         operand=ChangeWord(nodes.ptr[rhs].b)
         if nodes.ptr[fact_progress_strip(operand)].kind not=? 'int_lit' {operand=ChangeWord(nodes.ptr[rhs].a)}

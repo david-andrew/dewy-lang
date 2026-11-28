@@ -9,7 +9,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checker_types.dewy" import (TK TypeInfo StructInfo Field Variant)
 from p"checker_state.dewy" import (FnInst Global Local)
 from p"refinement_types.dewy" import (RefAtom RefTerm)
-from p"node_store.dewy" import (Node NK node_kids node_mk node_set_list)
+from p"node_store.dewy" import (NK Node node_aux2 node_d node_fval node_kids node_mk node_op node_set_list node_sval node_with_aux2 node_with_fval node_with_sval)
 from p"source_types.dewy" import (SrcFile)
 from p"type_inference.dewy" import (tu_prune tu_equal tu_is_union tu_union_members)
 from p"type_layout.dewy" import (tl_layout)
@@ -384,7 +384,7 @@ cx_binary=(e:CWord op:Tok a:CWord b:CWord t:CWord):>CWord=>$unsafe {
         else {r=CWord(uint64<overflow='wrap'>(p) >> (q & 63))}
     }
     else {cx_fail(e  "unsupported arithmetic operator")}
-    if cx_nodes[0].ptr[e].kind =? 'binary' and cx_nodes[0].ptr[e].aux2 =? - 1 and sg and(op =? 'slash' or op =? 'percent') {
+    if cx_nodes[0].ptr[e].kind =? 'binary' and node_aux2(cx_nodes[0].ptr[e].op_ext) =? - 1 and sg and(op =? 'slash' or op =? 'percent') {
         if op =? 'slash' and q =? - 1 {
             if cx_int_policy(t) =? 2 and p =? - (CWord(1) << (CWord(cx_types[0].ptr[t].bits) - 1)) {r=(CWord(1) << (CWord(cx_types[0].ptr[t].bits) - 1)) - 1}
         }
@@ -670,7 +670,7 @@ cx_ref_term=(e:CWord term:RefTerm self:CWord):>CWord=>$unsafe {
     value
 }
 cx_refinement=(e:CWord value:CWord):>void=>$unsafe {
-    let t=cx_prune(CWord(cx_nodes[0].ptr[e].aux2))
+    let t=cx_prune(CWord(node_aux2(cx_nodes[0].ptr[e].op_ext)))
     if t <=? 0 or cx_types[0].ptr[t].kind not=? 'refined' {cx_fail(e  "refinement contract is not available")}
     loop atom in cx_ref_predicates[0][CWord(cx_types[0].ptr[t].st)] {
         let a=cx_ref_term(e  atom.a  value)
@@ -843,7 +843,7 @@ cx_intrinsic=(e:CWord):>CWord=>$unsafe {
     }
     if id =? 'embed' {
         # (a file's bytes, read as often as a library reads its table: made once)
-        let at=CWord(cx_nodes[0].ptr[e].sval)
+        let at=CWord(node_sval(cx_nodes[0].ptr[e].op_ext))
         let known=cx_embed_cache.get(at)
         if known isnt? none {return known as int64}
         # (each of the 256 byte values once, so a big file costs one word a byte)
@@ -930,10 +930,10 @@ cx_pattern=(p:CWord v:CWord):>bool=>$unsafe {
         }
         return x.i not=? 0
     }
-    if k =? 'pvariant' {return x.i =? CWord(cx_nodes[0].ptr[p].aux2)}
+    if k =? 'pvariant' {return x.i =? CWord(node_aux2(cx_nodes[0].ptr[p].op_ext))}
     if k =? 'plit' {
         if tu_is_union(x.type) {
-            if x.i not=? CWord(cx_nodes[0].ptr[p].aux2) {return false}
+            if x.i not=? CWord(node_aux2(cx_nodes[0].ptr[p].op_ext)) {return false}
             return cx_pattern(p  x.items[0])
         }
         if cx_tkind(x.type) =? 'opt' {
@@ -974,7 +974,7 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
         }
         return cx_int(t  cx_nodes[0].ptr[e].ival)
     }
-    if k =? 'float_lit' {return cx_float(t  cx_nodes[0].ptr[e].fval)}
+    if k =? 'float_lit' {return cx_float(t  node_fval(cx_nodes[0].ptr[e].op_ext))}
     if k =? 'none_lit' {return cx_zero(t)}
     if k =? 'str_lit' {
         if cx_nodes[0].ptr[e].aux not=? 0 {
@@ -982,10 +982,10 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
             let text=""
             loop part in cx_kids(e) {
                 if cx_nodes[0].ptr[part].kind =? 'str_lit' and cx_nodes[0].ptr[part].aux =? 0 {
-                    text = "{text}{cx_name_of(CWord(cx_nodes[0].ptr[part].sval))}"
+                    text = "{text}{cx_name_of(CWord(node_sval(cx_nodes[0].ptr[part].op_ext)))}"
                     continue
                 }
-                if cx_nodes[0].ptr[part].kind not=? 'pair' or cx_nodes[0].ptr[part].sval not=? - 1 {cx_fail(e  "this string interpolation is not supported at compile time (text, machine integers and booleans are)")}
+                if cx_nodes[0].ptr[part].kind not=? 'pair' or node_sval(cx_nodes[0].ptr[part].op_ext) not=? - 1 {cx_fail(e  "this string interpolation is not supported at compile time (text, machine integers and booleans are)")}
                 let pv=cx_value(cx_expr(CWord(cx_nodes[0].ptr[part].a)))
                 if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
                 let pt=cx_prune(pv.type)
@@ -997,7 +997,7 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
             }
             return cx_add(CTValue[type = t  s = text])
         }
-        return cx_add(CTValue[type = t  s = cx_name_of(CWord(cx_nodes[0].ptr[e].sval))])
+        return cx_add(CTValue[type = t  s = cx_name_of(CWord(node_sval(cx_nodes[0].ptr[e].op_ext)))])
     }
     if k =? 'ident' {
         if cx_nodes[0].ptr[e].aux =? int32<overflow='wrap'>(CWord(2)) {return cx_global(e  CWord(cx_nodes[0].ptr[e].sym))}
@@ -1079,7 +1079,7 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
         if cx_nodes[0].ptr[e].aux =? 2 or cx_nodes[0].ptr[e].aux =? 3 {
             let v=CTValue[type = t]
             if cx_nodes[0].ptr[e].aux =? 3 {
-                v.i = CWord(cx_nodes[0].ptr[e].aux2)
+                v.i = CWord(node_aux2(cx_nodes[0].ptr[e].op_ext))
                 if tu_is_union(t) and cx_nkids(e) =? 1 {v.i = uu_index(t  cx_ntype(cx_kid(e  0)))}
             }
             loop _ in cx_kids(e) {v.items.push(0)}
@@ -1138,7 +1138,7 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
     if k =? 'unary' {
         let a=cx_expr(CWord(cx_nodes[0].ptr[e].a))
         if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
-        let op=cx_token(CWord(cx_nodes[0].ptr[e].op))
+        let op=cx_token(CWord(node_op(cx_nodes[0].ptr[e].op_ext)))
         if op =? 'plus' {return a}
         if op =? 'minus' {
             if cx_is_float(t) {return cx_float(t  -cx_value(a).f)}
@@ -1159,9 +1159,9 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
         let b=cx_expr(CWord(cx_nodes[0].ptr[e].b))
         if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
         if cx_nodes[0].ptr[e].aux =? 6 {
-            return cx_int(cx_T_BOOL[0]  int64(if cx_nodes[0].ptr[e].op =? int32<overflow='wrap'>(69) {cx_value(a).i =? 0} else {cx_value(a).i not=? 0}))
+            return cx_int(cx_T_BOOL[0]  int64(if node_op(cx_nodes[0].ptr[e].op_ext) =? int32<overflow='wrap'>(69) {cx_value(a).i =? 0} else {cx_value(a).i not=? 0}))
         }
-        return cx_binary(e  cx_token(CWord(cx_nodes[0].ptr[e].op))  a  b  t)
+        return cx_binary(e  cx_token(CWord(node_op(cx_nodes[0].ptr[e].op_ext)))  a  b  t)
     }
     if k =? 'if_' {
         let yes=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a))).i not=? 0
@@ -1250,11 +1250,11 @@ cx_stmt=(s:CWord):>CWord=>$unsafe {
         if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
         let old=cx_read_place(p)
         # (what `x op= v` reads stays as it was while v is worked out)
-        if cx_nodes[0].ptr[s].op not=? int32<overflow='wrap'>(47) {cx_disown(old)}
+        if node_op(cx_nodes[0].ptr[s].op_ext) not=? int32<overflow='wrap'>(47) {cx_disown(old)}
         let v=cx_expr(CWord(cx_nodes[0].ptr[s].b))
         if cx_frames[cx_frame].signal not=? 0 {return v}
-        if cx_nodes[0].ptr[s].op not=? int32<overflow='wrap'>(47) {
-            let op=cx_token(cx_host[0].compound_op(CWord(cx_nodes[0].ptr[s].op)))
+        if node_op(cx_nodes[0].ptr[s].op_ext) not=? int32<overflow='wrap'>(47) {
+            let op=cx_token(cx_host[0].compound_op(CWord(node_op(cx_nodes[0].ptr[s].op_ext))))
             v=cx_binary(s  op  old  v  cx_ntype(CWord(cx_nodes[0].ptr[s].a)))
         }
         cx_write_place(p  cx_store(v  cx_ntype(CWord(cx_nodes[0].ptr[s].a))  s))
@@ -1313,7 +1313,7 @@ cx_stmt=(s:CWord):>CWord=>$unsafe {
                 let produced5=cx_int(cx_T_INT[0]  i)
                 cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].c)] = produced5
                 let produced6=cx_add(v)
-                cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].d)] = produced6
+                cx_frames[cx_frame].values[CWord(node_d(cx_nodes[0].ptr[s].op_ext))] = produced6
                 if cx_nodes[0].ptr[s].aux =? 1 {cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].sym)] = v.items[i]}
                 cx_block(CWord(cx_nodes[0].ptr[s].b));
                 if cx_loop_exit() {break}
@@ -1360,11 +1360,11 @@ cx_literal=(v:CWord pos:CWord):>CWord=>$unsafe {
     cx_add_flag(n  NF_CHECKED)
     if k =? 'str_' {
         cx_nodes[0].ptr[n].kind ='str_lit'
-        cx_nodes[0].ptr[n].sval = int32<overflow='wrap'>(cx_host[0].intern(x.s))
+        cx_nodes[0].ptr[n].op_ext=node_with_sval(cx_nodes[0].ptr[n].op_ext (int32<overflow='wrap'>(cx_host[0].intern(x.s))))
     }
     else if k =? 'float_' {
         cx_nodes[0].ptr[n].kind ='float_lit'
-        cx_nodes[0].ptr[n].fval = x.f
+        cx_nodes[0].ptr[n].op_ext=node_with_fval(cx_nodes[0].ptr[n].op_ext x.f)
     }
     else if k =? 'bool_' {cx_nodes[0].ptr[n].kind ='bool_lit'}
     else if k =? 'array' or k =? 'fixed' or k =? 'tuple' or k =? 'struct_' or k =? 'enum_' or k =? 'opt' {
@@ -1385,7 +1385,7 @@ cx_literal=(v:CWord pos:CWord):>CWord=>$unsafe {
         else {
             cx_nodes[0].ptr[n].kind ='call'
             cx_nodes[0].ptr[n].aux = if k =? 'struct_' {2} else {3}
-            cx_nodes[0].ptr[n].aux2 = int32<overflow='wrap'>(x.i)
+            cx_nodes[0].ptr[n].op_ext=node_with_aux2(cx_nodes[0].ptr[n].op_ext (int32<overflow='wrap'>(x.i)))
         }
     }
     else if not cx_is_int(x.type) {cx_fail(n  "this value cannot be materialized")}
@@ -1468,7 +1468,7 @@ cx_word_binary=(e:CWord op:Tok p:CWord q:CWord):>CWord=>$unsafe {
             quotient=quotient-1
             remainder=remainder+q
         }
-        let floored=cx_nodes[0].ptr[e].kind =? 'binary' and cx_nodes[0].ptr[e].aux2 =? -1
+        let floored=cx_nodes[0].ptr[e].kind =? 'binary' and node_aux2(cx_nodes[0].ptr[e].op_ext) =? -1
         if not floored and remainder not=? 0 and (p <? 0) not=? (q <? 0) {
             quotient=quotient+1
             remainder=remainder-q
@@ -1510,7 +1510,7 @@ cx_math_binary=(e:CWord op:Tok a:CWord b:CWord):>CWord=>$unsafe {
         return cx_binary(e  op  result  cx_int(cx_T_INT[0]  0)  cx_T_BOOL[0])
     }
     let operation=if op =? 'plus' {0} else {if op =? 'minus' {1} else {if op =? 'star' {2} else {if op =? 'slash' {3} else {if op =? 'percent' {4} else {if op =? 'amp' {5} else {if op =? 'pipe' {6} else {7}}}}}}}
-    if cx_nodes[0].ptr[e].kind =? 'binary' and cx_nodes[0].ptr[e].aux2 =? - 1 and(op =? 'slash' or op =? 'percent') {operation += 5}
+    if cx_nodes[0].ptr[e].kind =? 'binary' and node_aux2(cx_nodes[0].ptr[e].op_ext) =? - 1 and(op =? 'slash' or op =? 'percent') {operation += 5}
     cx_math_unpack(cx_math_runtime("__mi_slow"  [x  y  cx_int(cx_T_INT[0]  operation)]  e))
 }
 cx_math_for=(s:CWord):>void=>$unsafe {

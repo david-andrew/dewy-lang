@@ -33,7 +33,7 @@ from p"ide.jo" import (IK_PARAM)
 from p"ide_decls.dewy" import (ide_dewy_alt)
 from p"ide_text.dewy" import (ide_named_args)
 from p"ide_ops.dewy" import (ide_fn_ref)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_nlist2 node_sval node_with_aux2)
 from p"refine.jo" import (str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
 from p"types.jo" import (T_NEVER T_NONE has_var is_int is_numeric is_union prune telem tkind types union_members)
@@ -71,10 +71,10 @@ rfc_arg_message=(d:CallErrorWord fi:CallErrorWord a:CallErrorWord ptx:CallErrorW
     if nodes.ptr[a].type =? 0 and nodes.ptr[a].kind =? 'array' and tkind(ptx) =? 'array' and str_set_of(telem(prune(ptx))) not=? 0 {
         let words=str_sets[str_set_of(telem(prune(ptx)))]
         loop e in kids(a) {
-            if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].aux =? 0 and not words.contains(name_of(CallErrorWord(nodes.ptr[e].sval))) {
+            if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].aux =? 0 and not words.contains(name_of(CallErrorWord(node_sval(nodes.ptr[e].op_ext)))) {
                 let spelled:array<string>=[]
                 loop w in words {spelled.push("'{w}'")}
-                last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' has '{name_of(CallErrorWord(nodes.ptr[e].sval))}', which is not one of {join(spelled " | ")}"
+                last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' has '{name_of(CallErrorWord(node_sval(nodes.ptr[e].op_ext)))}', which is not one of {join(spelled " | ")}"
                 break
             }
         }
@@ -94,7 +94,7 @@ rfc_arg_message=(d:CallErrorWord fi:CallErrorWord a:CallErrorWord ptx:CallErrorW
     # (load_texture("cat.png"): a file's name where its bytes go)
     if starts_with(fnm "load_") and nodes.ptr[a].type not=? 0 and tkind(ntype(a)) =? 'str_' and tkind(ptx) =? 'array' {
         let fln="name.png"
-        if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0 {fln=name_of(CallErrorWord(nodes.ptr[a].sval))}
+        if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0 {fln=name_of(CallErrorWord(node_sval(nodes.ptr[a].op_ext)))}
         last_err="{fnm} takes the file's contents: `{fnm}(embed(\"{fln}\"))` builds the file into the program (read_bytes(path) reads one at run time)"
     }
     # (xs.map((x, i): ...): JavaScript's map, which passes the position too)
@@ -177,7 +177,7 @@ union_hash=(n:CallErrorWord a:CallErrorWord t:CallErrorWord expected:CallErrorWo
             nodes.ptr[f].a=int32(it)
             nodes.ptr[f].b=int32(body)
             nodes.ptr[f].c=int32(chain)
-            nodes.ptr[f].aux2=-8
+            nodes.ptr[f].op_ext=node_with_aux2(nodes.ptr[f].op_ext (-8))
             chain=bc_block([bc_stmt(f pos)] pos)
         }
         j -= 1
@@ -210,7 +210,7 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
         failure.last_err=""
         failure.last_err_pos=0
     }
-    if nodes.ptr[n].aux2 =? -9 and args.length >? 0 {
+    if node_aux2(nodes.ptr[n].op_ext) =? -9 and args.length >? 0 {
         # (when nothing of the name takes the object, what its argument expects is beside the point)
         let why=if (failure.last_err as array<uint8>).length >? 0 and recv_fits {": {failure.last_err}"} else {""}
         fatal(nodes.ptr[n].pos "{dt(ntype(unnamed(args[0])))} has no field '{name_of(name)}' or matching zero-argument member{why}")
@@ -373,7 +373,7 @@ call_resolve_error=(kind:CallErrorWord n:CallErrorWord name:CallErrorWord decl:C
     if kind =? 5 {
         if partial {fatal(nodes.ptr[n].pos jd(nodes.ptr[n].pos "cannot infer generic types for partial application of '{name_of(name)}'; annotate the arguments" "cannot infer the type parameters of '{name_of(name)}' for this partial evaluation; give the result a function type (`let f:(b:int64:>int64) = @{name_of(name)}(...)`)"))}
         let tp="{i + 1}"
-        if CallErrorWord(nodes.ptr[decl].nlist2) >? i {tp="'{name_of(CallErrorWord(nodes.ptr[kid2(decl i)].name))}'"}
+        if CallErrorWord(node_nlist2(nodes.ptr[decl].op_ext)) >? i {tp="'{name_of(CallErrorWord(nodes.ptr[kid2(decl i)].name))}'"}
         fatal(nodes.ptr[n].pos "cannot infer type parameter {tp} of '{name_of(name)}' from the arguments")
     }
 }

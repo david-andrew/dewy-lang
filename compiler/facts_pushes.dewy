@@ -587,7 +587,7 @@ fact_counted_sums=(n:PushWord s:FactState count:PushWord induction:PushWord=0 bo
                     # path that completes the assignment.
                     operation=PushWord(nodes.ptr[store].a)
                 }
-                if operation >? 0 and nodes.ptr[operation].kind =? 'binary' and nodes.ptr[operation].aux =? 0 and (nodes.ptr[operation].op =? int32(58) or nodes.ptr[operation].op =? int32(59)) and fact_progress_same(a PushWord(nodes.ptr[operation].a)) and not exact_has_node(PushWord(nodes.ptr[operation].b)) {
+                if operation >? 0 and nodes.ptr[operation].kind =? 'binary' and nodes.ptr[operation].aux =? 0 and (node_op(nodes.ptr[operation].op_ext) =? int32(58) or node_op(nodes.ptr[operation].op_ext) =? int32(59)) and fact_progress_same(a PushWord(nodes.ptr[operation].a)) and not exact_has_node(PushWord(nodes.ptr[operation].b)) {
                     stores.push([l operation])
                 }
                 else {bad[l]=true}
@@ -625,7 +625,7 @@ fact_counted_sums=(n:PushWord s:FactState count:PushWord induction:PushWord=0 bo
         if entry.wide or delta.wide or delta.lo <? -2147483648 or delta.hi >? 2147483647 {continue}
         let low=min(0 delta.lo)
         let high=max(0 delta.hi)
-        if nodes.ptr[e].op =? int32(59) {
+        if node_op(nodes.ptr[e].op_ext) =? int32(59) {
             low=min(0 (-delta.hi))
             high=max(0 (-delta.lo))
         }
@@ -1236,3 +1236,4 @@ fact_carried_exit=(@s:FactState l:PushWord after:FactState @exits:FactState):>vo
 }
 
 from p"facts_lifecycle.dewy" import (fact_exact_demand)
+from p"node_store.dewy" import (node_op)

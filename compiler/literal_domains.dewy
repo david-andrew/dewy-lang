@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_op node_sval)
 # Literal write-domain extraction from an already checked node store. The
 # caller lends both arenas and the minus token number; no checker callback.
 # Strip only transparent wrappers. Conditional descent is bounded at depth 8,
@@ -24,7 +24,7 @@ ld_literals=(@store:array<Node> @lists:array<int32> n0:int64 text:bool minus:int
     if n =? 0 {return false}
     let k=store[n].kind
     if text and k =? 'str_lit' and store[n].aux not=? 1 {
-        out.push(int64(store[n].sval))
+        out.push(int64(node_sval(store[n].op_ext)))
         return true
     }
     if not text {
@@ -34,7 +34,7 @@ ld_literals=(@store:array<Node> @lists:array<int32> n0:int64 text:bool minus:int
             out.push(store[n].ival)
             return true
         }
-        if k =? 'unary' and store[n].op =? minus {
+        if k =? 'unary' and node_op(store[n].op_ext) =? minus {
             let v=ld_leaf(@store @lists int64(store[n].a))
             if store[v].kind =? 'int_lit' and store[v].ival >? int64.min and not ((int64(store[v].flags) & 2097152) not=? 0 and store[v].ival <? 0) {
                 out.push(-store[v].ival)

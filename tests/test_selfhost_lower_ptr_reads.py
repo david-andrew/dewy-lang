@@ -9,9 +9,9 @@ pytestmark = pytest.mark.nightly
 JO = jo_doubles({
     'ast.jo': {
         'nkids': 'nkids = (n: int) -> int: int(nodes[n].nlist)',
-        'nkids2': 'nkids2 = (n: int) -> int: int(nodes[n].nlist2)',
+        'nkids2': 'nkids2 = (n: int) -> int: int(node_nlist2(nodes[n].op_ext))',
         'kid': 'kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])',
-        'kid2': 'kid2 = (n: int, i: int) -> int: int(lists[int(nodes[n].list2) + i])',
+        'kid2': 'kid2 = (n: int, i: int) -> int: int(lists[int(node_list2(nodes[n].op_ext)) + i])',
         'has_flag': 'has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0',
         'flags': 'const NF_MUT = 1\nconst NF_EXTERN = 4\nconst NF_GLOBAL = 2048\nconst NF_AT = 2147483648',
     },

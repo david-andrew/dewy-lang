@@ -66,11 +66,11 @@ literal = (k: NK, t: int, dewy: bool = false) -> int:
     if dewy: nodes[n].pos = DEWY + n
     n
 unary = (op: Tok, a: int, dewy: bool = false) -> int:
-    n = node(.unary, a); nodes[n].op = i32(int(op))
+    n = node(.unary, a); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op))))
     if dewy: nodes[n].pos = DEWY + n
     n
 show = (n: int, r: CheckerUnaryResult):
-    print("{n}:{r.type}:{r.bypass}:{int(nodes[n].kind)}:{nodes[n].flags}:{nodes[n].type}:{nodes[n].a}:{nodes[n].ival}:{nodes[n].fval}:{xu_seen}")
+    print("{n}:{r.type}:{r.bypass}:{int(nodes[n].kind)}:{nodes[n].flags}:{nodes[n].type}:{nodes[n].a}:{nodes[n].ival}:{node_fval(nodes[n].op_ext)}:{xu_seen}")
 run = (n: int, expected: int = 0, ex: int = 0):
     show(n, xu_check(n, expected, ex))
 prepare_unary = () -> int:
@@ -101,13 +101,13 @@ main = ():
     run(unary(.minus, operand(T_INT)), struct_type, struct_type)
     xu_bigint = false
     # Quantity literals are syntactic: unchecked number times name under prefixes.
-    times = node(.binary, literal(.int_lit, T_INT)); nodes[times].b = i32(operand(T_INT)); nodes[times].op = i32(int(Tok.star)); nodes[times].type = i32(q)
+    times = node(.binary, literal(.int_lit, T_INT)); nodes[times].b = i32(operand(T_INT)); nodes[times].op_ext = node_with_op(nodes[times].op_ext, i32(i32(int(Tok.star)))); nodes[times].type = i32(q)
     run(unary(.minus, times), 7, 0)
     plus = unary(.plus, times); nodes[plus].type = i32(q)
     run(unary(.minus, plus), 0, 0)
     nodes[times].flags = i32(128)
     run(unary(.minus, times), 0, 0)
-    slash = node(.binary, literal(.float_lit, T_FLOAT)); nodes[slash].b = i32(operand(T_INT)); nodes[slash].op = i32(int(Tok.slash)); nodes[slash].type = i32(q)
+    slash = node(.binary, literal(.float_lit, T_FLOAT)); nodes[slash].b = i32(operand(T_INT)); nodes[slash].op_ext = node_with_op(nodes[slash].op_ext, i32(i32(int(Tok.slash)))); nodes[slash].type = i32(q)
     run(unary(.minus, slash), 0, 0)
     run(unary(.tilde, operand(secret)), 0, 0)
     # Overloads for records, tuples and nonsimple enums.
@@ -120,7 +120,7 @@ main = ():
     lit = literal(.int_lit, T_INT); nodes[lit].ival = 42; nodes[lit].b = 9
     n = unary(.minus, lit); nodes[n].c = 3; nodes[n].sym = 4
     run(n)
-    lit = literal(.float_lit, T_FLOAT); nodes[lit].fval = 2.5
+    lit = literal(.float_lit, T_FLOAT); nodes[lit].op_ext = node_with_fval(nodes[lit].op_ext, 2.5)
     run(unary(.minus, lit))
     low = -9223372036854775807 - 1
     lit = literal(.int_lit, T_MATH_INT, true); nodes[lit].ival = low

@@ -20,12 +20,13 @@ from p"refine_metadata.dewy" import (str_set_of)
 from p"util.jo" import (intern name_of)
 from p"source_queries.dewy" import (pos_str)
 from p"lower_scalars.dewy" import (push_i64)
+from p"node_store.dewy" import (node_sval)
 # Direct recursive lowering; shared state has one owner in member_lowering.jo.
 MoveWord:type=int64<overflow='wrap'>
 let member_lower_sets:array<int64>=[]
 member_lower_text=(e:MoveWord reg:MoveWord):>void=>$unsafe {
     if not member_templates.ptr[member_lower_active].positions.has(nodes.ptr[e].pos) {return}
-    member_lower_literals.push(MemberLiteral[reg nodes.ptr[e].pos 1 MoveWord(nodes.ptr[e].sval)]);
+    member_lower_literals.push(MemberLiteral[reg nodes.ptr[e].pos 1 MoveWord(node_sval(nodes.ptr[e].op_ext))]);
     member_lower_sets.push(0);
 }
 member_lower_word=(e:MoveWord value:MoveWord):>int64=>$unsafe {

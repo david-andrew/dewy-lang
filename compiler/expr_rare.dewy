@@ -27,6 +27,7 @@ from p"type_ops.dewy" import (dt mk_array)
 from p"types.jo" import (fields has_var is_union prune struct_targ structs telem tkind type_eq types union_members variants)
 from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_d node_with_aux2)
 
 RareExprWord:type=int64<overflow='wrap'>
 dewy_positional_fits=(n:RareExprWord target:RareExprWord):>bool=>$unsafe {
@@ -182,7 +183,7 @@ rename_idents=(n:RareExprWord renames:array<int64>):>void=>$unsafe {
     rename_idents(RareExprWord(nodes.ptr[n].b) renames)
     if k not=? 'for_' {
         rename_idents(RareExprWord(nodes.ptr[n].c) renames)
-        if k not=? 'partial' {rename_idents(RareExprWord(nodes.ptr[n].d) renames)}
+        if k not=? 'partial' {rename_idents(RareExprWord(node_d(nodes.ptr[n].op_ext)) renames)}
     }
     loop i in [0..nkids(n)) {rename_idents(kid(n i) renames)}
 }
@@ -214,7 +215,7 @@ variant_ctor=(n:RareExprWord et:RareExprWord vi:RareExprWord args:array<int64>):
     loop i in [0..nf) {finish_arg(mapped[i] RareExprWord(fields.ptr[RareExprWord(variants.ptr[v].fields) + i].type) false)}
     nodes.ptr[n].kind='call'
     nodes.ptr[n].aux=3
-    nodes.ptr[n].aux2=int32(vi)
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32(vi)))
     save_call_order(n args mapped)
     set_list(n mapped)
     nodes.ptr[n].type=int32(et)

@@ -40,11 +40,11 @@ main = ():
     # These integers are intentionally invalid AST indexes. Partial application
     # blocks, and for_.c/d must not be visited even in an otherwise safe body.
     partial = mk(.partial, 0)
-    nodes[partial].d = 2147483647
+    nodes[partial].op_ext = node_with_d(nodes[partial].op_ext, 2147483647)
     partial_fn = function(partial)
     loop_node = mk(.for_, 0)
     nodes[loop_node].c = 2147483647
-    nodes[loop_node].d = 2147483647
+    nodes[loop_node].op_ext = node_with_d(nodes[loop_node].op_ext, 2147483647)
     loop_fn = function(loop_node)
     # Tarjan must not freeze the first recursive backedge as a proof. Query
     # both members, including the one visited before the late blocker.

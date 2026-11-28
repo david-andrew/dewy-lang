@@ -12,6 +12,7 @@ from p"expr.jo" import (bc_count last_checked)
 from p"type_ops.dewy" import (dt soa_elem)
 from p"types.jo" import (fields prune structs types)
 from p"util.jo" import (intern name_of)
+from p"node_store.dewy" import (node_op node_with_op)
 
 SoaWord:type=int64<overflow='wrap'>
 # the struct value P(f0, f1, ...) from checked field values (in field order)
@@ -71,7 +72,7 @@ soa_assign=(s:SoaWord):>int64=>$unsafe {
     let lhs=SoaWord(nodes.ptr[s].a)
     let base=SoaWord(nodes.ptr[lhs].a)
     let st=prune(ntype(base))
-    if nodes.ptr[s].op not=? int32(47) {fatal(pos "only `=` assigns a whole element of a soa array");}
+    if node_op(nodes.ptr[s].op_ext) not=? int32(47) {fatal(pos "only `=` assigns a whole element of a soa array");}
     let tn="__st{bc_count}"
     let iname="__si{bc_count}"
     bc_count += 1
@@ -90,7 +91,7 @@ soa_assign=(s:SoaWord):>int64=>$unsafe {
         nodes.ptr[ix].a=int32(f)
         nodes.ptr[ix].b=int32(bc_ident(iname pos))
         let a=mk('assign' pos)
-        nodes.ptr[a].op=int32(47)
+        nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext (int32(47)))
         nodes.ptr[a].a=int32(ix)
         nodes.ptr[a].b=int32(bc_field(bc_ident(tn pos) name_of(fname) pos))
         stmts.push(a)

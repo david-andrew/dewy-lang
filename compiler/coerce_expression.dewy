@@ -55,7 +55,7 @@ from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_int b
 from p"array_element_conversion.dewy" import (array_elems_subsume elem_subsumes)
 from p"expr_hints.dewy" import (array_elems_gap_text duration_hint regroup_note)
 from p"types.jo" import (T_F32 T_INT T_MATH_INT T_NEVER T_RAWPTR T_U64 T_U8 has_var is_float is_int is_numeric is_union prune targ telem tkind type_eq types union_members)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_fval node_op node_sval node_with_fval)
 from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_U64 add_flag clear_flag has_flag mk nodes set_list)
 from p"refinement_types.dewy" import (FactRequest)
 from p"expr.jo" import (CV coerce_hint rational_constants rational_shown)
@@ -87,7 +87,7 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
     }
     if refine_active and tk =? 'refined' {return refine_coerce(n target)}
     let src_dirty=false
-    if nk0 =? 'float_lit' and is_lit0 and tk =? 'struct_' and nodes.ptr[n].sval not=? 0 {
+    if nk0 =? 'float_lit' and is_lit0 and tk =? 'struct_' and node_sval(nodes.ptr[n].op_ext) not=? 0 {
         exact_decimal(n);
         src_dirty=true
     }
@@ -247,14 +247,14 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
         if k =? 'int_lit' and tk =? 'int_' {return coerce_int_literal(n to)}
         if k =? 'int_lit' and tk =? 'float_' {
             nodes[n].kind = 'float_lit'
-            nodes[n].fval = float64(nodes.ptr[n].ival)
-            if has_flag(n NF_U64) {nodes[n].fval = float64(uint64<overflow='wrap'>(nodes.ptr[n].ival))}
+            nodes[n].op_ext=node_with_fval(nodes[n].op_ext (float64(nodes.ptr[n].ival)))
+            if has_flag(n NF_U64) {nodes[n].op_ext=node_with_fval(nodes[n].op_ext (float64(uint64<overflow='wrap'>(nodes.ptr[n].ival))))}
             nodes[n].type = int32<overflow='wrap'>(to)
             clear_flag(n NF_LITERAL)
             return n
         }
         if k =? 'float_lit' and tk =? 'float_' {
-            if nodes.ptr[n].sval not=? 0 and nodes.ptr[n].fval - nodes.ptr[n].fval not=? 0.0 {fatal(nodes.ptr[n].pos "real literal exceeds float64")}
+            if node_sval(nodes.ptr[n].op_ext) not=? 0 and node_fval(nodes.ptr[n].op_ext) - node_fval(nodes.ptr[n].op_ext) not=? 0.0 {fatal(nodes.ptr[n].pos "real literal exceeds float64")}
             nodes[n].type = int32<overflow='wrap'>(to)
             clear_flag(n NF_LITERAL)
             return n
@@ -299,7 +299,7 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
     if fk =? 'callable' or tk =? 'callable' {
         # (a spawn body is called once and released by its task, which so owns its captures)
         let source=setting_value_target(n)
-        let spawned=nodes.ptr[source].kind =? 'lambda' and nodes.ptr[source].aux2 =? 17
+        let spawned=nodes.ptr[source].kind =? 'lambda' and node_aux2(nodes.ptr[source].op_ext) =? 17
         if ownership_callable_cap(source_type) >? ownership_callable_cap(to) and not spawned {fatal(nodes.ptr[n].pos "callable conversion would erase capture ownership")}
         let fits=if spawned {mk_callable_contract(callable_base(source_type) callable_contract(source_type))} else {source_type}
         if not callable_fits(fits to) {fatal(nodes.ptr[n].pos "cannot prove callable effect contract")}
@@ -370,7 +370,7 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
         fatal(nodes.ptr[n].pos "cannot implicitly convert {dt(source_type)} to {dt(to)} (use {dt(to)}(x) to convert explicitly)")
     }
     if fk =? 'int_' and tk =? 'float_' {
-        if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].op =? 61 {
+        if nodes.ptr[n].kind =? 'binary' and node_op(nodes.ptr[n].op_ext) =? 61 {
             # (hits / shots * 100.0: the division drops the fraction before it becomes a float)
             let a=CoerceExpressionWord(nodes.ptr[n].a)
             let an="a"

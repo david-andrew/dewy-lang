@@ -16,6 +16,7 @@ from p"unit_ops.dewy" import (quantity_constant_scale)
 from p"units.jo" import (is_quantity)
 from p"util.jo" import (name_of)
 from p"warn_if.jo" import (wi_decls)
+from p"node_store.dewy" import (node_sval)
 
 FoldWord:type=int64<overflow='wrap'>
 # (a record of scalars, however nested, holding nothing a run would have to allocate; its fields are
@@ -70,7 +71,7 @@ cc_waits_for_validators=(n:FoldWord decl:FoldWord):>bool=>$unsafe {
     loop i in [0..nkids(n)) {
         let x=kid(n i)
         if nodes.ptr[x].kind =? 'conv' and nodes.ptr[x].a not=? 0 {x=FoldWord(nodes.ptr[x].a)}
-        if nodes.ptr[x].kind =? 'str_lit' and name_of(FoldWord(nodes.ptr[x].sval)) =? "system" {return true}
+        if nodes.ptr[x].kind =? 'str_lit' and name_of(FoldWord(node_sval(nodes.ptr[x].op_ext))) =? "system" {return true}
     }
     if wi_decls.has(decl) {
         loop w in wi_decls[decl] {

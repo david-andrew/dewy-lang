@@ -25,6 +25,7 @@ from p"type_ops.dewy" import (dt)
 from p"util.jo" import (name_of pos_in_lib)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_sval node_with_op node_with_sval)
 
 LoopWord:type=int64<overflow='wrap'>
 # the element alias of a loop over a soa array (see soa_loop)
@@ -170,14 +171,14 @@ check_live_loop=(s:LoopWord):>void=>$unsafe {
     nodes.ptr[range].a=int32(bc_int(0 pos))
     add_flag(range NF_INCLUSIVE)
     let first=mk('lhead' pos)
-    nodes.ptr[first].op=1
+    nodes.ptr[first].op_ext=node_with_op(nodes.ptr[first].op_ext 1)
     set_list(first [bc_ident(counter pos)])
     nodes.ptr[first].a=int32(range)
     let second=mk('lhead' pos)
-    nodes.ptr[second].op=4
+    nodes.ptr[second].op_ext=node_with_op(nodes.ptr[second].op_ext 4)
     nodes.ptr[second].a=int32(bc_bin('lt' bc_ident(counter pos) bc_call("__dewy_live_length" [length_place] pos) pos))
     let both=mk('lhead' pos)
-    nodes.ptr[both].op=2
+    nodes.ptr[both].op_ext=node_with_op(nodes.ptr[both].op_ext 2)
     nodes.ptr[both].a=int32(first)
     nodes.ptr[both].b=int32(second)
     let element=mk('index' pos)
@@ -187,7 +188,7 @@ check_live_loop=(s:LoopWord):>void=>$unsafe {
     nodes.ptr[decl].name=nodes.ptr[binder].name
     nodes.ptr[decl].b=int32(element)
     let lx=mk('loopx' pos)
-    nodes.ptr[lx].sval=nodes.ptr[s].sval
+    nodes.ptr[lx].op_ext=node_with_sval(nodes.ptr[lx].op_ext (node_sval(nodes.ptr[s].op_ext)))
     nodes.ptr[lx].a=int32(both)
     nodes.ptr[lx].b=int32(lx_block([decl kids(LoopWord(nodes.ptr[s].b))...] pos))
     nodes.ptr[s]=nodes.ptr[desugar_loopx(lx)]

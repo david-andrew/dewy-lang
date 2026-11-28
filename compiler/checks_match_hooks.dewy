@@ -35,6 +35,7 @@ from p"util.jo" import (files intern name_of pos_file)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"checker_narrow_rollback.dewy" import (narrow_returned)
+from p"node_store.dewy" import (node_aux2 node_sval node_with_aux2)
 
 MatchHookWord:type=int64<overflow='wrap'>
 # A bare name arm matches every value and binds it, shadowing what the name meant:
@@ -101,7 +102,7 @@ union_part=(e:int64 u:int64 keep:array<int64> pos:int64):>int64=>$unsafe {
 }
 check_match=(m:int64 expected:int64):>int64=>$unsafe {
     place_grouped_call(MatchHookWord(nodes.ptr[m].a));
-    if nodes.ptr[MatchHookWord(nodes.ptr[m].a)].kind =? 'call' and nodes.ptr[MatchHookWord(nodes.ptr[m].a)].aux2 =? int32(AUX2_PLACE) {return place_match(m expected)}
+    if nodes.ptr[MatchHookWord(nodes.ptr[m].a)].kind =? 'call' and node_aux2(nodes.ptr[MatchHookWord(nodes.ptr[m].a)].op_ext) =? int32(AUX2_PLACE) {return place_match(m expected)}
     if files[pos_file(nodes.ptr[m].pos)].is_dewy and shape_match_wanted(m) {return check_shaped_match(m expected)}
     # (`<heart.Tick>`: patterns naming their source, decisions.md batch 7)
     if files[pos_file(nodes.ptr[m].pos)].is_dewy {
@@ -220,7 +221,7 @@ match_string_missing=(m:int64):>void=>$unsafe {
     let written:array<string>=[]
     loop arm in kids(m) {
         loop p in kids(arm) {
-            if nodes.ptr[p].kind =? 'plit' and nodes.ptr[MatchHookWord(nodes.ptr[p].a)].kind =? 'str_lit' {written.push(name_of(MatchHookWord(nodes.ptr[MatchHookWord(nodes.ptr[p].a)].sval)))}
+            if nodes.ptr[p].kind =? 'plit' and nodes.ptr[MatchHookWord(nodes.ptr[p].a)].kind =? 'str_lit' {written.push(name_of(MatchHookWord(node_sval(nodes.ptr[MatchHookWord(nodes.ptr[p].a)].op_ext))))}
         }
     }
     if written.length >? 0 {
@@ -278,6 +279,6 @@ member_arms_as_variants=(ps:array<int64> result:int64):>void=>$unsafe {
         let e=MatchHookWord(nodes.ptr[p].a)
         if nodes.ptr[e].kind not=? 'dotname' {continue}
         nodes.ptr[p].kind='pvariant'
-        nodes.ptr[p].aux2=nodes.ptr[e].aux
+        nodes.ptr[p].op_ext=node_with_aux2(nodes.ptr[p].op_ext (nodes.ptr[e].aux))
     }
 }

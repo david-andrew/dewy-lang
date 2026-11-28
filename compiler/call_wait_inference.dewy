@@ -11,7 +11,7 @@ from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin_expr.dewy" import (call_waits_binds call_waits_local call_waits_mark call_waits_skips expected_bind_fits subst_partial text_literal)
 from p"expr.jo" import (literal_typed_elements literal_typed_names)
 from p"literal_context.dewy" import (is_lit)
-from p"node_store.dewy" import (call_waits_never)
+from p"node_store.dewy" import (call_waits_never node_nlist2)
 from p"types.jo" import (T_INT has_var)
 
 WaitWord:type=int64<overflow='wrap'>
@@ -40,7 +40,7 @@ call_waits=(a:int64):>int64=>$unsafe {
     let name=WaitWord(nodes.ptr[WaitWord(nodes.ptr[a].a)].name)
     let s=lookup(name)
     if s not=? 0 and syms.ptr[s].kind =? 'local' {return 0}
-    if s =? 0 or syms.ptr[s].kind not=? 'fns' or syms.ptr[s].decl =? 0 or nodes.ptr[WaitWord(syms.ptr[s].decl)].nlist2 =? 0 {
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' or syms.ptr[s].decl =? 0 or node_nlist2(nodes.ptr[WaitWord(syms.ptr[s].decl)].op_ext) =? 0 {
         call_waits_mark(name)
         return 0
     }
@@ -49,7 +49,7 @@ call_waits=(a:int64):>int64=>$unsafe {
     if d not=? 0 {
         let sig=fn_sig(d)
         if sig.ret not=? 0 {
-            loop id in [0..WaitWord(nodes.ptr[d].nlist2)) {
+            loop id in [0..WaitWord(node_nlist2(nodes.ptr[d].op_ext))) {
                 let binds=call_waits_binds(int64(sig.ntp) id)
                 let mentioned=false
                 loop p in sig.params {
@@ -68,7 +68,7 @@ call_waits=(a:int64):>int64=>$unsafe {
 call_waits_decl=(name:WaitWord):>WaitWord=>$unsafe {
     let own:array<int64>=[]
     collect_fns(name @own)
-    if own.length not=? 1 or nodes.ptr[own[0]].nlist2 =? 0 {return 0}
+    if own.length not=? 1 or node_nlist2(nodes.ptr[own[0]].op_ext) =? 0 {return 0}
     own[0]
 }
 literal_typed_call=(e:WaitWord):>bool=>$unsafe {
@@ -76,7 +76,7 @@ literal_typed_call=(e:WaitWord):>bool=>$unsafe {
     let name=WaitWord(nodes.ptr[WaitWord(nodes.ptr[e].a)].name)
     if call_waits_local(name) {return false}
     let s=lookup(name)
-    if s =? 0 or syms.ptr[s].kind not=? 'fns' or syms.ptr[s].decl =? 0 or nodes.ptr[WaitWord(syms.ptr[s].decl)].nlist2 =? 0 {
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' or syms.ptr[s].decl =? 0 or node_nlist2(nodes.ptr[WaitWord(syms.ptr[s].decl)].op_ext) =? 0 {
         call_waits_mark(name)
         return false
     }
@@ -87,7 +87,7 @@ literal_typed_call=(e:WaitWord):>bool=>$unsafe {
     }
     let sig=fn_sig(d)
     if nkids(e) >? sig.params.length {return false}
-    loop id in [0..WaitWord(nodes.ptr[d].nlist2)) {
+    loop id in [0..WaitWord(node_nlist2(nodes.ptr[d].op_ext))) {
         let literal=false
         let other=false
         let binds=call_waits_binds(int64(sig.ntp) id)

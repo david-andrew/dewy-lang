@@ -28,7 +28,7 @@ main = ():
     selfhost_test_bind()
     init_types()
     fns.resize(2); modules.resize(1)
-    d = mk(.fn_, 0); nodes[d].mod = 7; nodes[d].name = i32(intern("serve"))
+    d = mk(.fn_, 0); nodes[d].op_ext = node_with_mod(nodes[d].op_ext, i32(7)); nodes[d].name = i32(intern("serve"))
     fns[1].decl = i32(d)
     n = mk(.call, 0); nodes[n].sym = 1
     concurrency_protocol_module = 7

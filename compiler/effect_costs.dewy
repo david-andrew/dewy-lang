@@ -44,7 +44,7 @@ effect_library_summary=(f:EffectCostsWord c:EffectClass d:EffectCostsWord):>void
 effect_caller_obligation=(n:EffectCostsWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
     if k =? 'call' {return fact_string_call(n) >=? 2 or nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and panic_format_literal(n)}
-    return k =? 'pair' and nodes.ptr[n].sval >=? 0 and panic_format_spec(name_of(EffectCostsWord(nodes.ptr[n].sval)) representation_type(ntype(EffectCostsWord(nodes.ptr[n].a))))
+    return k =? 'pair' and node_sval(nodes.ptr[n].op_ext) >=? 0 and panic_format_spec(name_of(EffectCostsWord(node_sval(nodes.ptr[n].op_ext))) representation_type(ntype(EffectCostsWord(nodes.ptr[n].a))))
 }
 # Reviewed intrinsic identities, assigned by name resolution, never filenames
 # or user spelling. -1 means unclassified. Bits are residual may-costs, not
@@ -103,7 +103,7 @@ effect_lower_intrinsic=(f:EffectCostsWord n:EffectCostsWord):>void=>$unsafe {
     if effect_library_class(f) not=? EffectClass.unclassified {return}
     # (an explicit-allocation-failure frame: counted as allocation by its scan)
     if effect_oom_frame(n) {return}
-    if nodes.ptr[n].aux2 =? int32<overflow='wrap'>(RANGE_EXHAUSTION) and (effect_bounds_proven.has(n) or fact_range_assumed(n)) {return}
+    if node_aux2(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(RANGE_EXHAUSTION) and (effect_bounds_proven.has(n) or fact_range_assumed(n)) {return}
     let mask=effect_intrinsic_cost(nodes.ptr[n].aux as IN)
     let covered:EffectCostsWord=0
     loop event in effect_summaries.ptr[f].events {
@@ -252,3 +252,4 @@ effect_method_borrows=(f:EffectCostsWord):>bool=>$unsafe {
 }
 
 from p"facts_lifecycle.dewy" import (fn_in_lib)
+from p"node_store.dewy" import (node_aux2 node_sval)

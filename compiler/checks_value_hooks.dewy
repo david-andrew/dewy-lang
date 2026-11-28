@@ -52,6 +52,7 @@ from p"util.jo" import (err_notes files intern name_of pos_file)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"mixed_sign_compare.dewy" import (mixed_sign_compare)
+from p"node_store.dewy" import (node_aux2 node_with_aux2)
 
 ValueHookWord:type=int64<overflow='wrap'>
 # (a comparison of mixed-sign words: mixed_sign_compare.dewy)
@@ -163,10 +164,10 @@ call_int_literal=(n:int64 ex:int64):>int64=>$unsafe {
         # Keep that provenance on its packing conversion: the fact domain
         # can retain the sign without pretending the magnitude fits int64.
         let sign=nodes.ptr[unnamed(kid(n 0))].ival
-        nodes.ptr[n].aux2=0
+        nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
         check_expr(n 0);
         coerce(n T_MATH_INT);
-        if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.big2math)) {nodes.ptr[n].aux2=int32(sign)}
+        if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.big2math)) {nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32(sign)))}
         last_checked=n
         return T_MATH_INT
     }
@@ -176,7 +177,7 @@ call_int_literal=(n:int64 ex:int64):>int64=>$unsafe {
         }
         fatal(nodes.ptr[n].pos "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
     }
-    nodes.ptr[n].aux2=0
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
     -1
 }
 # (`let d:dict<string House> = [loop ... k -> v]`: its pairs are made as the
@@ -278,7 +279,7 @@ expr_other=(n:int64 expected:int64):>int64=>$unsafe {
     if k =? 'lazy_' {return check_lazy(n expected)}
     if k =? 'yield_' and nodes.ptr[n].aux =? 2 {return gen_check_fail_yield(n)}
     if k =? 'unit_lit' {
-        return quantity_constant(n nodes.ptr[n].ival ValueHookWord(nodes.ptr[n].aux) ValueHookWord(nodes.ptr[n].aux2) expected)
+        return quantity_constant(n nodes.ptr[n].ival ValueHookWord(nodes.ptr[n].aux) ValueHookWord(node_aux2(nodes.ptr[n].op_ext)) expected)
     }
     if k =? 'record_loop' {
         reflect_record(n)
@@ -290,7 +291,7 @@ expr_other=(n:int64 expected:int64):>int64=>$unsafe {
     let ex=ce_expected(expected)
     let t:ValueHookWord=0
     if k =? 'lambda' {t=check_lambda(n lambda_member(n expected))} else if k =? 'match_' {t=check_match(n expected)} else if k =? 'block' {
-        let snapshots=nodes.ptr[n].aux2 =? -17 or nodes.ptr[n].aux2 =? -20 or nodes.ptr[n].aux2 =? -21
+        let snapshots=node_aux2(nodes.ptr[n].op_ext) =? -17 or node_aux2(nodes.ptr[n].op_ext) =? -20 or node_aux2(nodes.ptr[n].op_ext) =? -21
         if not snapshots and has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'array' {
             nodes.ptr[kid(n 0)].a=int32(type_node_of(ex nodes.ptr[n].pos))
         }

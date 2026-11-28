@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import (Node NK)
+from p"node_store.dewy" import (NK Node node_aux2 node_op)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"checker_state.dewy" import FnInst
 from p"type_inference.dewy" import tu_prune
@@ -128,11 +128,11 @@ es_statement=(s:ESWord):>void=>$unsafe {
     if es_nodes[0].ptr[e].kind =? 'match_' {es_nodes[0][e].flags=es_nodes[0].ptr[e].flags | 16}
     let k=es_nodes[0].ptr[e].kind
     let named=k =? 'ident' or k =? 'field'
-    let op=ESWord(es_nodes[0].ptr[e].op)
+    let op=ESWord(node_op(es_nodes[0].ptr[e].op_ext))
     let a=ESWord(es_nodes[0].ptr[e].a)
     let pos=es_nodes[0].ptr[e].pos
     # A `spawn` statement hands its task to the group and expresses nothing.
-    let spawned=k =? 'call' and es_nodes[0].ptr[e].aux2 =? 17
+    let spawned=k =? 'call' and node_aux2(es_nodes[0].ptr[e].op_ext) =? 17
     let saved_site=es_pack_site[0]
     es_pack_site[0]=e
     let dropped=es_discarding[0]

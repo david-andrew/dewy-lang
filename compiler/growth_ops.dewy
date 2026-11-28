@@ -13,6 +13,7 @@ from p"types.jo" import (T_MATH_INT is_float is_int prune tkind)
 from p"rational_types.dewy" import (bundled_rational_type)
 from p"util.jo" import (intern pos_in_lib)
 from p"source_warnings.dewy" import (warn)
+from p"node_store.dewy" import (node_fval node_op node_sval)
 
 GrowthWord:type=int64<overflow='wrap'>
 growth_free=(cls:GrowthWord):>Growth=>{
@@ -65,8 +66,8 @@ growth_expr=(n:GrowthWord key:GrowthWord):>Growth=>$unsafe {
         return g
     }
     if k =? 'float_lit' {
-        let v=nodes.ptr[n].fval
-        if nodes.ptr[n].sval =? 0 {return growth_free(GROWTH_FLOAT)}
+        let v=node_fval(nodes.ptr[n].op_ext)
+        if node_sval(nodes.ptr[n].op_ext) =? 0 {return growth_free(GROWTH_FLOAT)}
         if v =? floor(v) and v <? 9007199254740992.0 and v >? -9007199254740992.0 {
             let g=growth_free(GROWTH_INT)
             g.unit=v =? 1.0 or v =? -1.0
@@ -91,11 +92,11 @@ growth_expr=(n:GrowthWord key:GrowthWord):>Growth=>$unsafe {
         if syms.ptr[sy].kind =? 'global' {return growth_free(growth_type_class(GrowthWord(globals.ptr[GrowthWord(syms.ptr[sy].ref)].type)))}
         return growth_free(GROWTH_OTHER)
     }
-    if k =? 'unary' and (nodes.ptr[n].op =? int32(59) or nodes.ptr[n].op =? int32(58)) and not has_flag(n NF_BROADCAST) {
+    if k =? 'unary' and (node_op(nodes.ptr[n].op_ext) =? int32(59) or node_op(nodes.ptr[n].op_ext) =? int32(58)) and not has_flag(n NF_BROADCAST) {
         return growth_expr(GrowthWord(nodes.ptr[n].a) key)
     }
     if k =? 'binary' and not has_flag(n NF_BROADCAST) {
-        let op=nodes.ptr[n].op
+        let op=node_op(nodes.ptr[n].op_ext)
         if op =? int32(58) or op =? int32(59) {return growth_add(growth_expr(GrowthWord(nodes.ptr[n].a) key) growth_expr(GrowthWord(nodes.ptr[n].b) key))}
         if op =? int32(60) {return growth_mul(growth_expr(GrowthWord(nodes.ptr[n].a) key) growth_expr(GrowthWord(nodes.ptr[n].b) key))}
         return growth_free(GROWTH_OTHER)
@@ -158,14 +159,14 @@ growth_assign=(s:GrowthWord):>void=>$unsafe {
     let sy=lookup(GrowthWord(nodes.ptr[lhs].name))
     let key=growth_key(sy)
     if key =? 0 {return}
-    let op=nodes.ptr[s].op
+    let op=node_op(nodes.ptr[s].op_ext)
     let right=GrowthWord(nodes.ptr[s].b)
     let g=growth_free(GROWTH_OTHER)
     let x=Growth(1 0 false GROWTH_INT false true)
     if op =? int32(47) {g=growth_expr(right key)}
-    else if nodes.ptr[s].sval =? int32(intern("__dewy_divide")) {g=growth_div(x growth_expr(right key))}
-    else if nodes.ptr[s].sval =? int32(intern("__dewy_power")) {g=growth_power(x right)}
-    else if nodes.ptr[s].sval not=? 0 {return}
+    else if node_sval(nodes.ptr[s].op_ext) =? int32(intern("__dewy_divide")) {g=growth_div(x growth_expr(right key))}
+    else if node_sval(nodes.ptr[s].op_ext) =? int32(intern("__dewy_power")) {g=growth_power(x right)}
+    else if node_sval(nodes.ptr[s].op_ext) not=? 0 {return}
     else if op =? int32(50) {g=growth_mul(x growth_expr(right key))}
     else if op =? int32(48) or op =? int32(49) {g=growth_add(x growth_expr(right key))}
     else {return}
@@ -208,8 +209,8 @@ growth_decl_before=(s:GrowthWord):>void=>$unsafe {
     growth_start_whole=false
     if nodes.ptr[s].b =? 0 or nodes.ptr[s].a not=? 0 {return}
     let init=GrowthWord(nodes.ptr[s].b)
-    if nodes.ptr[init].kind =? 'float_lit' and nodes.ptr[init].sval not=? 0 {
-        let v=nodes.ptr[init].fval
+    if nodes.ptr[init].kind =? 'float_lit' and node_sval(nodes.ptr[init].op_ext) not=? 0 {
+        let v=node_fval(nodes.ptr[init].op_ext)
         growth_start_whole=v =? floor(v)
     }
     else if nodes.ptr[init].kind =? 'int_lit' {growth_start_whole=true}

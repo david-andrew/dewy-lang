@@ -175,7 +175,7 @@ MAIN = r'''main = ():
     assert(values_candidate(fn) and nodes[fn].kind == .call)
     nominal = va_sym(.struct_, d)
     assert(values_record(nominal) == 7)
-    nodes[d].nlist2 = 1; assert(values_record(nominal) == 0)
+    nodes[d].op_ext = node_with_nlist2(nodes[d].op_ext, i32(1)); assert(values_record(nominal) == 0)
     assert(values_record(a) == 0 and values_arity(va_node(.call)) == -1)
     # Sink entry and restoration, including block hints and unknown dynamic packs.
     sink_pack_site = 77; va_dewy = false

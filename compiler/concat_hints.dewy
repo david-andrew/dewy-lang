@@ -10,6 +10,7 @@ from p"facts_text.dewy" import (fact_string_call)
 from p"types.jo" import (tkind)
 from p"util.jo" import (name_of)
 from p"witness_nodes.dewy" import (wit_text)
+from p"node_store.dewy" import (node_sval)
 
 
 ConcatWord:type=int64<overflow='wrap'>
@@ -18,7 +19,7 @@ ConcatWord:type=int64<overflow='wrap'>
 concat_piece=(n:ConcatWord text:bool second:bool=false):>string=>$unsafe {
     let k=nodes.ptr[n].kind
     if text and k =? 'str_lit' and nodes.ptr[n].aux =? 0 and nkids(n) =? 0 {
-        let s=name_of(ConcatWord(nodes.ptr[n].sval))
+        let s=name_of(ConcatWord(node_sval(nodes.ptr[n].op_ext)))
         if byte_find(s "\"") <? 0 and byte_find(s "\\") <? 0 and byte_find(s "\{") <? 0 and byte_find(s "}") <? 0 and byte_find(s "\n") <? 0 {return s}
     }
     let nm=""

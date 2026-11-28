@@ -42,9 +42,9 @@ cc_forward_read=(decl:FwdWord):>void=>$unsafe {
     if nodes.ptr[e].kind =? 'lambda' {
         loop q in kids(e) {rest.push(FwdWord(nodes.ptr[q].name))}
         e=cc_forward_body(FwdWord(nodes.ptr[e].b))
-        if e =? 0 or nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux2 =? int32(AUX2_PARTIAL) {return}
+        if e =? 0 or nodes.ptr[e].kind not=? 'call' or node_aux2(nodes.ptr[e].op_ext) =? int32(AUX2_PARTIAL) {return}
     }
-    else if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux2 not=? int32(AUX2_PARTIAL) {return}
+    else if nodes.ptr[e].kind not=? 'call' or node_aux2(nodes.ptr[e].op_ext) not=? int32(AUX2_PARTIAL) {return}
     let target=FwdWord(nodes.ptr[e].a)
     if target =? 0 or nodes.ptr[target].kind not=? 'ident' {return}
     let passed:array<int64>=[FwdWord(nodes.ptr[target].name)]
@@ -114,7 +114,7 @@ cc_forward=(giver:FwdWord decls:array<int64>):>array<int64>=>$unsafe {
         let at=shape[i]
         if at >=? nkids(giver) {return []}
         let x=kid(giver at)
-        let text=if nodes.ptr[x].kind =? 'str_lit' and nkids(x) =? 0 {FwdWord(nodes.ptr[x].sval)} else if nodes.ptr[x].type not=? 0 {cc_constant(x)} else {-1}
+        let text=if nodes.ptr[x].kind =? 'str_lit' and nkids(x) =? 0 {FwdWord(node_sval(nodes.ptr[x].op_ext))} else if nodes.ptr[x].type not=? 0 {cc_constant(x)} else {-1}
         if text <? 0 {return []}
         out.push(text)
     }
@@ -132,7 +132,7 @@ value_call_forward=(n:FwdWord giver:FwdWord decls:array<int64> args:array<int64>
     let all:array<int64>=[]
     loop i in [1..f.length) {
         let text=mk('str_lit' nodes.ptr[giver].pos)
-        nodes.ptr[text].sval=int32(f[i])
+        nodes.ptr[text].op_ext=node_with_sval(nodes.ptr[text].op_ext (int32(f[i])))
         nodes.ptr[text].type=int32(T_STR)
         add_flag(text NF_CHECKED)
         all.push(text)
@@ -148,7 +148,7 @@ value_call_forward=(n:FwdWord giver:FwdWord decls:array<int64> args:array<int64>
     nodes.ptr[n].aux=0
     nodes.ptr[n].sym=0
     set_list(n all)
-    let mod=FwdWord(nodes.ptr[decls[0]].mod)
+    let mod=FwdWord(node_mod(nodes.ptr[decls[0]].op_ext))
     # (the overloads whose parameters are written as the arguments' own types, when some are: one
     # of them wins anyway, and only its signature is read, so `_fmt_apply` of a float64 never
     # reads another's)
@@ -163,7 +163,7 @@ value_call_forward=(n:FwdWord giver:FwdWord decls:array<int64> args:array<int64>
         loop i in [f.length - 1..all.length) {
             let tn=FwdWord(nodes.ptr[kid(d i)].a)
             # (a built-in type's name, read from the universe: nothing is loaded)
-            let s=if tn =? 0 or nodes.ptr[tn].kind not=? 'tname' or nkids(tn) not=? 0 or nodes.ptr[tn].sval not=? 0 {0} else {universe.get(FwdWord(nodes.ptr[tn].name)) ?? 0}
+            let s=if tn =? 0 or nodes.ptr[tn].kind not=? 'tname' or nkids(tn) not=? 0 or node_sval(nodes.ptr[tn].op_ext) not=? 0 {0} else {universe.get(FwdWord(nodes.ptr[tn].name)) ?? 0}
             if s =? 0 or syms.ptr[s].kind not=? 'type_' {
                 built_in=false
                 fits=false
@@ -203,6 +203,7 @@ value_binding_forward=(n:FwdWord callee:FwdWord args:array<int64> expected:FwdWo
 # Literal fmt calls need no formatter module in the program being checked. Compile the
 # library's own validators into the compiler: one grammar and the same error messages.
 from p"@lib/format_patterns.dewy" import (_fmt_on_integer _fmt_on_float _fmt_on_text)
+from p"node_store.dewy" import (node_aux2 node_mod node_sval node_with_sval)
 # Before lookup can demand fmt's prelude module, establish that no lexical, module or
 # imported binding shadows it. Indexed scope/module probes; O(uses) only for mixed imports.
 fmt_literal_builtin=(name:FwdWord):>bool=>$unsafe {
@@ -234,7 +235,7 @@ fmt_literal_call=(n:FwdWord giver:FwdWord args:array<int64> expected:FwdWord):>F
     let t=prune(ntype(value))
     let k=types.ptr[t].kind
     if t not=? T_MATH_INT and t not=? T_STR and k not=? 'int_' and k not=? 'float_' {return -1}
-    let text=name_of(FwdWord(nodes.ptr[pattern].sval))
+    let text=name_of(FwdWord(node_sval(nodes.ptr[pattern].op_ext)))
     let why=if t =? T_STR {_fmt_on_text(text)} else if k =? 'float_' {_fmt_on_float(text)} else {_fmt_on_integer(text)}
     if why isnt? none {fatal(nodes.ptr[giver].pos "cannot format this value: {why}")}
     let name=intern("__format_valid")

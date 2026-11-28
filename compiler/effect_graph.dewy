@@ -24,6 +24,7 @@ from p"facts_forgets.dewy" import (fact_text_sink)
 from p"effect_costs.dewy" import (effect_borrowed_receiver effect_caller_obligation effect_library_summary effect_map_write effect_signature_opaque)
 from p"effect_scan.dewy" import (effect_body_moves_out effect_copy_captures effect_isolation_block effect_own_callback effect_scan_begin effect_scan_node effect_seen_bump)
 from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
+from p"node_store.dewy" import (node_sval)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
 let eg_placeless_mask:array<uint16>=[]
@@ -301,7 +302,7 @@ effect_declared_row=(g:GraphWord):>int64=>$unsafe {
     if known not=? none {return known}
     let c:GraphWord=0
     let d:GraphWord=GraphWord(fns.ptr[g].decl)
-    if d not=? 0 and nodes.ptr[d].sval not=? 0 and fns.ptr[g].kind not=? FK_LAMBDA and nodes.ptr[d].kind =? 'fn_' {
+    if d not=? 0 and node_sval(nodes.ptr[d].op_ext) not=? 0 and fns.ptr[g].kind not=? FK_LAMBDA and nodes.ptr[d].kind =? 'fn_' {
         let k=effect_subst(GraphWord(decl_infos.ptr[decl_info(d)].sig.contract) fns.ptr[g].targs)
         if k not=? 0 and not effect_contracts.ptr[k].open and effect_contracts.ptr[k].variables.length =? 0 {c=k}
     }

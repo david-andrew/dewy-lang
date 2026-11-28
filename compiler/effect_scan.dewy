@@ -214,7 +214,7 @@ effect_small=(n:EffectScanWord depth:EffectScanWord=0):>int64=>$unsafe {
     # (a value-preserving integer conversion of a small value)
     if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(0)) and is_int(ntype(n)) {return effect_small(EffectScanWord(nodes.ptr[n].a) depth + 1)}
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 or prune(ntype(n)) not=? T_MATH_INT {return -1}
-    let op=cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[EffectScanWord(node_op(nodes.ptr[n].op_ext))]
     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return -1}
     let a:EffectScanWord=effect_small(EffectScanWord(nodes.ptr[n].a) depth + 1)
     let b:EffectScanWord=effect_small(EffectScanWord(nodes.ptr[n].b) depth + 1)
@@ -397,7 +397,7 @@ effect_bare=(n:EffectScanWord depth:EffectScanWord=0):>bool=>$unsafe {
     return found
 }
 effect_readonly_binding=(n:EffectScanWord):>bool=>$unsafe {
-    if nodes.ptr[n].kind not=? 'vardecl' or nodes.ptr[n].aux2 not=? 1 {return false}
+    if nodes.ptr[n].kind not=? 'vardecl' or node_aux2(nodes.ptr[n].op_ext) not=? 1 {return false}
     if dbg_on and (not copies_on or not copy_strict(n)) {return false}
     let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
     let a:EffectScanWord=EffectScanWord(nodes.ptr[n].b)
@@ -801,7 +801,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             }
             <'binary'> => {
                 if nodes.ptr[n].aux =? 0 {
-                    let op=nodes.ptr[n].op
+                    let op=node_op(nodes.ptr[n].op_ext)
                     if (op >=? int32(58) and op <=? int32(60)) or (op >=? int32(63) and op <=? int32(65)) or (op >=? int32(69) and op <=? int32(74)) or op =? int32(82) {
                         let a=EffectScanWord(nodes.ptr[n].a)
                         let b=EffectScanWord(nodes.ptr[n].b)
@@ -881,7 +881,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         effect_add(f EffectEvent[EffectAtom['alloc'] n]);
         return
     }
-    if k =? 'intrinsic' and nodes.ptr[n].aux2 =? int32<overflow='wrap'>(RANGE_EXHAUSTION) {
+    if k =? 'intrinsic' and node_aux2(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(RANGE_EXHAUSTION) {
         effect_failure(f n);
         return
     }
@@ -1001,7 +1001,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     # allocate/detach; indexing may fail. Hooks and unsupported selectors keep
     # the ordinary opaque fallback.
     }
-    if k =? 'assign' and nodes.ptr[n].op =? int32<overflow='wrap'>(47) {
+    if k =? 'assign' and node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(47) {
         let target:EffectScanWord=EffectScanWord(nodes.ptr[n].a)
         if nodes.ptr[target].kind =? 'index' and (nodes.ptr[EffectScanWord(nodes.ptr[target].a)].kind =? 'field' or nodes.ptr[EffectScanWord(nodes.ptr[target].a)].kind =? 'ident') and effect_index_read(target) and tkind(representation_type(ntype(EffectScanWord(nodes.ptr[target].a)))) =? 'array' {
             effect_target_parts(f EffectScanWord(nodes.ptr[target].a));
@@ -1017,9 +1017,9 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if k =? 'assign' {
         effect_target_parts(f EffectScanWord(nodes.ptr[n].a));
         effect_access(f EffectScanWord(nodes.ptr[n].a) true);
-        if nodes.ptr[n].op not=? int32<overflow='wrap'>(47) {
+        if node_op(nodes.ptr[n].op_ext) not=? int32<overflow='wrap'>(47) {
             effect_access(f EffectScanWord(nodes.ptr[n].a) false);
-            if not effect_word_op(cx_token_values.ptr[compound_op(EffectScanWord(nodes.ptr[n].op))]) {effect_opaque(f n);}
+            if not effect_word_op(cx_token_values.ptr[compound_op(EffectScanWord(node_op(nodes.ptr[n].op_ext)))]) {effect_opaque(f n);}
             # (an `int` shifted by a signed count fails for a negative one: facts.jo)
             else if fact_shift_obliged(n) and not effect_count_literal(EffectScanWord(nodes.ptr[n].b)) {effect_failure(f n);}
         }
@@ -1137,27 +1137,27 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         if not supported and l >? 0 and EffectScanWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0 and is_fn_type(EffectScanWord(locals.ptr[l].type)) {supported=effect_callback(f n effect_own_callback(f EffectScanWord(nodes.ptr[n].b)))}
     }
     else if k =? 'binary' {
-        let shift=nodes.ptr[n].op =? int32<overflow='wrap'>(67) or nodes.ptr[n].op =? int32<overflow='wrap'>(68)
+        let shift=node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(67) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(68)
         let count_ok=effect_scalar(ntype(EffectScanWord(nodes.ptr[n].b))) or shift and effect_count_literal(EffectScanWord(nodes.ptr[n].b))
-        supported=nodes.ptr[n].aux =? 0 and effect_word_op(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) and count_ok
+        supported=nodes.ptr[n].aux =? 0 and effect_word_op(cx_token_values.ptr[EffectScanWord(node_op(nodes.ptr[n].op_ext))]) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) and count_ok
         # (word division and remainder: a zero divisor is a possible failure)
-        if not supported and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32<overflow='wrap'>(61) or nodes.ptr[n].op =? int32<overflow='wrap'>(62)) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].b))) {
+        if not supported and nodes.ptr[n].aux =? 0 and (node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(61) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(62)) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].b))) {
             supported=true
             let divisor:EffectScanWord=EffectScanWord(nodes.ptr[n].b)
             if nodes.ptr[divisor].kind not=? 'int_lit' or nodes.ptr[divisor].ival =? 0 {effect_failure(f n);}
         }
-        if not supported and nodes.ptr[n].aux =? 0 and effect_float_op(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_float(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_float(ntype(EffectScanWord(nodes.ptr[n].b))) {supported=true}
+        if not supported and nodes.ptr[n].aux =? 0 and effect_float_op(cx_token_values.ptr[EffectScanWord(node_op(nodes.ptr[n].op_ext))]) and effect_float(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_float(ntype(EffectScanWord(nodes.ptr[n].b))) {supported=true}
         # (members of one literal union compare as words)
-        if not supported and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32<overflow='wrap'>(69) or nodes.ptr[n].op =? int32<overflow='wrap'>(70)) {
+        if not supported and nodes.ptr[n].aux =? 0 and (node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(69) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(70)) {
             supported=effect_simple_enum(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_simple_enum(ntype(EffectScanWord(nodes.ptr[n].b)))
         # (small semantic integers: arithmetic that cannot promote, comparisons)
         }
         if not supported and nodes.ptr[n].aux =? 0 and effect_word(EffectScanWord(nodes.ptr[n].a)) and effect_word(EffectScanWord(nodes.ptr[n].b)) {
-            supported=effect_small(n) >=? 0 or (effect_word_op(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_scalar(ntype(n)))
+            supported=effect_small(n) >=? 0 or (effect_word_op(cx_token_values.ptr[EffectScanWord(node_op(nodes.ptr[n].op_ext))]) and effect_scalar(ntype(n)))
         # (a small counter against a word widened to `int`: compared as two
         # words, so the widened word is never packed)
         }
-        if not supported and nodes.ptr[n].aux =? 0 and effect_scalar(ntype(n)) and fact_comparison_raw(nodes.ptr[n].op) {
+        if not supported and nodes.ptr[n].aux =? 0 and effect_scalar(ntype(n)) and fact_comparison_raw(node_op(nodes.ptr[n].op_ext)) {
             let a=effect_unwidened(EffectScanWord(nodes.ptr[n].a))
             let b=effect_unwidened(EffectScanWord(nodes.ptr[n].b))
             if (a not=? EffectScanWord(nodes.ptr[n].a) or b not=? EffectScanWord(nodes.ptr[n].b)) and effect_word(a) and effect_word(b) {
@@ -1171,17 +1171,17 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             }
         }
         if not supported and nodes.ptr[n].aux =? 2 and types.ptr[representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))].kind =? 'str_' and types.ptr[representation_type(ntype(EffectScanWord(nodes.ptr[n].b)))].kind =? 'str_' {
-            supported=fact_comparison_raw(nodes.ptr[n].op) or nodes.ptr[n].op =? int32<overflow='wrap'>(58)
-            if nodes.ptr[n].op =? int32<overflow='wrap'>(58) {effect_plan_cost(f n 1 << 2);}
+            supported=fact_comparison_raw(node_op(nodes.ptr[n].op_ext)) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(58)
+            if node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(58) {effect_plan_cost(f n 1 << 2);}
         }
-        if not supported and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) {supported=true}
-        if not supported and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(58) or nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(60)) {
+        if not supported and nodes.ptr[n].aux =? 0 and fact_comparison_raw(node_op(nodes.ptr[n].op_ext)) and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) {supported=true}
+        if not supported and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) and (node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(58) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(59) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(60)) {
             supported=true
             effect_plan_cost(f n 1 << 2);
         # (`int` division and remainder: a big result allocates, and a zero
         # divisor is a possible failure, as for words)
         }
-        if not supported and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(61) or nodes.ptr[n].op =? int32<overflow='wrap'>(62)) {
+        if not supported and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) and (node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(61) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(62)) {
             supported=true
             effect_plan_cost(f n 1 << 2);
             let divisor:EffectScanWord=EffectScanWord(nodes.ptr[n].b)
@@ -1223,10 +1223,10 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     # (an optional's or union's tag test, payload and fallback are inline reads)
     else if k =? 'istype' or k =? 'narrow' or k =? 'coalesce' {supported=effect_share(ntype(EffectScanWord(nodes.ptr[n].a))) and (k =? 'istype' or effect_share(ntype(n)))}
     else if k =? 'unary' {
-        supported=effect_scalar(ntype(n)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(58) or nodes.ptr[n].op =? int32<overflow='wrap'>(66))
-        supported=supported or effect_float(ntype(n)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(58))
+        supported=effect_scalar(ntype(n)) and (node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(59) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(58) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(66))
+        supported=supported or effect_float(ntype(n)) and (node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(59) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(58))
         # (negating an `int` may grow it: -(-2^63))
-        if not supported and prune(ntype(n)) =? T_MATH_INT and (nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(58)) {
+        if not supported and prune(ntype(n)) =? T_MATH_INT and (node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(59) or node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(58)) {
             supported=true
             effect_plan_cost(f n 1 << 2);
         }
@@ -1234,16 +1234,16 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(13) and ownership_scalar(ntype(n)) {supported=true}
     else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(14) {
         # A proven refinement check is erased; an unproven one may fail.
-        supported=effect_plain(ntype(n)) or effect_footprints_only and nd_shape_predicates.has(EffectScanWord(types.ptr[zonk(EffectScanWord(nodes.ptr[n].aux2))].st)) and effect_value(ntype(n))
+        supported=effect_plain(ntype(n)) or effect_footprints_only and nd_shape_predicates.has(EffectScanWord(types.ptr[zonk(EffectScanWord(node_aux2(nodes.ptr[n].op_ext)))].st)) and effect_value(ntype(n))
         # (a self-contained contract on a value, `denominator:int<(>? 0)>`:
         # its check compares the value, or its length or fields, with
         # constants; it reads only that value and writes nothing, though an
         # `int` comparison may make a big constant: an allocation)
-        if not supported and effect_value(ntype(n)) and effect_self_contract(EffectScanWord(nodes.ptr[n].aux2)) {
+        if not supported and effect_value(ntype(n)) and effect_self_contract(EffectScanWord(node_aux2(nodes.ptr[n].op_ext))) {
             supported=true
-            if not type_eq(ntype(EffectScanWord(nodes.ptr[n].a)) EffectScanWord(nodes.ptr[n].aux2)) {effect_plan_cost(f n 1 << 2);}
+            if not type_eq(ntype(EffectScanWord(nodes.ptr[n].a)) EffectScanWord(node_aux2(nodes.ptr[n].op_ext))) {effect_plan_cost(f n 1 << 2);}
         }
-        if supported and not type_eq(ntype(EffectScanWord(nodes.ptr[n].a)) EffectScanWord(nodes.ptr[n].aux2)) {effect_failure(f n);}
+        if supported and not type_eq(ntype(EffectScanWord(nodes.ptr[n].a)) EffectScanWord(node_aux2(nodes.ptr[n].op_ext))) {effect_failure(f n);}
     # (wrapping a value as an optional, or one union as a wider one, fills the
     # flag or tag and the payload in place)
     }
@@ -1344,3 +1344,4 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
 }
 
 from p"facts_lifecycle.dewy" import (fn_in_lib)
+from p"node_store.dewy" import (node_aux2 node_op)

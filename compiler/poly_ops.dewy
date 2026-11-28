@@ -30,6 +30,7 @@ from p"types.jo" import (T_VOID align_up has_var mk_type talign targ tkind tsize
 from p"type_ops.dewy" import (decl_fn_labels mk_fn zonk)
 from p"util.jo" import (intern name_of pl_inst_decls pl_on)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_mod node_with_aux2 node_with_mod)
 
 PolyWord:type=int64<overflow='wrap'>
 poly_scope=():>PolyScope=>$unsafe {
@@ -88,7 +89,7 @@ check_poly_lambda=(lam:int64 expected:int64):>int64=>$unsafe {
     let d=nodes.length
     nodes.push(nodes.ptr[lam])
     nodes.ptr[d].sym=0
-    nodes.ptr[d].mod=int32(cur_mod())
+    nodes.ptr[d].op_ext=node_with_mod(nodes.ptr[d].op_ext (int32(cur_mod())))
     nodes.ptr[d].name=int32(intern("lambda"))
     let family=poly_families.length
     let env=new_inst(FK_LAMBDA cur_mod() "generic_environment")
@@ -141,7 +142,7 @@ poly_inst=(decl:PolyWord targs:array<int64> use_pos:PolyWord):>PolyWord=>$unsafe
         return f
     }
     let family=PolyWord(nodes.ptr[decl].aux)
-    let f=new_inst(FK_LAMBDA PolyWord(nodes.ptr[decl].mod) "generic_lambda")
+    let f=new_inst(FK_LAMBDA PolyWord(node_mod(nodes.ptr[decl].op_ext)) "generic_lambda")
     if dir_code_any and (code not=? 0 or (cx >=? 0 and dir_code_inst(PolyWord(ctxs[cx].inst)) not=? 0)) {dir_code_by_inst[f]=code}
     fns.ptr[f].decl=int32(decl)
     fns.ptr[f].target=int32(family)
@@ -277,7 +278,7 @@ poly_default_variant=(decl:PolyWord args:array<int64>):>PolyWord=>$unsafe {
     let cached=poly_defaults.get(key)
     if cached not=? none {return cached}
     let variant=clone(decl)
-    nodes.ptr[variant].mod=nodes.ptr[decl].mod
+    nodes.ptr[variant].op_ext=node_with_mod(nodes.ptr[variant].op_ext (node_mod(nodes.ptr[decl].op_ext)))
     let sig=fn_sig(decl)
     sig.params=[]
     sig.mutmask=0
@@ -309,7 +310,7 @@ poly_default_variant=(decl:PolyWord args:array<int64>):>PolyWord=>$unsafe {
             let default_value=clone(PolyWord(nodes.ptr[p].b))
             nodes.ptr[binding].b=int32(default_value)
             nodes.ptr[binding].a=nodes.ptr[p].a
-            nodes.ptr[binding].aux2=0
+            nodes.ptr[binding].op_ext=node_with_aux2(nodes.ptr[binding].op_ext 0)
         }
         if binding not=? 0 {prefix.push(binding)}
     }
@@ -327,7 +328,7 @@ poly_default_type=(decl:PolyWord i:PolyWord targs:array<int64>):>PolyWord=>$unsa
     let mark=scope_mark()
     # A nonliteral default can refer to earlier parameters (y=x+1). Give
     # inference its own temporary owner, never locals in the enclosing function.
-    let owner=new_inst(FK_LAMBDA PolyWord(nodes.ptr[decl].mod) "default_type")
+    let owner=new_inst(FK_LAMBDA PolyWord(node_mod(nodes.ptr[decl].op_ext)) "default_type")
     fns.ptr[owner].state=2
     fns.ptr[owner].ret=int32(T_VOID)
     fns.ptr[owner].targs=targs
@@ -339,7 +340,7 @@ poly_default_type=(decl:PolyWord i:PolyWord targs:array<int64>):>PolyWord=>$unsa
         }
     }
     let parent=cx
-    ctxs.push(FnCtx(int32(owner) int32(parent) int32(T_VOID) false 0 nodes.ptr[decl].mod ctxs[parent].floor))
+    ctxs.push(FnCtx(int32(owner) int32(parent) int32(T_VOID) false 0 node_mod(nodes.ptr[decl].op_ext) ctxs[parent].floor))
     cx=ctxs.length - 1
     push_type_params(decl targs)
     let sig=fn_sig(decl)

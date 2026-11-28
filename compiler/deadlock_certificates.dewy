@@ -27,6 +27,7 @@ from p"lower_helpers.dewy" import value_helper_calls
 from p"isolation_ops.dewy" import isolation_children
 from p"expr.jo" import (IN)
 from p"type_ops.dewy" import type_str
+from p"node_store.dewy" import (node_sval)
 
 # Summarize only demanded bodies; recursive components share their root summary.
 CertificateWord:type=int64<overflow='wrap'>
@@ -374,7 +375,7 @@ nd_value_call=(n:CertificateWord held:array<DlHeld>):>void=>$unsafe {
     nd_bad(pos "calls a function value the compiler cannot follow, so what it waits for is unknown" "call a function literal or a named function (or a local holding one), or give the value a callable type whose row says `no blocks`")
 }
 nd_foreign=(n:CertificateWord g:CertificateWord d:CertificateWord):>void=>$unsafe {
-    if nodes.ptr[d].sval not=? 0 {
+    if node_sval(nodes.ptr[d].op_ext) not=? 0 {
         let row=CertificateWord(decl_infos.ptr[decl_info(d)].sig.contract)
         if row not=? 0 and not effect_allows(row EffectAtom('block')) {return}
     }

@@ -9,7 +9,7 @@ from p"checker_binding_inputs.dewy" import (binding_leaves)
 from p"checker_type_entries.dewy" import (check_struct_fields subst)
 from p"expression_types.dewy" import (ntype)
 
-from p"node_store.dewy" import (call_waits_hook)
+from p"node_store.dewy" import (call_waits_hook node_aux2)
 from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_U64 fields has_var is_float is_int is_union prune struct_targ structs targ tkind type_eq types)
 from p"type_ops.dewy" import (mk_array)
 from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD add_flag clone has_flag kid kids nkids nodes)
@@ -168,9 +168,9 @@ snapshot_arg_cost=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
 }
 arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
     if nodes.ptr[a].kind =? 'block' {
-        if nodes.ptr[a].aux2 =? -17 {return snapshot_arg_cost(a pat @binds)}
-        if nodes.ptr[a].aux2 =? -20 {return branch_arg_cost(a pat @binds)}
-        if nodes.ptr[a].aux2 =? -21 {return branch_arg_cost(CVWord(nodes.ptr[kid(a 0)].b) pat @binds)}
+        if node_aux2(nodes.ptr[a].op_ext) =? -17 {return snapshot_arg_cost(a pat @binds)}
+        if node_aux2(nodes.ptr[a].op_ext) =? -20 {return branch_arg_cost(a pat @binds)}
+        if node_aux2(nodes.ptr[a].op_ext) =? -21 {return branch_arg_cost(CVWord(nodes.ptr[kid(a 0)].b) pat @binds)}
     }
     if effects_active and nodes.ptr[a].type not=? 0 and callable_contract(pat) not=? 0 {
         let inferred=effect_infer_callable(a pat)

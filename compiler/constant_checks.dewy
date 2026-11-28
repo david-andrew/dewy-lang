@@ -22,6 +22,7 @@ from p"comptime.jo" import (ct_values)
 from p"warn_if_ops.dewy" import (wi_param)
 from p"unit_rare.dewy" import (time_grid_proven)
 from p"time_grid_types.dewy" import grid_constant_check
+from p"node_store.dewy" import (node_sval node_with_sval)
 
 ConstantWord:type=int64<overflow='wrap'>
 let CC_LOCAL:ConstantWord=1 # SK.local
@@ -44,7 +45,7 @@ cc_read_decl=(decl:ConstantWord):>void=>$unsafe {
             let cond=ConstantWord(nodes.ptr[at].a)
             let said=ConstantWord(nodes.ptr[at].b)
             if cond =? 0 or said =? 0 or nodes.ptr[cond].kind not=? 'bool_lit' or nodes.ptr[cond].ival =? 0 or nodes.ptr[said].kind not=? 'str_lit' {fatal(nodes.ptr[at].pos "`$error_if` takes `true` and a message for now: `$error_if true \"write this instead\"`")}
-            cc_errors[decl]=name_of(ConstantWord(nodes.ptr[said].sval))
+            cc_errors[decl]=name_of(ConstantWord(node_sval(nodes.ptr[said].op_ext)))
             cc_any=true
             continue
         }
@@ -63,7 +64,7 @@ cc_read_decl=(decl:ConstantWord):>void=>$unsafe {
         }
         let s=lookup(ConstantWord(nodes.ptr[callee].name))
         if s =? 0 or syms.ptr[s].kind not=? 'fns' {fatal(nodes.ptr[callee].pos "the validator of a constant check is a function: `{name_of(ConstantWord(nodes.ptr[callee].name))}` is none")}
-        checks.push(CheckConstant(params ConstantWord(syms.ptr[s].decl) name_of(ConstantWord(nodes.ptr[msg].sval))))
+        checks.push(CheckConstant(params ConstantWord(syms.ptr[s].decl) name_of(ConstantWord(node_sval(nodes.ptr[msg].op_ext)))))
         cc_decls[decl]=checks
         cc_any=true
     }
@@ -76,12 +77,12 @@ cc_constant=(x0:ConstantWord):>ConstantWord=>$unsafe {
         else {break}
     }
     # (with parts, it is an interpolation)
-    if nodes.ptr[x].kind =? 'str_lit' {return if nkids(x) =? 0 {ConstantWord(nodes.ptr[x].sval)} else {-1}}
+    if nodes.ptr[x].kind =? 'str_lit' {return if nkids(x) =? 0 {ConstantWord(node_sval(nodes.ptr[x].op_ext))} else {-1}}
     if nodes.ptr[x].kind not=? 'ident' {return -1}
     let k=ConstantWord(nodes.ptr[x].aux)
     if k not=? CC_CONST and k not=? CC_GLOBAL and k not=? CC_LOCAL {return -1}
     let initial=checked_const_init(k ConstantWord(nodes.ptr[x].sym) nodes.ptr[x].pos)
-    if initial not=? 0 and nodes.ptr[initial].kind =? 'str_lit' and nkids(initial) =? 0 {return ConstantWord(nodes.ptr[initial].sval)}
+    if initial not=? 0 and nodes.ptr[initial].kind =? 'str_lit' and nkids(initial) =? 0 {return ConstantWord(node_sval(nodes.ptr[initial].op_ext))}
     -1
 }
 # expr.jo, a call n of f (declaration decl) whose type is set: its narrowed type, or 0 when it
@@ -163,7 +164,7 @@ cc_check_pos=(n:ConstantWord c:CheckConstant):>ConstantWord=>$unsafe {
 # ("" promises nothing and fails nothing).
 cc_verdict=(c:CheckConstant args:array<int64> pos:ConstantWord):>string|none=>$unsafe {
     # (one run for each validator and constant: `fmt'.2f'` asks the same of every call)
-    let key=if args.length =? 1 and nodes.ptr[args[0]].kind =? 'str_lit' {"{c.validator}:{name_of(ConstantWord(nodes.ptr[args[0]].sval))}"} else {""}
+    let key=if args.length =? 1 and nodes.ptr[args[0]].kind =? 'str_lit' {"{c.validator}:{name_of(ConstantWord(node_sval(nodes.ptr[args[0]].op_ext)))}"} else {""}
     if key not=? "" and cc_verdicts.has(key) {
         let said=cc_verdicts[key]
         return if said =? "\u{1}" {none} else {said}
@@ -238,7 +239,7 @@ cc_arguments=(xs:array<int64> c:CheckConstant open_none:bool=false):>array<int64
         # (a string the parameter takes as itself; in a wider type, the argument keeps its conversion)
         if text >=? 0 and prune(ntype(x)) =? T_STR {
             let arg=mk('str_lit' nodes.ptr[x].pos)
-            nodes.ptr[arg].sval=int32(text)
+            nodes.ptr[arg].op_ext=node_with_sval(nodes.ptr[arg].op_ext (int32(text)))
             nodes.ptr[arg].type=int32(T_STR)
             add_flag(arg NF_CHECKED)
             args.push(arg)

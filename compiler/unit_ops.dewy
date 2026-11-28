@@ -25,7 +25,7 @@ from p"union_conversion_nodes.dewy" import (move_divisor)
 from p"numeric_library_types.dewy" import (bundled_bigint_type)
 from p"integer_conversions.dewy" import (int_fits wrap_conv)
 from p"rational_literals.dewy" import (rational_constant rational_constant_parts)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_op node_sval node_with_aux2 node_with_fval)
 from p"quantity_algebra.dewy" import (QuantityLadder QuantityScale qa_base_dimension qa_combine_dimensions qa_dimension_str qa_intern_quantity_tag qa_intern_quantity_unit qa_power_dimension qa_quantity_gcd qa_quantity_ladder qa_quantity_scale)
 from p"types.jo" import (T_BOOL T_F32 T_FLOAT T_INT T_MATH_INT T_STR T_VOID is_float is_int is_numeric mk_type prune structs tkind type_eq types)
 from p"type_ops.dewy" import (dt mk_array mk_union)
@@ -76,11 +76,11 @@ quantity_mismatch=(pos:UnitWord a:UnitWord b:UnitWord):>void=>{
 resolve_quantity_type=(n:UnitWord):>int64=>$unsafe {
     let a=resolve_type(UnitWord(nodes.ptr[n].a))
     let ad=quantity_dimension(a)
-    let op=cx_token_values.ptr[UnitWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[UnitWord(node_op(nodes.ptr[n].op_ext))]
     if op =? 'caret' {
         if types.ptr[a].kind not=? 'dimension' {fatal(nodes.ptr[n].pos "raise the dimension factor to a power, not its numeric representation")}
         let e=UnitWord(nodes.ptr[n].b)
-        if nodes.ptr[e].kind =? 'binary' and nodes.ptr[e].op =? int32(61) {
+        if nodes.ptr[e].kind =? 'binary' and node_op(nodes.ptr[e].op_ext) =? int32(61) {
             return mk_dimension(power_dimension(ad ceval(UnitWord(nodes.ptr[e].a)).i nodes.ptr[n].pos ceval(UnitWord(nodes.ptr[e].b)).i))
         }
         if nodes.ptr[e].kind =? 'call' and nodes.ptr[UnitWord(nodes.ptr[e].a)].kind =? 'ident' and nodes.ptr[UnitWord(nodes.ptr[e].a)].name =? int32(intern("__dewy_divide")) and nkids(e) =? 2 {
@@ -119,7 +119,7 @@ quantity_constant=(n:UnitWord num:UnitWord den:UnitWord dim:UnitWord expected:Un
     let a:UnitWord=0
     if is_float(hint) {
         a=mk('float_lit' pos)
-        nodes.ptr[a].fval=float64(value.numerator) / float64(value.denominator)
+        nodes.ptr[a].op_ext=node_with_fval(nodes.ptr[a].op_ext (float64(value.numerator) / float64(value.denominator)))
         check_expr(a hint);
     }
     # (a written decimal holds fractions, `let t = 0.0m`, as a plain 0.0 does)
@@ -136,14 +136,14 @@ quantity_constant=(n:UnitWord num:UnitWord den:UnitWord dim:UnitWord expected:Un
     }
     let tag=if dim not=? 0 and is_quantity(expected) and quantity_dimension(expected) =? dim {quantity_tag(expected)} else {0}
     let t=mk_quantity(ntype(a) dim 0 tag)
-    nodes.ptr[n]=Node(kind='conv' pos=pos a=int32(a) aux=int32(int64(CV.quantity_const)) aux2=int32(scale) type=int32(t) flags=int32(NF_CHECKED))
+    nodes.ptr[n]=Node(kind='conv' pos=pos a=int32(a) aux=int32(int64(CV.quantity_const)) op_ext=node_with_aux2(uint32(0) int32(scale)) type=int32(t) flags=int32(NF_CHECKED))
     last_checked=n
     t
 }
 quantity_constant_scale=(n:UnitWord):>int64=>$unsafe {
     if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.quantity_const)) {
         if is_float(quantity_base(ntype(n))) {return -1}
-        return UnitWord(nodes.ptr[n].aux2)
+        return UnitWord(node_aux2(nodes.ptr[n].op_ext))
     }
     if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].type not=? 0 {
         let source=binding_const_init(sym_kind_of(UnitWord(nodes.ptr[n].aux)) UnitWord(nodes.ptr[n].sym) nodes.ptr[n].pos)
@@ -311,7 +311,7 @@ quantity_operands=(a:UnitWord b:UnitWord):>array<int64>=>$unsafe {
     [aa bb]
 }
 quantity_binary_plain=(n:UnitWord a:UnitWord b:UnitWord expected:UnitWord):>int64=>$unsafe {
-    let op=cx_token_values.ptr[UnitWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[UnitWord(node_op(nodes.ptr[n].op_ext))]
     let ad=quantity_dimension(ntype(a))
     let bd=quantity_dimension(ntype(b))
     let dim=ad
@@ -408,7 +408,7 @@ quantity_arithmetic_plain=(n:UnitWord name:UnitWord a:UnitWord b:UnitWord expect
 quantity_unary_plain=(n:UnitWord expected:UnitWord):>int64=>$unsafe {
     let a=UnitWord(nodes.ptr[n].a)
     let dim=quantity_dimension(ntype(a))
-    let op=cx_token_values.ptr[UnitWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[UnitWord(node_op(nodes.ptr[n].op_ext))]
     if op not=? 'minus' and op not=? 'plus' {fatal(nodes.ptr[n].pos "operator {op_text(op nodes.ptr[n].pos)} is not defined for physical quantities")}
     let scale=quantity_constant_scale(a)
     if scale >=? 0 {
@@ -424,15 +424,15 @@ quantity_unary_plain=(n:UnitWord expected:UnitWord):>int64=>$unsafe {
 # indexed/field path still captures and reacquires places in the usual checker.
 quantity_compound=(s:UnitWord target:UnitWord):>bool=>$unsafe {
     if quantity_base(target) =? T_MATH_INT {return false}
-    if not is_numeric(quantity_base(target)) or nodes.ptr[s].sval not=? 0 or has_flag(s NF_BROADCAST) {return false}
+    if not is_numeric(quantity_base(target)) or node_sval(nodes.ptr[s].op_ext) not=? 0 or has_flag(s NF_BROADCAST) {return false}
     if nodes.ptr[UnitWord(nodes.ptr[s].a)].kind not=? 'ident' {return false}
-    if nodes.ptr[s].op not=? int32(48) and nodes.ptr[s].op not=? int32(49) {return false}
+    if node_op(nodes.ptr[s].op_ext) not=? int32(48) and node_op(nodes.ptr[s].op_ext) not=? int32(49) {return false}
     let right=UnitWord(nodes.ptr[s].b)
     let literal=quantity_literal_syntax(right)
     check_expr(right target);
     right=last_checked
     # (t += 5°C: what is added to or taken from a temperature point is a difference)
-    quantity_update_check(nodes.ptr[s].pos nodes.ptr[s].op =? int32(49) UnitWord(nodes.ptr[s].a) right target literal)
+    quantity_update_check(nodes.ptr[s].pos node_op(nodes.ptr[s].op_ext) =? int32(49) UnitWord(nodes.ptr[s].a) right target literal)
     if quantity_offset_tagged(target) or quantity_offset_tagged(ntype(right)) {right=quantity_delta_reading(right)}
     nodes.ptr[s].b=int32(quantity_number(coerce(right target)))
     true
@@ -652,7 +652,7 @@ quantity_literal_syntax=(e:UnitWord):>bool=>$unsafe {
     if e =? 0 or has_flag(e NF_CHECKED) {return false}
     let k=nodes.ptr[e].kind
     if k =? 'unary' {return quantity_literal_syntax(UnitWord(nodes.ptr[e].a))}
-    if k =? 'binary' and nodes.ptr[e].op =? int32(60) {
+    if k =? 'binary' and node_op(nodes.ptr[e].op_ext) =? int32(60) {
         let x=nodes.ptr[UnitWord(nodes.ptr[e].a)].kind
         return (x =? 'int_lit' or x =? 'float_lit') and nodes.ptr[UnitWord(nodes.ptr[e].b)].kind =? 'ident'
     }
@@ -680,7 +680,7 @@ quantity_binary=(n:UnitWord a:UnitWord b:UnitWord expected:UnitWord):>int64=>$un
     if quantity_internal >? 0 {return quantity_binary_plain(n a b expected)}
     let ta=ntype(a)
     let tb=ntype(b)
-    let op=cx_token_values.ptr[UnitWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[UnitWord(node_op(nodes.ptr[n].op_ext))]
     # (a temperature minus a temperature is a difference unless a literal is taken away)
     let temperatures=op =? 'minus' and quantity_dimension(ta) =? base_dimension(4) and quantity_dimension(tb) =? base_dimension(4)
     if quantity_tag(ta) =? 0 and quantity_tag(tb) =? 0 and not temperatures {return quantity_binary_plain(n a b expected)}
@@ -854,7 +854,7 @@ quantity_unary=(n:UnitWord expected:UnitWord):>int64=>$unsafe {
     let tag=quantity_tag(t)
     if tag =? 0 {return quantity_unary_plain(n expected)}
     let q=quantity_tags[tag]
-    let op=cx_token_values.ptr[UnitWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[UnitWord(node_op(nodes.ptr[n].op_ext))]
     if op =? 'minus' and not q.delta and q.origin not=? 0 {
         # (negating a reading: -(20°C) is -20°C; a point's value is not negated)
         if not literal and quantity_point(t) {quantity_point_scaled(nodes.ptr[n].pos a t)}
@@ -892,7 +892,7 @@ quantity_unit_text=(e:UnitWord):>string=>$unsafe {
     let k=nodes.ptr[e].kind
     if k =? 'tname' or k =? 'ident' {return name_of(UnitWord(nodes.ptr[e].name))}
     if k =? 'tquantity' {
-        let op=cx_token_values.ptr[UnitWord(nodes.ptr[e].op)]
+        let op=cx_token_values.ptr[UnitWord(node_op(nodes.ptr[e].op_ext))]
         if op =? 'caret' {
             let p=UnitWord(nodes.ptr[e].b)
             if nodes.ptr[p].kind =? 'int_lit' {return "{quantity_unit_text(UnitWord(nodes.ptr[e].a))}^{nodes.ptr[p].ival}"}
@@ -904,7 +904,7 @@ quantity_unit_text=(e:UnitWord):>string=>$unsafe {
         if op =? 'slash' {
             # (W/(m^2*K): what the slash divides by stays one group)
             let r=UnitWord(nodes.ptr[e].b)
-            let group=nodes.ptr[r].kind =? 'tquantity' and nodes.ptr[r].op not=? int32(65)
+            let group=nodes.ptr[r].kind =? 'tquantity' and node_op(nodes.ptr[r].op_ext) not=? int32(65)
             if group {return "{left}/({right})"}
             return "{left}/{right}"
         }
@@ -925,7 +925,7 @@ quantity_unit_syntax=(e:UnitWord):>bool=>$unsafe {
         return sk =? 'global' or sk =? 'const_' or sk =? 'local'
     }
     if k =? 'tquantity' {
-        if nodes.ptr[e].op =? int32(65) {return quantity_unit_syntax(UnitWord(nodes.ptr[e].a))}
+        if node_op(nodes.ptr[e].op_ext) =? int32(65) {return quantity_unit_syntax(UnitWord(nodes.ptr[e].a))}
         return quantity_unit_syntax(UnitWord(nodes.ptr[e].a)) and quantity_unit_syntax(UnitWord(nodes.ptr[e].b))
     }
     false
@@ -938,7 +938,7 @@ quantity_unit_expr=(e:UnitWord):>int64=>$unsafe {
         nodes.ptr[x].name=nodes.ptr[e].name
         return x
     }
-    let op=cx_token_values.ptr[UnitWord(nodes.ptr[e].op)]
+    let op=cx_token_values.ptr[UnitWord(node_op(nodes.ptr[e].op_ext))]
     if op =? 'caret' {return bc_call("__dewy_power" [quantity_unit_expr(UnitWord(nodes.ptr[e].a)) UnitWord(nodes.ptr[e].b)] pos)}
     if op =? 'slash' and dewy_at(pos) {return bc_call("__dewy_divide" [quantity_unit_expr(UnitWord(nodes.ptr[e].a)) quantity_unit_expr(UnitWord(nodes.ptr[e].b))] pos)}
     bc_bin(op quantity_unit_expr(UnitWord(nodes.ptr[e].a)) quantity_unit_expr(UnitWord(nodes.ptr[e].b)) pos)
@@ -1029,7 +1029,7 @@ quantity_display=(x:UnitWord):>int64=>$unsafe {
         }
         offset=mk('float_lit' pos)
         let scaled=quantity_scale(onum * quantity_units[ladder.units[0]].den oden)
-        nodes.ptr[offset].fval=float64(quantity_scales[scaled].numerator) / float64(quantity_scales[scaled].denominator)
+        nodes.ptr[offset].op_ext=node_with_fval(nodes.ptr[offset].op_ext (float64(quantity_scales[scaled].numerator) / float64(quantity_scales[scaled].denominator)))
     }
     let c=mk('call' pos)
     nodes.ptr[c].a=int32(bc_field(bc_ident("$dewy_rational" pos) fname pos))
@@ -1074,7 +1074,7 @@ quantity_shown_number=(x:UnitWord):>int64=>$unsafe {
         number=quantity_float(number)
         offset=mk('float_lit' pos)
         let scaled=quantity_scale(onum * u.den oden)
-        nodes.ptr[offset].fval=float64(quantity_scales[scaled].numerator) / float64(quantity_scales[scaled].denominator)
+        nodes.ptr[offset].op_ext=node_with_fval(nodes.ptr[offset].op_ext (float64(quantity_scales[scaled].numerator) / float64(quantity_scales[scaled].denominator)))
     }
     let c=mk('call' pos)
     let fname=if exact {"_quantity_exact_number"} else {"_quantity_float_number"}

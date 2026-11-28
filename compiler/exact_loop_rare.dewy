@@ -29,6 +29,7 @@ from p"math_ops.dewy" import (math_proven_word math_word_expr math_word_range)
 from p"refine_metadata.dewy" import (representation_type)
 from p"types.jo" import (T_INT T_MATH_INT prune structs telem tkind types)
 from p"util.jo" import (files pos_file)
+from p"node_store.dewy" import (node_op)
 
 ExactLoopWord:type=int64<overflow='wrap'>
 exl_key=(n:ExactLoopWord):>int64=>$unsafe {
@@ -100,7 +101,7 @@ exl_bound=(n0:ExactLoopWord):>int64=>$unsafe {
     }
     let a=exl_bound(ExactLoopWord(nodes.ptr[n].a))
     let b=exl_bound(ExactLoopWord(nodes.ptr[n].b))
-    let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[ExactLoopWord(node_op(nodes.ptr[n].op_ext))]
     if op =? 'plus' {return exl_add(a b)}
     if op =? 'star' {return exl_mul(a b)}
     if op =? 'percent' {return e_addi(b (-1))}
@@ -281,12 +282,12 @@ exm_width=(n0:ExactLoopWord bits:ExactLoopWord):>int64=>$unsafe {
         return bits
     }
     if k =? 'call' and nkids(n) =? 2 and (fact_library_call(n "min") or fact_library_call(n "max")) {return max(exm_width(kid(n 0) bits) exm_width(kid(n 1) bits))}
-    if k =? 'unary' and nodes.ptr[n].op =? int32(59) {return exm_width(ExactLoopWord(nodes.ptr[n].a) bits) + 1}
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? int32(59) {return exm_width(ExactLoopWord(nodes.ptr[n].a) bits) + 1}
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return 10000}
     if has_flag(n NF_BROADCAST) {exm_broadcast=true}
     let a=exm_width(ExactLoopWord(nodes.ptr[n].a) bits)
     let b=exm_width(ExactLoopWord(nodes.ptr[n].b) bits)
-    let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[ExactLoopWord(node_op(nodes.ptr[n].op_ext))]
     if op =? 'plus' or op =? 'minus' {return max(a b) + 1}
     if op =? 'star' {return a + b}
     if op =? 'amp' or op =? 'pipe' or op =? 'caret' {return max(a b)}
@@ -308,7 +309,7 @@ exm_word=(n0:ExactLoopWord):>int64=>$unsafe {
     if k =? 'binary' {
         let a=exm_word(ExactLoopWord(nodes.ptr[n].a))
         let b=exm_word(ExactLoopWord(nodes.ptr[n].b))
-        return e_bin(int_op(cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)] true) VI a b)
+        return e_bin(int_op(cx_token_values.ptr[ExactLoopWord(node_op(nodes.ptr[n].op_ext))] true) VI a b)
     }
     if k =? 'unary' {return e_un('neg' VI exm_word(ExactLoopWord(nodes.ptr[n].a)))}
     if k =? 'call' {
@@ -328,7 +329,7 @@ exm_tagged_word=(n0:ExactLoopWord):>int64=>$unsafe {
     if k =? 'ident' {return ExactLoopWord(locals.ptr[ExactLoopWord(nodes.ptr[n].sym)].vreg)}
     if k =? 'unary' {return e_un('neg' VI exm_tagged_word(ExactLoopWord(nodes.ptr[n].a)))}
     if k =? 'binary' {
-        let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[ExactLoopWord(node_op(nodes.ptr[n].op_ext))]
         let a=ExactLoopWord(nodes.ptr[n].a)
         let b=ExactLoopWord(nodes.ptr[n].b)
         if op =? 'star' {

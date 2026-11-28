@@ -13,6 +13,7 @@ from p"msl_emit.dewy" import (ml_function)
 from p"types.jo" import (T_MAT4 types)
 from p"util.jo" import (name_of)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_mod)
 
 MslWord:type=int64<overflow='wrap'>
 ml_err=(pos:MslWord msg:string):>void=>{
@@ -78,7 +79,7 @@ ml_with_ctx=(ctx:string rest:array<string>):>string=>{
 ml_is_gbuf_op=(e:MslWord name:string):>bool=>$unsafe {
     if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux not=? 0 or nkids(e) =? 0 {return false}
     let decl=MslWord(fns.ptr[MslWord(nodes.ptr[e].sym)].decl)
-    decl not=? 0 and modules[MslWord(nodes.ptr[decl].mod)].is_prelude and name_of(MslWord(nodes.ptr[decl].name)) =? name and is_gpu_buffer(ntype(kid(e 0)))
+    decl not=? 0 and modules[MslWord(node_mod(nodes.ptr[decl].op_ext))].is_prelude and name_of(MslWord(nodes.ptr[decl].name)) =? name and is_gpu_buffer(ntype(kid(e 0)))
 }
 # a GpuBuffer operand, kept in a temporary unless it is read from the uniforms each time it is used
 ml_gbuf_value=(e:MslWord):>string=>{

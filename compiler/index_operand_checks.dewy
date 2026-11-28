@@ -16,6 +16,7 @@ from p"range_checks.dewy" import (dewy_range_value)
 from p"type_ops.dewy" import (dt mk_array)
 from p"types.jo" import (T_INT T_MATH_INT is_int prune telem tkind types)
 from p"util.jo" import (files intern name_of pos_file)
+from p"node_store.dewy" import (node_mod node_sval)
 
 IndexOperandWord:type=int64<overflow='wrap'>
 
@@ -61,7 +62,7 @@ neg_index_check=(b:IndexOperandWord):>void=>$unsafe {
 # (f[0] indexes f()).
 dewy_bracket_call=(n:int64):>bool=>$unsafe {
     let base=IndexOperandWord(nodes.ptr[n].a)
-    if nodes.ptr[base].kind not=? 'ident' or nodes.ptr[n].sval not=? 0 or nkids(n) =? 0 or not dewy_at(nodes.ptr[n].pos) {return false}
+    if nodes.ptr[base].kind not=? 'ident' or node_sval(nodes.ptr[n].op_ext) not=? 0 or nkids(n) =? 0 or not dewy_at(nodes.ptr[n].pos) {return false}
     let nm=IndexOperandWord(nodes.ptr[base].name)
     let s=lookup(nm)
     if s =? 0 or syms.ptr[s].kind not=? 'fns' or bare_fns_call(nm (-1)) not=? 0 {return false}
@@ -107,7 +108,7 @@ map_presence_fn=(call:int64):>int64=>$unsafe {
     let path="{lib_dir}/core/map.jo"
     if files.ptr[pos_file(nodes.ptr[d].pos)].path not=? path {return 0}
     let decls:array<int64>=[]
-    collect_module(IndexOperandWord(nodes.ptr[d].mod) intern("has") @decls)
+    collect_module(IndexOperandWord(node_mod(nodes.ptr[d].op_ext)) intern("has") @decls)
     loop candidate in decls {
         if files.ptr[pos_file(nodes.ptr[candidate].pos)].path =? path {
             return get_fn_inst(candidate fns.ptr[f].targs nodes.ptr[call].pos)

@@ -35,6 +35,7 @@ from p"types.jo" import (fields prune ptr_size structs targ telem tkind tsize ty
 from p"type_ops.dewy" import (dt is_managed layout type_has_fn)
 from p"util.jo" import (err_notes name_of)
 from p"diagnostic_exit.dewy" import (fatal ice)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 CopyWord:type=int64<overflow='wrap'>
 CopyU64:type=uint64<overflow='wrap'>
@@ -81,7 +82,7 @@ copies_reset=():>void=>$unsafe {
             if body not=? 0 {
                 loop i in [0..nkids(body)) {
                     let s=kid(body i)
-                    if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+                    if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
                     if nkids(s) >? 0 {continue}
                     let l=CopyWord(nodes.ptr[s].sym)
                     let source=CopyWord(nodes.ptr[s].b)
@@ -126,7 +127,7 @@ copy_escapes_walk=(n:CopyWord l:CopyWord l_owned:bool owning0:bool=false):>bool=
     }
     if k =? 'return_' {return copy_escapes_walk(CopyWord(nodes.ptr[n].a) l l_owned true)}
     if k =? 'vardecl' {
-        if nodes.ptr[n].aux2 =? 1 {return false}
+        if node_aux2(nodes.ptr[n].op_ext) =? 1 {return false}
         return copy_escapes_walk(CopyWord(nodes.ptr[n].b) l l_owned true)
     }
     if k =? 'assign' {
@@ -203,7 +204,7 @@ copy_escapes_batch=(n:CopyWord owning:bool):>void=>$unsafe {
     }
     if k =? 'return_' {copy_escapes_batch(CopyWord(nodes.ptr[n].a) true); return}
     if k =? 'vardecl' {
-        if nodes.ptr[n].aux2 =? 1 {return}
+        if node_aux2(nodes.ptr[n].op_ext) =? 1 {return}
         copy_escapes_batch(CopyWord(nodes.ptr[n].b) true)
         return
     }
@@ -296,7 +297,7 @@ copies_parameters=():>void=>$unsafe {
         let nk=CopyWord(nodes.ptr[body].nlist)
         loop i in [CopyWord(0)..nk) {
             let s=CopyWord(lists.ptr[lbase + i])
-            if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+            if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
             if nkids(s) >? 0 {continue}
             let l=CopyWord(nodes.ptr[s].sym)
             let source=CopyWord(nodes.ptr[s].b)
@@ -332,7 +333,7 @@ copies_parameters=():>void=>$unsafe {
         let nk=CopyWord(nodes.ptr[body].nlist)
         loop i in [CopyWord(0)..nk) {
             let s=CopyWord(lists.ptr[lbase + i])
-            if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+            if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
             if nkids(s) >? 0 {continue}
             let l=CopyWord(nodes.ptr[s].sym)
             let source=CopyWord(nodes.ptr[s].b)
@@ -363,7 +364,7 @@ copies_parameters=():>void=>$unsafe {
             batch_p.clear()
             loop i in [CopyWord(0)..nk) {
                 let s=CopyWord(lists.ptr[lbase + i])
-                if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+                if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
                 if nkids(s) >? 0 {continue}
                 let l=CopyWord(nodes.ptr[s].sym)
                 let source=CopyWord(nodes.ptr[s].b)
@@ -673,7 +674,7 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
         live[l]=true
         return
     }
-    if k =? 'assign' and nodes.ptr[n].op =? int32(47) and nodes.ptr[n].aux =? 0 {
+    if k =? 'assign' and node_op(nodes.ptr[n].op_ext) =? int32(47) and nodes.ptr[n].aux =? 0 {
         let target=CopyWord(nodes.ptr[n].a)
         if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32(1) {
             # Replacement kills the old value; evaluate its RHS against the

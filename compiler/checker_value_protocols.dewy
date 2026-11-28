@@ -14,6 +14,7 @@ from p"type_ops.dewy" import (dt layout)
 from p"types.jo" import (T_BOOL T_MATH_INT T_STR T_U64 fields has_var prune structs targ telem tkind type_eq types variants)
 from p"units.jo" import (quantity_base)
 from p"util.jo" import (intern name_of)
+from p"node_store.dewy" import (node_mod)
 
 ProtocolWord:type=int64<overflow='wrap'>
 record_value_member=(t:ProtocolWord hashing:bool):>ProtocolWord=>$unsafe {
@@ -29,7 +30,7 @@ record_value_member=(t:ProtocolWord hashing:bool):>ProtocolWord=>$unsafe {
     loop name in protocol_names {collect_module(m name @decls)}
     let own:array<int64>=[]
     loop d in decls {
-        if ProtocolWord(nodes.ptr[d].mod) =? m and fn_sig(d).mutmask =? 0 {own.push(d)}
+        if ProtocolWord(node_mod(nodes.ptr[d].op_ext)) =? m and fn_sig(d).mutmask =? 0 {own.push(d)}
     }
     if own.length =? 0 {return 0}
     let pos=nodes.ptr[ProtocolWord(structs.ptr[ProtocolWord(types.ptr[t].st)].decl)].pos

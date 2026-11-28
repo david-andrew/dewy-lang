@@ -30,6 +30,7 @@ from p"util.jo" import (err_notes)
 from p"witness.jo" import (wit_holder_text)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_refinement)
+from p"node_store.dewy" import (node_aux2 node_with_aux2)
 
 # Checks and entries write Jo's holder, holder text and entry through places bound once;
 # validation, probe and note tables take direct element writes, as in the other fact leaves.
@@ -130,11 +131,11 @@ ref_check=(n:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsafe {
 }
 ref_check_held=(n:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsafe {
     if fact_speculating >? 0 {
-        ref_assume(zonk(RefineTransferWord(nodes.ptr[n].aux2)) self args @s)
+        ref_assume(zonk(RefineTransferWord(node_aux2(nodes.ptr[n].op_ext))) self args @s)
         return
     }
-    let t=zonk(RefineTransferWord(nodes.ptr[n].aux2))
-    nodes.ptr[n].aux2=int32(t)
+    let t=zonk(RefineTransferWord(node_aux2(nodes.ptr[n].op_ext)))
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32(t)))
     if not s.live {return}
     # (a permutation of the array, or a growth whose new values were checked: ref_self_establish)
     if ref_self_active and ref_self_established.has(n) {

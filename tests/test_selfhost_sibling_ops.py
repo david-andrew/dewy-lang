@@ -45,13 +45,13 @@ cur_assign = 0
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 set_kid = (n: int, i: int, v: int): lists[int(nodes[n].list) + i] = i32(v)
 nkids = (n: int) -> int: int(nodes[n].nlist)
-nkids2 = (n: int) -> int: int(nodes[n].nlist2)
+nkids2 = (n: int) -> int: int(node_nlist2(nodes[n].op_ext))
 kid_c = (n: int) -> int: int(nodes[n].c)
-kid_d = (n: int) -> int: int(nodes[n].d)
+kid_d = (n: int) -> int: int(node_d(nodes[n].op_ext))
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 kids2 = (n: int) -> int[]:
     out: int[]
-    loop i in [0..nkids2(n)): out.push(int(lists2[int(nodes[n].list2) + i]))
+    loop i in [0..nkids2(n)): out.push(int(lists2[int(node_list2(nodes[n].op_ext)) + i]))
     out
 mk = (k: NK, pos: int) -> int:
     nodes.push(Node(kind=k, pos=pos))
@@ -142,7 +142,7 @@ block = (items: int[]) -> int:
     n
 assign = (op: Tok, a: int, b: int) -> int:
     n = mk(.assign, 4)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 field = (base: int, name: int) -> int:
     n = mk(.field, 5)
@@ -163,7 +163,7 @@ bind_local = (name: int, t: int) -> int:
     scope[name] = syms.len() - 1
     locals.len() - 1
 list2 = (n: int, items: int[]):
-    nodes[n].list2 = i32(lists2.len()); nodes[n].nlist2 = i32(items.len())
+    nodes[n].op_ext = node_with_list2(nodes[n].op_ext, i32(i32(lists2.len()))); nodes[n].op_ext = node_with_nlist2(nodes[n].op_ext, i32(i32(items.len())))
     loop x in items: lists2.push(i32(x))
 literal = (t: int) -> int:
     callee = ident(100 + t)
@@ -205,7 +205,7 @@ main = ():
     head_mut = mk(.lhead, 1); nodes[head_mut].a = i32(me()); nodes[head_mut].flags = i32(NF_MUT)
     for_plain = mk(.for_, 1); nodes[for_plain].a = i32(me())
     deep_c = mk(.if_, 1); nodes[deep_c].c = i32(assign(.assign, me(), mk(.int_lit, 1)))
-    deep_d = mk(.if_, 1); nodes[deep_d].d = i32(assign(.assign, me(), mk(.int_lit, 1)))
+    deep_d = mk(.if_, 1); nodes[deep_d].op_ext = node_with_d(nodes[deep_d].op_ext, i32(i32(assign(.assign, me(), mk(.int_lit, 1)))))
     deep_a = mk(.if_, 1); nodes[deep_a].a = i32(assign(.assign, me(), mk(.int_lit, 1)))
     deep_b = mk(.if_, 1); nodes[deep_b].b = i32(assign(.assign, me(), mk(.int_lit, 1)))
     in_kids = block([assign(.assign, me(), mk(.int_lit, 1))])
@@ -346,7 +346,7 @@ main = ():
     generic = mk(.fn_, 1); list2(generic, [1])
     syms.push(Sym(kind=.struct_, ref=i32(generic))); scope[106] = syms.len() - 1
     syms.push(Sym(kind=.type_, ref=0)); scope[107] = syms.len() - 1
-    tagged = ident(102); nodes[tagged].sval = 1
+    tagged = ident(102); nodes[tagged].op_ext = node_with_sval(nodes[tagged].op_ext, i32(1))
     indexed = mk(.index, 1); nodes[indexed].a = i32(ident(102))
     loop v in [0, mk(.int_lit, 1), literal(2), indexed, literal(3), literal(4), literal(5), literal(6), literal(7), literal(9), call(tagged, []), call(field(ident(1), 1), []), call(0, [])]:
         print("syntax {sibling_syntax_type(v)}")
@@ -367,7 +367,7 @@ main = ():
     scan(in_lambda, false)
     in_fn = mk(.fn_, 1); list2(in_fn, [assign(.assign, me(), literal(3))])
     scan(in_fn, false)
-    wide = mk(.if_, 1); nodes[wide].a = i32(assign(.assign, me(), literal(2))); nodes[wide].b = i32(assign(.assign, me(), literal(3))); nodes[wide].c = i32(assign(.assign, me(), literal(4))); nodes[wide].d = i32(assign(.assign, me(), literal(2)))
+    wide = mk(.if_, 1); nodes[wide].a = i32(assign(.assign, me(), literal(2))); nodes[wide].b = i32(assign(.assign, me(), literal(3))); nodes[wide].c = i32(assign(.assign, me(), literal(4))); nodes[wide].op_ext = node_with_d(nodes[wide].op_ext, i32(i32(assign(.assign, me(), literal(2)))))
     set_list(wide, [assign(.assign, me(), literal(3))]); list2(wide, [assign(.assign, me(), literal(4))])
     scan(wide, false)
     print("{sibling_family(T_CIRCLE, T_SQUARE)} {sibling_family(T_DOT, T_SQUARE)} {sibling_family(T_OTHER, T_SQUARE)} {sibling_family(T_CIRCLE, T_OTHER)}")
@@ -442,7 +442,7 @@ main = ():
     lw(w2, false)
     w3 = mk(.while_, 1); nodes[w3].c = i32(assign(.assign, me(), mk(.int_lit, 1)))
     lw(w3, false)
-    w4 = mk(.while_, 1); nodes[w4].d = i32(assign(.assign, me(), mk(.int_lit, 1)))
+    w4 = mk(.while_, 1); nodes[w4].op_ext = node_with_d(nodes[w4].op_ext, i32(i32(assign(.assign, me(), mk(.int_lit, 1)))))
     lw(w4, false)
     w5 = mk(.while_, 1); set_list(w5, [assign(.assign, me(), mk(.int_lit, 1))])
     lw(w5, false)

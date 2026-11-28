@@ -107,7 +107,7 @@ main = ():
     xm_bound = v
     run(lambda([param(6)]), int(tb_mk_fn([v], v, 0, 0, 0, false)))
     print(locals[locals.len() - 1].type)
-    contracted = lambda([param(7, T_INT)]); nodes[contracted].sval = 9
+    contracted = lambda([param(7, T_INT)]); nodes[contracted].op_ext = node_with_sval(nodes[contracted].op_ext, i32(9))
     xm_effects_on = true
     before = nodes.len()
     run(contracted)

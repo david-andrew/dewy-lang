@@ -41,7 +41,7 @@ dc_parser: ParserD
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 kids2 = (n: int) -> int[]: node_kids2(nodes, lists, n)
 kid_c = (n: int) -> int: int(nodes[n].c)
-kid_d = (n: int) -> int: int(nodes[n].d)
+kid_d = (n: int) -> int: int(node_d(nodes[n].op_ext))
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 pos_file = (p: int) -> int: p >> 20
 pos_off = (p: int) -> int: p & 0xFFFFF
@@ -56,7 +56,7 @@ DRIVER = r'''
 use 'icount.jo'
 at = (f: int, off: int) -> int: (f << 20) | off
 n_ = (k: NK, pos: int, a: int = 0, b: int = 0, c: int = 0, d: int = 0) -> int:
-    nodes.push(Node(kind=k, pos=pos, a=i32(a), b=i32(b), c=i32(c), d=i32(d)))
+    nodes.push(Node(kind=k, pos=pos, a=i32(a), b=i32(b), c=i32(c), op_ext=node_with_d(u32(0), i32(i32(d)))))
     nodes.len() - 1
 state = (): print("{ic_on} {ic_bucket} {ic_last} {ic_counts}")
 main = ():
@@ -117,9 +117,9 @@ main = ():
     lazy = n_(.block, at(0, 1)); nodes[lazy].flags = i32(NF_LAZY); nodes[lazy].ival = 0; nodes[lazy].aux = 8
     plain = n_(.block, at(0, 1))
     outside = n_(.block, at(9, 1)); nodes[outside].flags = i32(NF_LAZY)
-    waiting = n_(.block, at(0, 1)); nodes[waiting].ival = 0; nodes[waiting].aux2 = DC_LAZY_SPAN
+    waiting = n_(.block, at(0, 1)); nodes[waiting].ival = 0; nodes[waiting].op_ext = node_with_aux2(nodes[waiting].op_ext, i32(DC_LAZY_SPAN))
     dc_parser.reader.dc_lazy_span_end[waiting] = 4
-    away = n_(.block, at(9, 1)); nodes[away].aux2 = DC_LAZY_SPAN
+    away = n_(.block, at(9, 1)); nodes[away].op_ext = node_with_aux2(nodes[away].op_ext, i32(DC_LAZY_SPAN))
     dc_parser.reader.dc_lazy_span_end[away] = 4
     # (a body read already: its block holds the body, and its span from the file's start is not waiting)
     read = n_(.block, at(0, 1)); nodes[read].ival = 0

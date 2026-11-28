@@ -193,7 +193,7 @@ fact_slice_root=(n:SlicePrepWord):>PlaceIdentity=>$unsafe {
 # contracts, O(predicate atoms), with node-indexed slice deduplication.
 fact_slice_contract_actuals=(call:SlicePrepWord arg:SlicePrepWord):>void=>$unsafe {
     fsp_push_val(arg)
-    let rt=prune(SlicePrepWord(nodes.ptr[arg].aux2))
+    let rt=prune(SlicePrepWord(node_aux2(nodes.ptr[arg].op_ext)))
     if types.ptr[rt].kind not=? 'refined' {
         fsp_push_val(call)
         return
@@ -1006,8 +1006,8 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
                 if nodes.ptr[n].aux =? int32(5) {opaque_writes.push(n)}
                 let l=SlicePrepWord(nodes.ptr[n].sym)
                 if l >? 0 {fact_slice_writer(@writers PlaceIdentity('local' SlicePrepWord(locals.ptr[l].owner) l) n)}
-                if nodes.ptr[n].aux =? int32(3) and nodes.ptr[n].aux2 >? 0 {
-                    let vl=SlicePrepWord(nodes.ptr[n].aux2)
+                if nodes.ptr[n].aux =? int32(3) and node_aux2(nodes.ptr[n].op_ext) >? 0 {
+                    let vl=SlicePrepWord(node_aux2(nodes.ptr[n].op_ext))
                     fact_slice_writer(@writers PlaceIdentity('local' SlicePrepWord(locals.ptr[vl].owner) vl) n)
                 }
                 if demand_static and (fact_stepped_loop(n) or fact_open_range(n)) {fsp_push_val(n)}
@@ -1055,7 +1055,7 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
                     if not fact_pure_binary(n) {exposed_writes.push(n)}
                 }
                 else if demand_static {
-                    let tok=cx_token_values.ptr[SlicePrepWord(nodes.ptr[n].op)]
+                    let tok=cx_token_values.ptr[SlicePrepWord(node_op(nodes.ptr[n].op_ext))]
                     if tok =? 'slash' or tok =? 'percent' or fact_shift_obliged(n) {fsp_push_val(n)}
                 }
             }
@@ -1174,7 +1174,7 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
                     fsp_push_val(SlicePrepWord(nodes.ptr[n].a))
                     fsp_push_val(SlicePrepWord(nodes.ptr[n].b))
                 } else {fsp_push_children_val(n)}
-                if refine_active and nodes.ptr[n].aux =? int32(int64(CV.refinement)) {fact_slice_local_writers(SlicePrepWord(nodes.ptr[n].aux2) writers)}
+                if refine_active and nodes.ptr[n].aux =? int32(int64(CV.refinement)) {fact_slice_local_writers(SlicePrepWord(node_aux2(nodes.ptr[n].op_ext)) writers)}
             }
             <'lambda'|'lazy_'> => {}
             <'call'> => {fsp_l2_call(n)}
@@ -1242,3 +1242,4 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
 }
 
 from p"facts_values.dewy" import (fact_place fact_scalar fact_type)
+from p"node_store.dewy" import (node_aux2 node_op)

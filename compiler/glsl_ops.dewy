@@ -14,6 +14,7 @@ from p"types.jo" import (T_MATH_INT prune types)
 from p"type_ops.dewy" import (dt)
 from p"util.jo" import (name_of)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_op)
 
 GlslWord:type=int64<overflow='wrap'>
 gl_err=(pos:GlslWord msg:string):>void=>{
@@ -34,7 +35,7 @@ sl_ring_exact=(e:GlslWord):>bool=>$unsafe {
     let k=nodes.ptr[e].kind
     if k =? 'unary' {return sl_ring_exact(GlslWord(nodes.ptr[e].a))}
     if k not=? 'binary' {return true}
-    let op=cx_token_values.ptr[GlslWord(nodes.ptr[e].op)]
+    let op=cx_token_values.ptr[GlslWord(node_op(nodes.ptr[e].op_ext))]
     let a=GlslWord(nodes.ptr[e].a)
     let b=GlslWord(nodes.ptr[e].b)
     if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'amp' or op =? 'pipe' or op =? 'caret' or op =? 'kw_xor' or op =? 'shl' {return sl_ring_exact(a) and sl_ring_exact(b)}
@@ -139,13 +140,13 @@ sl_range_of=(e:GlslWord):>array<int64>=>$unsafe {
         if last >=? 2147483647 {return unknown}
         return [a[0] max(a[1] last)]
     }
-    if k =? 'unary' and cx_token_values.ptr[GlslWord(nodes.ptr[e].op)] =? 'minus' {
+    if k =? 'unary' and cx_token_values.ptr[GlslWord(node_op(nodes.ptr[e].op_ext))] =? 'minus' {
         let a=sl_exact_range(GlslWord(nodes.ptr[e].a))
         if a.length =? 0 {return unknown}
         return sl_i32_range(-a[1] (-a[0]))
     }
     if k not=? 'binary' or nodes.ptr[e].aux not=? 0 {return unknown}
-    let op=cx_token_values.ptr[GlslWord(nodes.ptr[e].op)]
+    let op=cx_token_values.ptr[GlslWord(node_op(nodes.ptr[e].op_ext))]
     let a=sl_exact_range(GlslWord(nodes.ptr[e].a))
     let b=sl_exact_range(GlslWord(nodes.ptr[e].b))
     if a.length =? 0 or b.length =? 0 {return unknown}

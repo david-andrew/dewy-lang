@@ -14,6 +14,7 @@ from p"parser_decls.dewy" import (parse_toplevel)
 from p"parser_expr.dewy" import (parse_expr)
 from p"parser_stmts.dewy" import (parse_indented_block)
 from p"util.jo" import (files intern pl_on pl_reached pos_file)
+from p"node_store.dewy" import (node_with_sval)
 
 TextWord:type=int64<overflow='wrap'>
 
@@ -164,7 +165,7 @@ parse_string_token=(t:TextWord):>int64=>$unsafe {
             has_interp=true
             if i >? lit_start {
                 let lit=mk('str_lit' pos)
-                nodes.ptr[lit].sval=int32<overflow='wrap'>(intern(decode_str(__str_slice(s lit_start i) pos raw)))
+                nodes.ptr[lit].op_ext=node_with_sval(nodes.ptr[lit].op_ext (int32<overflow='wrap'>(intern(decode_str(__str_slice(s lit_start i) pos raw)))))
                 parts.push(lit)
             }
             let depth:TextWord=1
@@ -256,7 +257,7 @@ parse_string_token=(t:TextWord):>int64=>$unsafe {
             p_base=saved_base
             if (shown as array<uint8>).length >? 0 {
                 let lit=mk('str_lit' pos)
-                nodes.ptr[lit].sval=int32<overflow='wrap'>(intern(shown))
+                nodes.ptr[lit].op_ext=node_with_sval(nodes.ptr[lit].op_ext (int32<overflow='wrap'>(intern(shown))))
                 parts.push(lit)
             }
             let part=mk('pair' pos)
@@ -264,9 +265,9 @@ parse_string_token=(t:TextWord):>int64=>$unsafe {
             if colon >=? 0 {
                 let bad=literal_spec_problem(__str_slice(s colon + 1 j))
                 if bad not=? "" {fatal(pos "`\{{trim(__str_slice(s i + 1 j))}\}`: {bad} (a format is [[fill]align][+][#][0][width][,][.precision][type], as \{x:>8.2f\}; types f e E g G % (numbers), d x X b o (whole numbers), s (text))")}
-                nodes.ptr[part].sval=int32<overflow='wrap'>(intern(__str_slice(s colon + 1 j)))
+                nodes.ptr[part].op_ext=node_with_sval(nodes.ptr[part].op_ext (int32<overflow='wrap'>(intern(__str_slice(s colon + 1 j)))))
             }
-            else {nodes.ptr[part].sval=-1}
+            else {nodes.ptr[part].op_ext=node_with_sval(nodes.ptr[part].op_ext (-1))}
             parts.push(part)
             i=j + 1
             lit_start=i
@@ -276,7 +277,7 @@ parse_string_token=(t:TextWord):>int64=>$unsafe {
     }
     if not has_interp {
         let txt=decode_str(s pos raw)
-        nodes.ptr[n].sval=int32<overflow='wrap'>(intern(txt))
+        nodes.ptr[n].op_ext=node_with_sval(nodes.ptr[n].op_ext (int32<overflow='wrap'>(intern(txt))))
         if __utf8_len1(txt) {
             add_flag(n NF_CHARLIKE)
             if flags & STRF_SINGLE not=? 0 {add_flag(n NF_SQUOTE)}
@@ -285,7 +286,7 @@ parse_string_token=(t:TextWord):>int64=>$unsafe {
     }
     if lit_start <? n_len {
         let lit=mk('str_lit' pos)
-        nodes.ptr[lit].sval=int32<overflow='wrap'>(intern(decode_str(__str_slice(s lit_start n_len) pos raw)))
+        nodes.ptr[lit].op_ext=node_with_sval(nodes.ptr[lit].op_ext (int32<overflow='wrap'>(intern(decode_str(__str_slice(s lit_start n_len) pos raw)))))
         parts.push(lit)
     }
     nodes.ptr[n].aux=1

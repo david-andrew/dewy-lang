@@ -28,12 +28,12 @@ xg_check_host = (n: int, expected: int) -> int:
         xg_last = xg_replacement; xg_replacement = 0
     if nodes[n].kind == .binary or nodes[n].kind == .unary:
         assert(int(nodes[int(nodes[n].a)].flags) & 128 != 0)
-        assert(nodes[n].op == i32(int(Tok.amp)) or nodes[n].op == i32(int(Tok.pipe)) or nodes[n].op == i32(int(Tok.tilde)))
+        assert(node_op(nodes[n].op_ext) == i32(int(Tok.amp)) or node_op(nodes[n].op_ext) == i32(int(Tok.pipe)) or node_op(nodes[n].op_ext) == i32(int(Tok.tilde)))
         return T_INT
     if nodes[n].kind == .call: return T_STR
     int(nodes[xg_last].type)
 xg_coerce_host = (n: int, t: int) -> int:
-    if nodes[n].sval == 999: print("coerce-error"); exit(19)
+    if node_sval(nodes[n].op_ext) == 999: print("coerce-error"); exit(19)
     events.push("coerce:{n}:{t}:{xg_scopes.names.len()}")
     nodes[n].type = i32(t)
     n
@@ -93,7 +93,7 @@ main = ():
         assert(snapshot[n].kind == k and snapshot[ia].flags == 0)
         assert(r.type == T_INT and r.bypass)
         op = if k == .not_: Tok.tilde else if k == .and_: Tok.amp else: Tok.pipe
-        assert(nodes[n].op == i32(int(op)))
+        assert(node_op(nodes[n].op_ext) == i32(int(op)))
         assert(nodes[n].kind == (if k == .not_: NK.unary else: NK.binary))
     plain_a = a; plain_b = b
     tuple_type = int(tb_mk_tuple([T_BOOL]))
@@ -164,7 +164,7 @@ def test_checker_logic_error(compiler, tmp_path):
 main = ():
     prepare()
     a = operand(T_STR)
-    nodes[a].sval = 999
+    nodes[a].op_ext = node_with_sval(nodes[a].op_ext, i32(999))
     xg_check(logical(.not_, a), 0, 0)
     print("unreachable")
 '''

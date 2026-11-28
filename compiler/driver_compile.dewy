@@ -73,6 +73,7 @@ from p"witness_ops.dewy" import (wit_skip_close)
 from p"x64.jo" import (code entry_end_lf ra_spill_cost ra_total ra_verbose)
 from p"x64_ops.dewy" import (x64_entry x64_entry_win x64_resolve x64_stubs)
 from p"x64_baseline.dewy" import (x64_baseline_try)
+from p"node_store.dewy" import (node_mod)
 
 DriverWord:type=int64<overflow='wrap'>
 compile=(path:string out0:string):>string=>$unsafe {
@@ -256,11 +257,11 @@ compile=(path:string out0:string):>string=>$unsafe {
                 fi=lfuncs.ptr[i].inst
                 fd=DriverWord(fns.ptr[fi].decl)
                 if pending_exports >? 0 and fd not=? 0 {
-                    let fm=DriverWord(nodes.ptr[fd].mod)
+                    let fm=DriverWord(node_mod(nodes.ptr[fd].op_ext))
                     if not used_mods.has(fm) {
                         used_mods[fm]=true
                         loop k in 0.. and f in export_fns {
-                            if not exp_done[k] and nodes.ptr[DriverWord(fns.ptr[f].decl)].mod =? int32<overflow='wrap'>(fm) {
+                            if not exp_done[k] and node_mod(nodes.ptr[DriverWord(fns.ptr[f].decl)].op_ext) =? int32<overflow='wrap'>(fm) {
                                 exp_done[k]=true
                                 pending_exports -= 1
                                 lf_of_inst(f);

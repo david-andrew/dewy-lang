@@ -29,6 +29,7 @@ from p"refine_metadata.dewy" import (mk_refined ref_intern)
 from p"refine_ops.dewy" import ref_addr_max
 from p"unit_rare.dewy" import register_quantity_names
 from p"types.jo" import (T_MATH_INT T_INT T_I8 T_I16 T_I32 T_U8 T_U16 T_U32 T_U64 T_FLOAT T_F32 T_STR T_BOOL T_VOID T_NEVER T_VEC2 T_VEC3 T_VEC4 T_MAT4 T_IVEC2 T_IVEC3 T_IVEC4)
+from p"node_store.dewy" import (node_mod node_with_sval)
 
 StartupWord:type=int64<overflow='wrap'>
 # The main module m's own function the game calls by this name (main, update, draw), as its
@@ -37,7 +38,7 @@ game_fn=(m:StartupWord name:string):>StartupWord | none=>$unsafe {
     let e=modules[m].names.get(intern(name)) ?? 0
     loop e not=? 0 and syms.ptr[e].kind =? 'fns' and syms.ptr[e].decl not=? 0 and dewy_is_method(StartupWord(syms.ptr[e].decl)) {e=StartupWord(syms.ptr[e].next)}
     if e =? 0 {return none}
-    if name =? "main" and files[StartupWord(modules[m].file)].is_dewy and (syms.ptr[e].decl =? 0 or StartupWord(nodes.ptr[StartupWord(syms.ptr[e].decl)].mod) not=? m) {return none}
+    if name =? "main" and files[StartupWord(modules[m].file)].is_dewy and (syms.ptr[e].decl =? 0 or StartupWord(node_mod(nodes.ptr[StartupWord(syms.ptr[e].decl)].op_ext)) not=? m) {return none}
     e
 }
 # a call of the function `name` with no arguments, anywhere in n but inside function literals
@@ -160,22 +161,22 @@ add_universe=():>void=>{
     nodes[order].aux = -7
     universe[intern("MemoryOrder")] = new_sym(intern("MemoryOrder") 'alias_' order order)
     let tv = mk('str_lit' 0)
-    nodes[tv].sval = int32<overflow='wrap'>(intern(target_const()))
+    nodes[tv].op_ext=node_with_sval(nodes[tv].op_ext (int32<overflow='wrap'>(intern(target_const()))))
     let av = mk('str_lit' 0)
     let arch = "x86_64"
     if target_wasm {arch = "wasm32"}
     if target_arm64 {arch = "arm64"}
-    nodes[av].sval = int32<overflow='wrap'>(intern(arch))
+    nodes[av].op_ext=node_with_sval(nodes[av].op_ext (int32<overflow='wrap'>(intern(arch))))
     let tr = mk('bool_lit' 0)
     if not release_build {nodes[tr].ival = 1}
     let fl = mk('bool_lit' 0)
     let wv = mk('bool_lit' 0)
     if watch_build {nodes[wv].ival = 1}
     let pn = mk('str_lit' 0)
-    nodes[pn].sval = int32<overflow='wrap'>(intern(program_name))
+    nodes[pn].op_ext=node_with_sval(nodes[pn].op_ext (int32<overflow='wrap'>(intern(program_name))))
     let icon = @icon_node
     icon = mk('str_lit' 0)
-    nodes[icon].sval = int32<overflow='wrap'>(intern(""))
+    nodes[icon].op_ext=node_with_sval(nodes[icon].op_ext (int32<overflow='wrap'>(intern(""))))
     register_universe_constant("TARGET" tv T_STR)
     register_universe_constant("ARCH" av T_STR)
     register_universe_constant("DEBUG" tr T_BOOL)

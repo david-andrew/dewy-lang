@@ -72,15 +72,15 @@ main = ():
     nodes[11] = Node(kind=.ident, sym=2)
     nodes[12] = Node(kind=.field, a=10, name=101, type=i32(T_INT))
     nodes[13] = Node(kind=.field, a=11, name=101, type=i32(T_INT))
-    nodes[14] = Node(kind=.binary, a=12, b=13, op=i32(int(Tok.eq)))
+    nodes[14] = Node(kind=.binary, a=12, b=13, op_ext=node_with_op(u32(0), i32(i32(int(Tok.eq)))))
     if not fact_reflexive_eq(14, 1, 2, 0): exit(30)
     nodes[13].name = 102
     if fact_reflexive_eq(14, 1, 2, 0): exit(31)
     nodes[13].name = 101; nodes[12].aux = -1
     if fact_reflexive_eq(14, 1, 2, 0): exit(32)
-    nodes[12].aux = 0; nodes[14].op = i32(int(Tok.ne))
+    nodes[12].aux = 0; nodes[14].op_ext = node_with_op(nodes[14].op_ext, i32(i32(int(Tok.ne))))
     if fact_reflexive_eq(14, 1, 2, 0): exit(33)
-    nodes[14].op = i32(int(Tok.eq))
+    nodes[14].op_ext = node_with_op(nodes[14].op_ext, i32(i32(int(Tok.eq))))
     nodes[15] = Node(kind=.ident, sym=1)
     nodes[16] = Node(kind=.vardecl, sym=3, b=15)
     nodes[17] = Node(kind=.ident, sym=2)

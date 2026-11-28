@@ -3,6 +3,7 @@ from p"path_narrowing.dewy" import (narrow_by)
 from p"checker_block_entries.dewy" import (check_block)
 from p"ast.jo" import (nodes)
 from p"check.jo" import (narrow_jumps)
+from p"node_store.dewy" import (node_op)
 
 # `if` and `if let` run in checker_conditionals.dewy; these are its services.
 cond_block=(b:int64 expected:int64 value:bool @jumps:int64):>int64=>{
@@ -12,6 +13,6 @@ cond_block=(b:int64 expected:int64 value:bool @jumps:int64):>int64=>{
 
 cond_narrow=(cond:int64 holds:bool):>void=>$unsafe {
     let nd=nodes.ptr + cond
-    if nd[0].kind =? 'binary' and nd[0].op not=? 69 and nd[0].op not=? 70 {return}
+    if nd[0].kind =? 'binary' and node_op(nd[0].op_ext) not=? 69 and node_op(nd[0].op_ext) not=? 70 {return}
     narrow_by(cond holds)
 }

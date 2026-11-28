@@ -89,7 +89,7 @@ operand = (t: int, k: NK = .ident) -> int:
 cast = (a: int, t: int, dewy: bool = false, bits: bool = false) -> int:
     n = node(.cast, a); nodes[n].b = i32(node(.tname, 0, t, 3))
     if dewy: nodes[n].pos = DEWY + n
-    if bits: nodes[n].aux2 = 1
+    if bits: nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(1))
     n
 kind = (k: TK, elem: int = 0, st: int = 0) -> int:
     types.push(TypeInfo(kind = k, elem = i32(elem), st = i32(st)))

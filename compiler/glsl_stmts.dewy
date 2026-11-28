@@ -18,6 +18,7 @@ from p"glsl_ops.dewy" import (gl_err gl_store_check gl_first gl_fn_name gl_local
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
 from p"types.jo" import (T_I32 T_MAT4 T_MATH_INT T_VEC4 fields is_float is_vec prune structs tkind tsize types)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_aux2 node_d node_fval node_mod node_op)
 
 GlslStmtWord:type=int64<overflow='wrap'>
 # Shader arithmetic is float32, even for a CPU float64 function. Scale with
@@ -94,7 +95,7 @@ gl_stmt=(s:GlslStmtWord depth:GlslStmtWord):>void=>$unsafe {
     else if k =? 'assign' {
         if nodes.ptr[s].aux not=? 0 {gl_err(nodes.ptr[s].pos "unsupported assignment in shader")}
         let a=GlslStmtWord(nodes.ptr[s].a)
-        let op=GlslStmtWord(nodes.ptr[s].op)
+        let op=GlslStmtWord(node_op(nodes.ptr[s].op_ext))
         let ta=prune(ntype(a))
         let bop=gl_compound_op(cx_token(op))
         # (integers through gl_arith: their + - * wrap through unsigned numbers)
@@ -129,7 +130,7 @@ gl_stmt=(s:GlslStmtWord depth:GlslStmtWord):>void=>$unsafe {
         let el=GlslStmtWord(nodes.ptr[s].sym)
         let arr=""
         if nodes.ptr[s].aux =? 1 {
-            arr=gl_local(GlslStmtWord(nodes.ptr[s].d))
+            arr=gl_local(GlslStmtWord(node_d(nodes.ptr[s].op_ext)))
             gl_out.push("{pre}{gl_type(ct nodes.ptr[s].pos)} {arr} = {gl_expr(GlslStmtWord(nodes.ptr[s].a))};\n")
         }
         gl_out.push("{pre}for (int {iv} = 0; {iv} < {fixed_len(ct)}; {iv}++) \{\n")
@@ -186,7 +187,7 @@ gl_expr=(e:GlslStmtWord):>string=>$unsafe {
         if nodes.ptr[e].ival <? -2147483648 or nodes.ptr[e].ival >? 4294967295 {gl_err(nodes.ptr[e].pos "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")}
         return "{nodes.ptr[e].ival}"
     }
-    if k =? 'float_lit' {return gl_float(nodes.ptr[e].fval)}
+    if k =? 'float_lit' {return gl_float(node_fval(nodes.ptr[e].op_ext))}
     if k =? 'bool_lit' {
         if nodes.ptr[e].ival not=? 0 {return "true"}
         return "false"
@@ -212,7 +213,7 @@ gl_expr=(e:GlslStmtWord):>string=>$unsafe {
     if k =? 'binary' {
         let a=GlslStmtWord(nodes.ptr[e].a)
         let b=GlslStmtWord(nodes.ptr[e].b)
-        let op=cx_token_values.ptr[GlslStmtWord(nodes.ptr[e].op)]
+        let op=cx_token_values.ptr[GlslStmtWord(node_op(nodes.ptr[e].op_ext))]
         # (% keeps the dividend's sign, as on the CPU: GLSL's mod() takes the divisor's, and its %
         # is undefined for negative numbers)
         if op =? 'percent' and (is_float(ntype(a)) or is_vec(ntype(a))) {
@@ -221,13 +222,13 @@ gl_expr=(e:GlslStmtWord):>string=>$unsafe {
             return "({x} - {y} * trunc({x} / {y}))"
         }
         # (Dewy's `//` and `%` of signed integers floor, as on the CPU)
-        if nodes.ptr[e].aux2 =? -1 and (op =? 'slash' or op =? 'percent') and types.ptr[t].kind =? 'int_' and types.ptr[t].sign {return gl_narrow("{gl_floor(op =? 'percent')}({gl_expr(a)}, {gl_expr(b)})" t)}
+        if node_aux2(nodes.ptr[e].op_ext) =? -1 and (op =? 'slash' or op =? 'percent') and types.ptr[t].kind =? 'int_' and types.ptr[t].sign {return gl_narrow("{gl_floor(op =? 'percent')}({gl_expr(a)}, {gl_expr(b)})" t)}
         return gl_arith(op gl_expr(a) gl_expr(b) ntype(a) t ntype(b))
     }
     if k =? 'unary' {
-        if nodes.ptr[e].op =? int32(58) {return gl_expr(GlslStmtWord(nodes.ptr[e].a))}
+        if node_op(nodes.ptr[e].op_ext) =? int32(58) {return gl_expr(GlslStmtWord(nodes.ptr[e].a))}
         # (a space: `- -1.5`, not the decrement `--1.5`)
-        if nodes.ptr[e].op =? int32(59) {
+        if node_op(nodes.ptr[e].op_ext) =? int32(59) {
             # (integers through unsigned ones, which wrap: see gl_arith)
             if types.ptr[t].kind =? 'int_' {return gl_narrow("int(-uint({gl_expr(GlslStmtWord(nodes.ptr[e].a))}))" t)}
             if is_vec(t) and types.ptr[t].sign {return "ivec{types.ptr[t].bits}(-uvec{types.ptr[t].bits}({gl_expr(GlslStmtWord(nodes.ptr[e].a))}))"}
@@ -313,7 +314,7 @@ gl_expr=(e:GlslStmtWord):>string=>$unsafe {
         let nm=name_of(GlslStmtWord(nodes.ptr[decl].name))
         let args:array<string>=[]
         loop i in [0..nkids(e)) {args.push(gl_expr(kid(e i)))}
-        if modules[GlslStmtWord(nodes.ptr[decl].mod)].is_prelude {
+        if modules[GlslStmtWord(node_mod(nodes.ptr[decl].op_ext))].is_prelude {
             let g=sl_turns_fns.get(nm)
             if g not=? none {return "{g}(6.283185307179586 * fract({args[0]}))"}
             let g=builtin_map.get(nm)

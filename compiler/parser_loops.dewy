@@ -12,6 +12,7 @@ from p"parser_cursor.dewy" import (accept advance cur_pos pk)
 from p"parser_expr.dewy" import (parse_expr parse_not)
 from p"parser_flow_nodes.dewy" import (head_has_binder lx_flow_effects lx_opt_value lx_or_terms)
 from p"util.jo" import (files intern name_of pos_file)
+from p"node_store.dewy" import (node_op node_sval node_with_aux2 node_with_op node_with_sval)
 
 LoopWord:type=int64<overflow='wrap'>
 
@@ -90,7 +91,7 @@ parse_loop_head=():>int64=>$unsafe {
     }
     let h=parse_head_or()
     p_header=saved_h
-    let hk=nodes.ptr[h].op
+    let hk=node_op(nodes.ptr[h].op_ext)
     if hk =? 4 {
         # a plain condition
         let w=mk('while_' pos)
@@ -100,7 +101,7 @@ parse_loop_head=():>int64=>$unsafe {
     if hk =? 1 {
         # the binder node itself becomes the loop
         nodes.ptr[h].kind='for_'
-        nodes.ptr[h].op=0
+        nodes.ptr[h].op_ext=node_with_op(nodes.ptr[h].op_ext 0)
         nodes.ptr[h].pos=pos
         return h
     }
@@ -111,7 +112,7 @@ parse_loop_head=():>int64=>$unsafe {
 
 # Flatten an and-chain into its terms.
 head_terms=(h:LoopWord @out:array<int64>):>bool=>$unsafe {
-    let op=nodes.ptr[h].op
+    let op=node_op(nodes.ptr[h].op_ext)
     if op =? 2 {return head_terms(LoopWord(nodes.ptr[h].a) @out) and head_terms(LoopWord(nodes.ptr[h].b) @out)}
     if op =? 3 {return false}
     out.push(h)
@@ -156,7 +157,7 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
         let nseq:LoopWord=0
         let ok=true
         loop t in terms {
-            if nodes.ptr[t].op =? 1 {
+            if node_op(nodes.ptr[t].op_ext) =? 1 {
                 if terms.length >? 1 and has_flag(LoopWord(nodes.ptr[t].a) NF_STEP) {fatal(nodes.ptr[t].pos "stepped ranges are only supported in single loops for now")}
                 if nkids(t) not=? 1 or has_flag(t NF_MUT) and is_open_range(t) {ok=false}
                 else if not is_open_range(t) {
@@ -177,13 +178,13 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
         # Restrict this to a leading binder so earlier conditions cannot see a
         # newly shadowing name that was not in scope at their source position.
         let first=terms[0]
-        let direct_binder=nodes.ptr[first].op =? 1 and (not has_flag(first NF_MUT) or terms.length =? 1)
+        let direct_binder=node_op(nodes.ptr[first].op_ext) =? 1 and (not has_flag(first NF_MUT) or terms.length =? 1)
         loop i in [1..terms.length) {
-            if nodes.ptr[terms[i]].op not=? 4 {direct_binder=false}
+            if node_op(nodes.ptr[terms[i]].op_ext) not=? 4 {direct_binder=false}
         }
         if direct_binder {
             let f=mk('for_' pos)
-            nodes.ptr[f].sval=nodes.ptr[lx].sval
+            nodes.ptr[f].op_ext=node_with_sval(nodes.ptr[f].op_ext (node_sval(nodes.ptr[lx].op_ext)))
             nodes.ptr[f].a=nodes.ptr[first].a
             if has_flag(first NF_MUT) {add_flag(f NF_MUT)}
             set_list(f kids(first))
@@ -198,16 +199,16 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
         if ok and nseq =? 1 {
             loop t in terms {
                 if t =? seq {break}
-                if nodes.ptr[t].op =? 4 {ok=false}
+                if node_op(nodes.ptr[t].op_ext) =? 4 {ok=false}
             }
         }
         if ok and nseq =? 1 and nodes.ptr[LoopWord(nodes.ptr[seq].a)].kind not=? 'range' {
             let f=mk('for_' pos)
-            nodes.ptr[f].sval=nodes.ptr[lx].sval
+            nodes.ptr[f].op_ext=node_with_sval(nodes.ptr[f].op_ext (node_sval(nodes.ptr[lx].op_ext)))
             let ixname=intern("__ix{tag}")
             let pre:array<int64>=[]
             loop t in terms {
-                let op=nodes.ptr[t].op
+                let op=node_op(nodes.ptr[t].op_ext)
                 if op =? 1 and t not=? seq {
                     let lo=LoopWord(nodes.ptr[LoopWord(nodes.ptr[t].a)].a)
                     let v=LoopWord(nodes.ptr[kid(t 0)].name)
@@ -232,7 +233,7 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
         # (Dewy: an element in place only through the indexed form above)
         if files[pos_file(pos)].is_dewy {
             loop t in terms {
-                if nodes.ptr[t].op =? 1 and has_flag(t NF_MUT) {fatal(nodes.ptr[t].pos "a mutable element (`@x in xs`) combines with counters from 0 and conditions over one array (`loop i in 0.. and @x in xs`); write other combinations as separate loops")}
+                if node_op(nodes.ptr[t].op_ext) =? 1 and has_flag(t NF_MUT) {fatal(nodes.ptr[t].pos "a mutable element (`@x in xs`) combines with counters from 0 and conditions over one array (`loop i in 0.. and @x in xs`); write other combinations as separate loops")}
             }
         }
     }
@@ -246,7 +247,7 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
     let tr=mk('bool_lit' pos)
     nodes.ptr[tr].ival=1
     nodes.ptr[wl].a=int32<overflow='wrap'>(tr)
-    nodes.ptr[wl].sval=nodes.ptr[lx].sval
+    nodes.ptr[wl].op_ext=node_with_sval(nodes.ptr[wl].op_ext (node_sval(nodes.ptr[lx].op_ext)))
     loop i in [0..nkids(body)) {head.push(kid(body i))}
     nodes.ptr[wl].b=int32<overflow='wrap'>(lx_block(head pos))
     setup.push(wl)
@@ -260,7 +261,7 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
 # Statements that advance the iterators of h and break when the loop is over
 # (tail: statements after every binder and condition, still before the body).
 lx_lower_head=(h:LoopWord tag:string @setup:array<int64> @head:array<int64> @tail:array<int64> pos:LoopWord):>void=>$unsafe {
-    let op=nodes.ptr[h].op
+    let op=node_op(nodes.ptr[h].op_ext)
     if op =? 2 {
         lx_lower_head(LoopWord(nodes.ptr[h].a) tag @setup @head @tail pos)
         lx_lower_head(LoopWord(nodes.ptr[h].b) tag @setup @head @tail pos)
@@ -277,7 +278,7 @@ lx_lower_head=(h:LoopWord tag:string @setup:array<int64> @head:array<int64> @tai
         lx_or_terms(h @alts)
         let alive:array<int64>=[]
         loop t in alts {
-            if nodes.ptr[t].op not=? 1 {fatal(nodes.ptr[t].pos "only loop variables (x in xs) can be combined with `or`")}
+            if node_op(nodes.ptr[t].op_ext) not=? 1 {fatal(nodes.ptr[t].pos "only loop variables (x in xs) can be combined with `or`")}
             alive.push(lx_binder(t tag @setup @head @tail true pos))
         }
         let cond=lx_not(lx_ident(name_of(alive[0]) pos) pos)
@@ -297,7 +298,7 @@ lx_lower_head=(h:LoopWord tag:string @setup:array<int64> @head:array<int64> @tai
 lx_range_exhausted=(condition:LoopWord message:LoopWord start:LoopWord pos:LoopWord):>int64=>$unsafe {
     let args:array<int64>=[condition message clone(start)]
     let n=lx_call("$dewy_range_exhausted" args pos)
-    nodes.ptr[n].aux2=int32<overflow='wrap'>(RANGE_EXHAUSTION)
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32<overflow='wrap'>(RANGE_EXHAUSTION)))
     n
 }
 
@@ -366,7 +367,7 @@ lx_binder=(t:LoopWord tag:string @setup:array<int64> @head:array<int64> @tail:ar
             let wrapped="$range_wrapped{id}"
             setup.push(lx_let(intern(wrapped) lx_bool(false pos) pos))
             let message=mk('str_lit' pos)
-            nodes.ptr[message].sval=int32<overflow='wrap'>(intern("range exhausted its integer type"))
+            nodes.ptr[message].op_ext=node_with_sval(nodes.ptr[message].op_ext (int32<overflow='wrap'>(intern("range exhausted its integer type"))))
             head.push(lx_expr_stmt(lx_range_exhausted(lx_not(lx_ident(wrapped pos) pos) message LoopWord(nodes.ptr[it].a) pos) pos))
             head.push(lx_let(v lx_ident(cur pos) pos))
             let left=lx_ident(cur pos)
@@ -405,7 +406,7 @@ lx_binder=(t:LoopWord tag:string @setup:array<int64> @head:array<int64> @tail:ar
         }
         else {
             let message=mk('str_lit' pos)
-            nodes.ptr[message].sval=int32<overflow='wrap'>(intern("range exhausted its integer type"))
+            nodes.ptr[message].op_ext=node_with_sval(nodes.ptr[message].op_ext (int32<overflow='wrap'>(intern("range exhausted its integer type"))))
             let left=lx_ident(cur pos)
             let max_args:array<int64>=[lx_ident(cur pos)]
             let last=lx_bin('eq' left lx_call("$dewy_range_max" max_args pos) pos)
@@ -448,7 +449,8 @@ lx_binder=(t:LoopWord tag:string @setup:array<int64> @head:array<int64> @tail:ar
             let names=if nested_single {kids(kid(t 0))} else {kids(t)}
             set_list(tp names)
             let a=mk('assign' pos)
-            nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+            # Frozen Tok.assign ordinal.
+            nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext 47)
             nodes.ptr[a].a=int32<overflow='wrap'>(tp)
             nodes.ptr[a].b=int32<overflow='wrap'>(lx_ident(name_of(v) pos))
             head.push(a)
@@ -574,7 +576,8 @@ loop_unpack_many=(f:LoopWord):>void=>$unsafe {
     let t=mk('tuple' pos)
     set_list(t kids(f))
     let a=mk('assign' pos)
-    nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+    # Frozen Tok.assign ordinal.
+    nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext 47)
     nodes.ptr[a].a=int32<overflow='wrap'>(t)
     nodes.ptr[a].b=int32<overflow='wrap'>(lx_ident("__each{lx_count}" pos))
     let body=LoopWord(nodes.ptr[f].b)

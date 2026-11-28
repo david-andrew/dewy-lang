@@ -27,6 +27,7 @@ from p"refine_metadata.dewy" import (representation_type)
 from p"type_ops.dewy" import (layout mk_array)
 from p"types.jo" import (T_INT T_MATH_INT fields structs telem tkind tsize types)
 from p"util.jo" import (files pos_file)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 ExactLoopWord:type=int64<overflow='wrap'>
 
@@ -45,7 +46,7 @@ exl_expr=(n0:ExactLoopWord):>bool=>$unsafe {
     }
     if k =? 'index' {return nodes.ptr[n].aux =? 0 and exl_array(ExactLoopWord(nodes.ptr[n].a)) and exl_expr(ExactLoopWord(nodes.ptr[n].b))}
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return false}
-    let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[ExactLoopWord(node_op(nodes.ptr[n].op_ext))]
     if op =? 'percent' {
         let [known divisor]=integer_constant(ExactLoopWord(nodes.ptr[n].b))
         if not known or divisor <=? 0 {return false}
@@ -66,7 +67,7 @@ exl_plan=(n:ExactLoopWord depth:ExactLoopWord):>bool=>$unsafe {
         if nkids(n) not=? 0 or has_flag(n NF_GLOBAL) or nodes.ptr[n].sym <=? 0 or nodes.ptr[n].b =? 0 {return false}
         let l=ExactLoopWord(nodes.ptr[n].sym)
         let value=ExactLoopWord(nodes.ptr[n].b)
-        if nodes.ptr[n].aux2 =? 1 {
+        if node_aux2(nodes.ptr[n].op_ext) =? 1 {
             if nodes.ptr[value].kind not=? 'ident' or nodes.ptr[value].aux not=? int32(1) {return false}
             exl_aliases[l]=value
             if tkind(ntype(value)) =? 'array' {return true}
@@ -93,7 +94,7 @@ exl_plan=(n:ExactLoopWord depth:ExactLoopWord):>bool=>$unsafe {
         let l=ExactLoopWord(nodes.ptr[a].sym)
         if not exl_locals.has(l) or ExactLoopWord(locals.ptr[l].flags) & (LF_PARAM | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF) not=? 0 {return false}
         let b=exl_strip(ExactLoopWord(nodes.ptr[n].b))
-        if nodes.ptr[b].kind not=? 'binary' or cx_token_values.ptr[ExactLoopWord(nodes.ptr[b].op)] not=? 'plus' or nodes.ptr[b].aux not=? 0 {return false}
+        if nodes.ptr[b].kind not=? 'binary' or cx_token_values.ptr[ExactLoopWord(node_op(nodes.ptr[b].op_ext))] not=? 'plus' or nodes.ptr[b].aux not=? 0 {return false}
         let left=exl_strip(ExactLoopWord(nodes.ptr[b].a))
         if nodes.ptr[left].kind not=? 'ident' or nodes.ptr[left].sym not=? int32(l) or nodes.ptr[left].aux not=? int32(1) {return false}
         if fact_mentions(ExactLoopWord(nodes.ptr[b].b) l) or not exl_expr(ExactLoopWord(nodes.ptr[b].b)) {return false}

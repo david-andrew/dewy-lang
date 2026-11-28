@@ -5,6 +5,7 @@ from p"parse.jo" import (p_toks)
 from p"parser_shared.dewy" import (lx_block lx_expr_stmt lx_ident)
 from p"parser_cursor.dewy" import (partner)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_d node_op)
 
 ParserFlowWord:type=int64<overflow='wrap'>
 # Conservative source control flow: 1 falls through, 2 returns, 4 exits a loop.
@@ -39,12 +40,12 @@ lx_flow_effects=(n:ParserFlowWord):>int64=>$unsafe {
     # or conditions. Keep fallthrough possible rather than proving termination.
     let e:ParserFlowWord=1
     e |= lx_flow_effects(ParserFlowWord(nodes.ptr[n].a)) | lx_flow_effects(ParserFlowWord(nodes.ptr[n].b))
-    e |= lx_flow_effects(ParserFlowWord(nodes.ptr[n].c)) | lx_flow_effects(ParserFlowWord(nodes.ptr[n].d))
+    e |= lx_flow_effects(ParserFlowWord(nodes.ptr[n].c)) | lx_flow_effects(ParserFlowWord(node_d(nodes.ptr[n].op_ext)))
     loop item in kids(n) {e |= lx_flow_effects(item)}
     e
 }
 lx_or_terms=(h:ParserFlowWord @out:array<int64>):>void=>$unsafe {
-    if ParserFlowWord(nodes.ptr[h].op) =? 3 {
+    if ParserFlowWord(node_op(nodes.ptr[h].op_ext)) =? 3 {
         lx_or_terms(ParserFlowWord(nodes.ptr[h].a) @out)
         lx_or_terms(ParserFlowWord(nodes.ptr[h].b) @out)
     }

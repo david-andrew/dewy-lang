@@ -26,12 +26,13 @@ from p"types.jo" import (T_F32 T_I32 T_MATH_INT is_float is_int is_numeric prune
 from p"unit_ops.dewy" import (quantity_literal_syntax)
 from p"util.jo" import (intern name_of)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_aux2 node_op node_sval node_with_aux2 node_with_op node_with_sval)
 
 DottedWord:type=int64<overflow='wrap'>
 # (`m[0 [..]] =? [1 2]`: a 1-D selection against a literal of its elements; `m * [1.0 0.0]`:
 # a matrix times a column vector written out, in the matrix's elements)
 binary_nd_hint=(n:DottedWord ta:DottedWord h:DottedWord):>int64=>$unsafe {
-    let op=cx_token_values.ptr[DottedWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[DottedWord(node_op(nodes.ptr[n].op_ext))]
     let bk=nodes.ptr[DottedWord(nodes.ptr[n].b)].kind
     if (op =? 'eq' or op =? 'ne') and is_nd(ta) and bk =? 'array' {return mk_array(nd_elem(ta))}
     if op =? 'star' and is_nd(ta) and bk =? 'array' and dewy_at(nodes.ptr[n].pos) and is_numeric(nd_elem(ta)) {return mk_array(nd_elem(ta))}
@@ -46,7 +47,7 @@ binary_nd_hint=(n:DottedWord ta:DottedWord h:DottedWord):>int64=>$unsafe {
 dewy_new_axis=(n:DottedWord expected:DottedWord):>int64=>$unsafe {
     let pos=nodes.ptr[n].pos
     let entries=kids(n)
-    let base=if nodes.ptr[n].sval not=? 0 {name_of(DottedWord(nodes.ptr[n].sval))} else {""}
+    let base=if node_sval(nodes.ptr[n].op_ext) not=? 0 {name_of(DottedWord(node_sval(nodes.ptr[n].op_ext)))} else {""}
     let receiver=DottedWord(nodes.ptr[n].a)
     let t=prune(check_expr(clone(receiver) 0))
     if is_nd(t) {
@@ -186,7 +187,7 @@ bc_loop=(name:string n:DottedWord body:array<int64> pos:DottedWord):>int64=>$uns
 # the operator a dotted operator applies to each element (.+ is +, .<= is <=, ...)
 dot_base_op=(n:DottedWord):>Tok=>$unsafe {
     let c=DottedWord(nodes.ptr[n].aux)
-    let three=nodes.ptr[n].aux2 =? 1
+    let three=node_aux2(nodes.ptr[n].op_ext) =? 1
     if c =? b'+' {return 'plus'}
     if c =? b'-' {return 'minus'}
     if c =? b'*' {return 'star'}
@@ -212,11 +213,11 @@ dot_template=(n:DottedWord @leaves:array<int64> tag:string):>int64=>$unsafe {
     if k =? 'unary' and has_flag(n NF_BROADCAST) {
         let a=dot_template(DottedWord(nodes.ptr[n].a) @leaves tag)
         let result=mk('unary' pos)
-        nodes.ptr[result].op=nodes.ptr[n].op
+        nodes.ptr[result].op_ext=node_with_op(nodes.ptr[result].op_ext (node_op(nodes.ptr[n].op_ext)))
         nodes.ptr[result].a=int32(a)
         return result
     }
-    if k =? 'binary' and nodes.ptr[n].op =? int32(85) {
+    if k =? 'binary' and node_op(nodes.ptr[n].op_ext) =? int32(85) {
         let a=dot_template(DottedWord(nodes.ptr[n].a) @leaves tag)
         let b=dot_template(DottedWord(nodes.ptr[n].b) @leaves tag)
         let op=dot_base_op(n)
@@ -236,7 +237,7 @@ dot_template=(n:DottedWord @leaves:array<int64> tag:string):>int64=>$unsafe {
         nodes.ptr[c].a=nodes.ptr[n].a
         # (`@load.(sources)`: each element a partial, `@load(source)`, an argument group of an
         # ungrouped `@` chain; nothing is called. decisions.md batch 7, select-v6.md)
-        if nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) {nodes.ptr[c].aux2=nodes.ptr[n].aux2}
+        if node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL) {nodes.ptr[c].op_ext=node_with_aux2(nodes.ptr[c].op_ext (node_aux2(nodes.ptr[n].op_ext)))}
         let args:array<int64>=[]
         loop x in kids(n) {args.push(dot_template(x @leaves tag))}
         set_list(c args)
@@ -311,7 +312,7 @@ bc_loop_nd=(tmpl:DottedWord arrs:array<string> kinds:array<int64> pre:string epr
         let step=mk('assign' pos)
         nodes.ptr[step].a=int32(dotted_id(pre "q{k}" pos))
         nodes.ptr[step].b=int32(bc_bcast_index([bc_int(1 pos) dotted_id(pre "q{k}" pos) dotted_id(pre "ls{k}" pos)] pos))
-        nodes.ptr[step].op=int32(47)
+        nodes.ptr[step].op_ext=node_with_op(nodes.ptr[step].op_ext (int32(47)))
         advance.push(step)
     }
     # (room for every element, written in place: element i in step i)
@@ -337,7 +338,7 @@ bc_loop_nd=(tmpl:DottedWord arrs:array<string> kinds:array<int64> pre:string epr
     let store=mk('assign' pos)
     nodes.ptr[store].a=int32(ixo)
     nodes.ptr[store].b=int32(tmpl)
-    nodes.ptr[store].op=int32(47)
+    nodes.ptr[store].op_ext=node_with_op(nodes.ptr[store].op_ext (int32(47)))
     body.push(store)
     loop step in advance {body.push(step)}
     rowpre.push(bc_loop("{pre}j" dotted_id(pre "in" pos) body pos))
@@ -432,7 +433,7 @@ bc_body1=(tmpl:DottedWord arrs:array<string> pre:string epre:string out:string s
     let asg=mk('assign' pos)
     nodes.ptr[asg].a=int32(ixo)
     nodes.ptr[asg].b=int32(tmpl)
-    nodes.ptr[asg].op=int32(47)
+    nodes.ptr[asg].op_ext=node_with_op(nodes.ptr[asg].op_ext (int32(47)))
     body.push(asg)
     body
 }
@@ -575,7 +576,7 @@ check_dotted=(n:int64 expected:int64):>int64=>$unsafe {
         let runf="__gpu_run_f"
         if is_int(rt) {runf="__gpu_run_i"}
         let ds=mk('str_lit' pos)
-        nodes.ptr[ds].sval=int32(intern(desc))
+        nodes.ptr[ds].op_ext=node_with_sval(nodes.ptr[ds].op_ext (int32(intern(desc))))
         let ga=mk('array' pos)
         set_list(ga gins)
         # (the operands' broadcast, an obligation as a CPU array's is)

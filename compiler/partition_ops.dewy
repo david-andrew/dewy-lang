@@ -19,6 +19,7 @@ from p"parallel_ops.dewy" import (parallel_prelude_call)
 from p"partition.jo" import (partition_active partition_data partition_descs partition_lengths partition_mode partition_proven)
 from p"types.jo" import (telem tkind tsize)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 PartWord:type=int64<overflow='wrap'>
 partition_scalar=(t:PartWord):>bool=>{
@@ -42,7 +43,7 @@ partition_bound=(n:PartWord):>bool=>$unsafe {
         return PartWord(locals.ptr[PartWord(nodes.ptr[n].sym)].flags) & (LF_ASSIGNED | LF_ADDR | LF_SHARED | LF_BYREF | LF_ALIAS | LF_MUTPARAM) =? 0
     }
     if k =? 'conv' {return partition_bound(PartWord(nodes.ptr[n].a))}
-    if k =? 'binary' and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32(58) or nodes.ptr[n].op =? int32(59)) {
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 and (node_op(nodes.ptr[n].op_ext) =? int32(58) or node_op(nodes.ptr[n].op_ext) =? int32(59)) {
         return partition_bound(PartWord(nodes.ptr[n].a)) and partition_bound(PartWord(nodes.ptr[n].b))
     }
     false
@@ -69,7 +70,7 @@ partition_parameter=(l:PartWord f:PartWord):>PartWord=>$unsafe {
     if PartWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {return l}
     if PartWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_EXPOSED | LF_SHARED) not=? 0 {return 0}
     loop s in kids(PartWord(fns.ptr[f].body)) {
-        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
         if nodes.ptr[s].sym not=? int32(l) {continue}
         let a=PartWord(nodes.ptr[s].b)
         if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) {
@@ -124,7 +125,7 @@ partition_body=(n:PartWord f:PartWord @seen:dict<int64 bool>):>bool=>$unsafe {
         let id=nodes.ptr[n].aux as IN
         if id not=? IN.assert and id not=? IN.runtime_assert and id not=? IN.fmin and id not=? IN.fmax and id not=? IN.sqrt {return false}
     }
-    if k =? 'vardecl' and nodes.ptr[n].aux2 =? 1 and partition_parameter(PartWord(nodes.ptr[n].sym) f) not=? 0 {return true}
+    if k =? 'vardecl' and node_aux2(nodes.ptr[n].op_ext) =? 1 and partition_parameter(PartWord(nodes.ptr[n].sym) f) not=? 0 {return true}
     if k =? 'vardecl' and not has_flag(n NF_GLOBAL) {
         let fork=partition_fork(PartWord(nodes.ptr[n].b))
         if fork not=? 0 {return partition_fork_safe(fork @seen)}
@@ -270,7 +271,7 @@ partition_fork=(n0:PartWord):>PartWord=>$unsafe {
     let branch:PartWord=0
     let returned=false
     loop statement in kids(body) {
-        if nodes.ptr[statement].kind =? 'vardecl' and nodes.ptr[statement].aux2 =? 1 {continue}
+        if nodes.ptr[statement].kind =? 'vardecl' and node_aux2(nodes.ptr[statement].op_ext) =? 1 {continue}
         if nodes.ptr[statement].kind =? 'if_' and branch =? 0 and not returned {branch=statement}
         else if nodes.ptr[statement].kind =? 'return_' and branch not=? 0 and not returned {
             let r=PartWord(nodes.ptr[statement].a)
@@ -281,7 +282,7 @@ partition_fork=(n0:PartWord):>PartWord=>$unsafe {
     }
     if branch =? 0 or not returned {return 0}
     let condition=PartWord(nodes.ptr[branch].a)
-    if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].op not=? int32(69) or nodes.ptr[condition].aux not=? 0 {return 0}
+    if nodes.ptr[condition].kind not=? 'binary' or node_op(nodes.ptr[condition].op_ext) not=? int32(69) or nodes.ptr[condition].aux not=? 0 {return 0}
     let index=word_integer_value(PartWord(nodes.ptr[condition].a))
     let zero=word_integer_value(PartWord(nodes.ptr[condition].b))
     if nodes.ptr[zero].kind not=? 'int_lit' or nodes.ptr[zero].ival not=? 0 or nodes.ptr[index].kind not=? 'ident' or nodes.ptr[index].aux not=? int32(1) {return 0}
@@ -382,7 +383,7 @@ partition_begin=(f:PartWord):>void=>$unsafe {
         }
     }
     loop s in kids(PartWord(fns.ptr[f].body)) {
-        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
         let l=PartWord(nodes.ptr[s].sym)
         let p=partition_parameter(l f)
         if p not=? 0 and p not=? l {

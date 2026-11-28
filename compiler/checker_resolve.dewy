@@ -1,7 +1,7 @@
 $runtime_checks
 from p"checker_type_entries.dewy" import (type_param_defaults)
 
-from p"node_store.dewy" import (Node node_kids node_kids2)
+from p"node_store.dewy" import (Node node_kids node_kids2 node_list2 node_nlist2 node_sval)
 from p"checker_types.dewy" import (TK TypeInfo)
 from p"checker_state.dewy" import (RefineBindings)
 from p"checker_alias.dewy" import (ca_resolve_alias)
@@ -57,10 +57,10 @@ ct_kid=(n:CTWord i:CTWord):>CTWord=>$unsafe {
     CTWord(ct_input[0].lists[0].ptr[CTWord(ct_input[0].nodes[0].ptr[n].list) + i])
 }
 ct_nkids2=(n:CTWord):>CTWord=>$unsafe {
-    CTWord(ct_input[0].nodes[0].ptr[n].nlist2)
+    CTWord(node_nlist2(ct_input[0].nodes[0].ptr[n].op_ext))
 }
 ct_kid2=(n:CTWord i:CTWord):>CTWord=>$unsafe {
-    CTWord(ct_input[0].lists[0].ptr[CTWord(ct_input[0].nodes[0].ptr[n].list2) + i])
+    CTWord(ct_input[0].lists[0].ptr[CTWord(node_list2(ct_input[0].nodes[0].ptr[n].op_ext)) + i])
 }
 ct_kids=(n:CTWord):>array<int64>=>$unsafe {
     node_kids(@ct_input[0].nodes[0]   @ct_input[0].lists[0]   n)
@@ -230,7 +230,7 @@ ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
             key=tn_label_key(labels)
         }
         let base=tb_mk_fn(ps   ret   mm   key   0   pack_result_count(CTWord(ct_input[0].nodes[0].ptr[tn].a)) >? 0)
-        if ct_input[0].nodes[0].ptr[tn].sval =? 0 {return base}
+        if node_sval(ct_input[0].nodes[0].ptr[tn].op_ext) =? 0 {return base}
         let names:array<int64>=[]
         loop p in ct_kids2(tn) {names.push(CTWord(ct_input[0].nodes[0].ptr[p].name))}
         return resolve_type_contract(tn   base   ps   names   mm)

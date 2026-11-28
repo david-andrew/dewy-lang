@@ -33,7 +33,7 @@ from p"numeric_library_types.dewy" import (bundled_bigint_type)
 from p"checks_builders.dewy" import (bc_call bc_field bc_ident)
 from p"checker_tokens.dewy" import (Tok)
 from p"types.jo" import (T_INT T_MATH_INT is_float is_int is_numeric prune types)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_sval node_with_aux2 node_with_op)
 from p"ast.jo" import (NF_CHECKED NF_U64 add_flag has_flag mk nodes set_list)
 
 ArithmeticCallsWord:type=int64<overflow='wrap'>
@@ -65,8 +65,8 @@ dewy_arithmetic_call=(n:int64 name:int64 args:array<int64> expected:int64):>int6
     }
     let exact_operands=(is_numeric(ntype(a)) or bundled_rational_type(ntype(a)) or bundled_bigint_type(ntype(a))) and (is_numeric(ntype(b)) or bundled_rational_type(ntype(b)) or bundled_bigint_type(ntype(b)))
     if exact_operands and not is_float(expected) and not (is_float(ntype(a)) and not is_lit(a)) and not (is_float(ntype(b)) and not is_lit(b)) {
-        if nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0 and is_lit(a) {exact_decimal(a);}
-        if nodes.ptr[b].kind =? 'float_lit' and nodes.ptr[b].sval not=? 0 and is_lit(b) {exact_decimal(b);}
+        if nodes.ptr[a].kind =? 'float_lit' and node_sval(nodes.ptr[a].op_ext) not=? 0 and is_lit(a) {exact_decimal(a);}
+        if nodes.ptr[b].kind =? 'float_lit' and node_sval(nodes.ptr[b].op_ext) not=? 0 and is_lit(b) {exact_decimal(b);}
     }
     if (is_quantity(ntype(a)) or is_quantity(ntype(b))) and quantity_record_operand(prune(ntype(a)) prune(ntype(b))) {
         let op=if name =? intern("__dewy_divide") {"/"} else if name =? intern("__floor_div") {"//"} else if name =? intern("__floor_mod") {"%"} else {"**"}
@@ -109,7 +109,7 @@ dewy_arithmetic_call=(n:int64 name:int64 args:array<int64> expected:int64):>int6
             if dir_panics_demanded() {fact_divisors[n] = 1}
         }
         else {
-            nodes[n] = Node(kind = 'binary' pos = pos op = 61 a = int32<overflow='wrap'>(a) b = int32<overflow='wrap'>(b))
+            nodes[n] = Node(kind = 'binary' pos = pos op_ext = uint32(61) a = int32<overflow='wrap'>(a) b = int32<overflow='wrap'>(b))
         }
         return check_expr(n expected)
     }
@@ -168,7 +168,7 @@ dewy_arithmetic_call=(n:int64 name:int64 args:array<int64> expected:int64):>int6
             [known exponent]=integer_constant(b)
             if known {coerce(b T_INT);}
         }
-        nodes[n] = Node(kind = 'binary' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(a) b = int32<overflow='wrap'>(b) type = int32<overflow='wrap'>(t) op = 79 flags = int32<overflow='wrap'>(NF_CHECKED))
+        nodes[n] = Node(kind = 'binary' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(a) b = int32<overflow='wrap'>(b) type = int32<overflow='wrap'>(t) op_ext = uint32(79) flags = int32<overflow='wrap'>(NF_CHECKED))
         return exact_int_result(n)
     }
     if policy not=? 0 or not power and exact_type(ntype(a) nodes.ptr[n].pos) {
@@ -180,7 +180,7 @@ dewy_arithmetic_call=(n:int64 name:int64 args:array<int64> expected:int64):>int6
                 let [known_modulus modulus]=integer_constant(b)
                 if known_modulus and modulus >? 0 and modulus & (modulus - 1) not=? 0 {runtime_demand("__exact_i128_mod_pos")}
             }
-            nodes[n] = Node(kind = 'binary' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(a) b = int32<overflow='wrap'>(b) type = int32<overflow='wrap'>(t) op = tok_ordinal(if modulo {Tok.percent} else {Tok.slash}) aux2 = -1 flags = int32<overflow='wrap'>(NF_CHECKED))
+            nodes[n] = Node(kind = 'binary' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(a) b = int32<overflow='wrap'>(b) type = int32<overflow='wrap'>(t) op_ext = node_with_aux2(node_with_op(uint32(0) tok_ordinal(if modulo {Tok.percent} else {Tok.slash})) int32(-1)) flags = int32<overflow='wrap'>(NF_CHECKED))
             return if policy =? 0 {exact_int_result(n)} else {t}
         }
     }

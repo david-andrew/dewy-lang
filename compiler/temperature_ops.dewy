@@ -18,14 +18,15 @@ from p"unit_ops.dewy" import (base_dimension intern_quantity_tag mk_quantity qua
 from p"util.jo" import (name_of pos_in_lib)
 from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (line_col)
+from p"node_store.dewy" import (node_fval node_mod node_op)
 TempWord:type=int64<overflow='wrap'>
 # (the unit name of a temperature literal as written, before checking: 20°C, -5°F; else 0)
 tk_literal_unit=(e:TempWord):>TempWord=>$unsafe {
     if e =? 0 or has_flag(e NF_CHECKED) {return 0}
     let k=nodes.ptr[e].kind
-    if k =? 'unary' and nodes.ptr[e].op =? int32(59) {return tk_literal_unit(TempWord(nodes.ptr[e].a))}
+    if k =? 'unary' and node_op(nodes.ptr[e].op_ext) =? int32(59) {return tk_literal_unit(TempWord(nodes.ptr[e].a))}
     # (written next to its number: `20*°C` is a product, a point)
-    if k not=? 'binary' or nodes.ptr[e].op not=? int32(60) or not has_flag(e NF_JUXT) {return 0}
+    if k not=? 'binary' or node_op(nodes.ptr[e].op_ext) not=? int32(60) or not has_flag(e NF_JUXT) {return 0}
     let x=nodes.ptr[TempWord(nodes.ptr[e].a)].kind
     let u=TempWord(nodes.ptr[e].b)
     if (x not=? 'int_lit' and x not=? 'float_lit') or nodes.ptr[u].kind not=? 'ident' {return 0}
@@ -97,7 +98,7 @@ tk_partner=(d:TempWord block:TempWord index:TempWord):>TempWord=>$unsafe {
     if block not=? 0 {
         loop i in [index + 1..nkids(block)) {tk_statement(block i)}
     }
-    else {tk_module(TempWord(nodes.ptr[d].mod))}
+    else {tk_module(TempWord(node_mod(nodes.ptr[d].op_ext)))}
     let kind=tk_own_kind()
     tk_deciding.remove(d);
     tks=saved
@@ -165,7 +166,7 @@ tk_class=(x:TempWord depth:TempWord):>TempWord=>$unsafe {
     if u not=? 0 {return if tk_offset_unit(u) {TKC_LIT} else {TKC_OTHER}}
     if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'none_lit' {return TKC_OTHER}
     if k =? 'unary' {
-        if nodes.ptr[x].op not=? int32(59) {return TKC_OTHER}
+        if node_op(nodes.ptr[x].op_ext) not=? int32(59) {return TKC_OTHER}
         return tk_class(TempWord(nodes.ptr[x].a) depth + 1)
     }
     if k =? 'cast' {
@@ -173,7 +174,7 @@ tk_class=(x:TempWord depth:TempWord):>TempWord=>$unsafe {
         return if c =? TKC_LIT or c =? TKC_NAMED {TKC_POINT} else {c}
     }
     if k =? 'binary' {
-        let op=cx_token(nodes.ptr[x].op)
+        let op=cx_token(node_op(nodes.ptr[x].op_ext))
         let a=TempWord(nodes.ptr[x].a)
         let b=TempWord(nodes.ptr[x].b)
         if op =? 'plus' or op =? 'minus' {
@@ -250,7 +251,7 @@ tk_use=(n:TempWord):>void=>$unsafe {
         let sa=tk_self(a)
         let sb=tk_self(b)
         if not sa and not sb {return}
-        let op=cx_token(nodes.ptr[n].op)
+        let op=cx_token(node_op(nodes.ptr[n].op_ext))
         if op =? 'dotop' {
             let c=TempWord(nodes.ptr[n].aux)
             if c =? b'+' {op='plus'}
@@ -279,14 +280,14 @@ tk_use=(n:TempWord):>void=>$unsafe {
         else if cmp and c =? TKC_DIFF {tk_note(true n me mediated)}
         return
     }
-    if k =? 'unary' and nodes.ptr[n].op =? int32(59) and tk_self(TempWord(nodes.ptr[n].a)) {
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? int32(59) and tk_self(TempWord(nodes.ptr[n].a)) {
         tk_note(true n TempWord(nodes.ptr[n].a) false)
         return
     }
     if k =? 'assign' {
         let lhs=TempWord(nodes.ptr[n].a)
         let rhs=TempWord(nodes.ptr[n].b)
-        let op=cx_token(nodes.ptr[n].op)
+        let op=cx_token(node_op(nodes.ptr[n].op_ext))
         if tk_self(lhs) {
             if op =? 'assign' and tk_literal_unit(rhs) =? tks.unit {tks.writes.push(rhs)}
             else {tks.open=true}
@@ -344,7 +345,7 @@ tk_walk=(n:TempWord):>void=>$unsafe {
         return
     }
     if k =? 'binary' or k =? 'unary' or k =? 'assign' {tk_use(n)}
-    if k =? 'assign' and nodes.ptr[n].op =? int32(47) and nodes.ptr[TempWord(nodes.ptr[n].a)].kind =? 'ident' and not tk_self(TempWord(nodes.ptr[n].a)) {
+    if k =? 'assign' and node_op(nodes.ptr[n].op_ext) =? int32(47) and nodes.ptr[TempWord(nodes.ptr[n].a)].kind =? 'ident' and not tk_self(TempWord(nodes.ptr[n].a)) {
         # (a name not seen yet: `x = value` declares it)
         let nm=TempWord(nodes.ptr[TempWord(nodes.ptr[n].a)].name)
         tk_walk(TempWord(nodes.ptr[n].b))
@@ -388,7 +389,7 @@ tk_text=(x:TempWord):>string=>$unsafe {
     let u=tk_literal_unit(x)
     if u not=? 0 and nodes.ptr[x].kind =? 'binary' {
         let v=TempWord(nodes.ptr[x].a)
-        let number=if nodes.ptr[v].kind =? 'int_lit' {"{nodes.ptr[v].ival}"} else {"{nodes.ptr[v].fval}"}
+        let number=if nodes.ptr[v].kind =? 'int_lit' {"{nodes.ptr[v].ival}"} else {"{node_fval(nodes.ptr[v].op_ext)}"}
         return "{number}{name_of(u)}"
     }
     "…"
@@ -411,7 +412,7 @@ tk_op_text=(op:Tok):>string=>{
 tk_use_text=(n:TempWord):>string=>$unsafe {
     let k=nodes.ptr[n].kind
     if k =? 'unary' {return "-{tk_text(TempWord(nodes.ptr[n].a))}"}
-    let op=cx_token(nodes.ptr[n].op)
+    let op=cx_token(node_op(nodes.ptr[n].op_ext))
     if k =? 'binary' and op =? 'dotop' {
         let c=TempWord(nodes.ptr[n].aux)
         let sym="/"
@@ -432,7 +433,7 @@ temperature_binding=(s:TempWord t:TempWord unit:TempWord global:bool):>TempWord=
     tk_decls=[]
     tks=TkScan(name=TempWord(nodes.ptr[s].name) unit=unit self_decl=s)
     tk_deciding[s]=true
-    if global {tk_module(TempWord(nodes.ptr[s].mod))}
+    if global {tk_module(TempWord(node_mod(nodes.ptr[s].op_ext)))}
     else {
         loop i in [sibling_index + 1..nkids(sibling_block)) {tk_statement(sibling_block i)}
     }

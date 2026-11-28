@@ -3,6 +3,7 @@ $runtime_checks
 from p"ast.jo" import (mk nodes)
 from p"checker_tokens.dewy" import (Tok)
 from p"lex.jo" import (kw_kinds)
+from p"node_store.dewy" import (node_with_op)
 
 OpWord:type=int64<overflow='wrap'>
 
@@ -121,7 +122,7 @@ binprec=(k:Tok):>int64=>binprec_value(k)
 
 lx_bin=(op:Tok a:OpWord b:OpWord pos:OpWord):>int64=>$unsafe {
     let n=mk('binary' pos)
-    nodes.ptr[n].op=tok_ordinal(op)
+    nodes.ptr[n].op_ext=node_with_op(nodes.ptr[n].op_ext (tok_ordinal(op)))
     nodes.ptr[n].a=int32<overflow='wrap'>(a)
     nodes.ptr[n].b=int32<overflow='wrap'>(b)
     n
@@ -129,7 +130,7 @@ lx_bin=(op:Tok a:OpWord b:OpWord pos:OpWord):>int64=>$unsafe {
 
 lx_assign=(target:OpWord op:Tok v:OpWord pos:OpWord):>int64=>$unsafe {
     let a=mk('assign' pos)
-    nodes.ptr[a].op=tok_ordinal(op)
+    nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext (tok_ordinal(op)))
     nodes.ptr[a].a=int32<overflow='wrap'>(target)
     nodes.ptr[a].b=int32<overflow='wrap'>(v)
     a

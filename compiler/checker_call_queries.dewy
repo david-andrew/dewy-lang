@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import (Node call_waits_hook call_waits_never)
+from p"node_store.dewy" import (Node call_waits_hook call_waits_never node_aux2 node_op)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (FnInst Sym FnCtx)
 # Questions the call checker asks of a call's names and arguments: which intrinsic a
@@ -80,8 +80,8 @@ intrinsic_of=(name:CGWord):>CGWord=>$unsafe {
 # A literal too wide for a word (a call the reader marked), possibly negated.
 cg_oversized=(a:CGWord):>bool=>$unsafe {
     let nd=cg_nodes[0].ptr + a
-    if nd[0].kind =? 'unary' and nd[0].op =? 59 {return cg_oversized(CGWord(nd[0].a))}
-    nd[0].kind =? 'call' and nd[0].aux2 =? -1
+    if nd[0].kind =? 'unary' and node_op(nd[0].op_ext) =? 59 {return cg_oversized(CGWord(nd[0].a))}
+    nd[0].kind =? 'call' and node_aux2(nd[0].op_ext) =? -1
 }
 cg_dewy=(pos:int64):>bool=>$unsafe {cg_files[0].ptr[pos >> 40].is_dewy}
 # Does argument a take its type from its parameter: an unchecked Dewy literal (array,
@@ -99,7 +99,7 @@ ctx_array_waits=(a:CGWord):>bool=>$unsafe {
 }
 ctx_dependent_call=(a:CGWord):>bool=>$unsafe {
     let nd=cg_nodes[0].ptr + a
-    if nd[0].aux2 =? -1 {return true}
+    if node_aux2(nd[0].op_ext) =? -1 {return true}
     if nd[0].type =? 0 {
         let callee_index=CGWord(nd[0].a)
         let cn=cg_nodes[0].ptr + callee_index
@@ -127,7 +127,7 @@ ctx_dependent=(a:CGWord):>bool=>$unsafe {
     let nd=cg_nodes[0].ptr + a
     match nd[0].kind {
         <'ident'|'field'|'typeapply'> => (CGWord(nd[0].flags) & 4096) not=? 0
-        <'unary'> => nd[0].op =? 59 and cg_oversized(CGWord(nd[0].a))
+        <'unary'> => node_op(nd[0].op_ext) =? 59 and cg_oversized(CGWord(nd[0].a))
         <'dotname'> => nd[0].type =? 0
         <'lambda'|'none_lit'|'hole'|'record_lit'> => true
         <'if_'|'match_'> => (CGWord(nd[0].flags) & 128) =? 0 and cg_dewy(nd[0].pos)

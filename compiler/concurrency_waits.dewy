@@ -20,6 +20,7 @@ from p"ownership_hooks.dewy" import (ownership_literal_print)
 from p"lower_helpers.dewy" import (value_helper_calls)
 from p"concurrency_parsafe.dewy" import (parsafe_is_param parsafe_vouched_nonblocking)
 from p"lower_races.dewy" import (local_literal_fn)
+from p"node_store.dewy" import (node_sval)
 # Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
 WaitingWord:type=int64<overflow='wrap'>
 let cw_file_class:array<int8>=[]
@@ -131,7 +132,7 @@ concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bo
     # (a foreign function whose declared row excludes `blocks`, `& no_effects` or
     # `& no blocks`, is trusted not to wait, as part of its unsafe claim)
     if has_flag(d NF_EXTERN) {
-        if nodes.ptr[d].sval =? 0 {return true}
+        if node_sval(nodes.ptr[d].op_ext) =? 0 {return true}
         let row:WaitingWord=WaitingWord(fn_sig(d).contract)
         return row =? 0 or effect_allows(row EffectAtom['block']) or effect_contracts.ptr[row].atoms.contains(EffectAtom['opaque'])
     }

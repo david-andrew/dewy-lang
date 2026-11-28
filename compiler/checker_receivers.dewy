@@ -3,7 +3,7 @@ from p"index_operand_checks.dewy" import (dewy_bracket_call)
 from p"member_handles.dewy" import (dewy_method_handle type_name_member)
 
 from p"expr_node_queries.dewy" import (grouped_place_call)
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_aux2 node_sval)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -114,7 +114,7 @@ xs_sync_field_mask=():>void=>$unsafe {
 }
 # Flags: NF_JUXT 536870912, NF_LOOPCOUNT 33554432.
 xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
-    if xs_nodes[0].ptr[n].aux2 =? (-11) and grouped_place_call(n) {return check_expr(n expected)}
+    if node_aux2(xs_nodes[0].ptr[n].op_ext) =? (-11) and grouped_place_call(n) {return check_expr(n expected)}
     # (NF_AT: `@x.method` is the method's handle)
     if XSWord(xs_nodes[0].ptr[n].flags) & 2147483648 not=? 0 {
         let handle=dewy_method_handle(n expected)
@@ -167,8 +167,8 @@ xs_index=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
     if xs_flag(n 536870912) {field_juxt(n)}
     xs_index_base[0]=XSWord(xs_nodes[0].ptr[n].a)
     # `mean[xs]` in Dewy: a function called with brackets.
-    if xs_nodes[0].ptr[XSWord(xs_nodes[0].ptr[n].a)].kind =? 'ident' and xs_nodes[0].ptr[n].sval =? 0 and xs_count(n) >? 0 and xs_dewy_at(n) and dewy_bracket_call(n) {return check_expr(n expected)}
-    if xs_nodes[0].ptr[n].sval not=? 0 {return index_end(n expected)}
+    if xs_nodes[0].ptr[XSWord(xs_nodes[0].ptr[n].a)].kind =? 'ident' and node_sval(xs_nodes[0].ptr[n].op_ext) =? 0 and xs_count(n) >? 0 and xs_dewy_at(n) and dewy_bracket_call(n) {return check_expr(n expected)}
+    if node_sval(xs_nodes[0].ptr[n].op_ext) not=? 0 {return index_end(n expected)}
     let saved=xs_type_receiver[0]
     xs_type_receiver[0]=XSWord(xs_nodes[0].ptr[n].a)
     if xs_nodes[0].ptr[n].b =? 0 and xs_count(n) =? 0 {xs_empty_receiver[0]=XSWord(xs_nodes[0].ptr[n].a)}

@@ -13,7 +13,7 @@ from p"checker_value_calls.dewy" import (values_call)
 from p"checker_call_services.dewy" import (call_head call_typeapply call_ident_special call_dotname call_member_prepare call_member_type call_member_callable call_member_tail call_index call_value call_name_early call_name_intrinsic call_name_array call_name_sym call_name_collect)
 from p"checker_call_convert.dewy" import arg_finish_rest
 from p"checker_call_resolve.dewy" import resolve_fn_call
-from p"node_store.dewy" import (Node node_set_list node_kids)
+from p"node_store.dewy" import (Node node_aux2 node_kids node_op node_set_list node_with_aux2 node_with_op)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -270,7 +270,7 @@ values_settled=(n:XEWord):>bool=>$unsafe {
         if named {a=XEWord(xe_nodes[0].ptr[original].a)}
         let k=xe_nodes[0].ptr[a].kind
         let flags=XEWord(xe_nodes[0].ptr[a].flags)
-        if k =? 'block' and xe_nodes[0].ptr[a].aux2 =? 1796 {return false}
+        if k =? 'block' and node_aux2(xe_nodes[0].ptr[a].op_ext) =? 1796 {return false}
         if k =? 'call' {
             let m=xe_members_name[0]
             if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[a].a)].name) =? m {return false}
@@ -378,7 +378,7 @@ xe_untyped=(a0:XEWord):>void=>$unsafe {
     let afl=XEWord(an[0].flags)
     if (afl & 128) not=? 0 {return}
     let ak=an[0].kind
-    if not ((afl & 4096) =? 0 and (ak =? 'ident' or ak =? 'int_lit' or ak =? 'binary' or ak =? 'field' or ak =? 'index' or ak =? 'str_lit' or ak =? 'bool_lit' or ak =? 'float_lit' or (ak =? 'call' and an[0].type not=? 0 and an[0].aux2 not=? -1))) {
+    if not ((afl & 4096) =? 0 and (ak =? 'ident' or ak =? 'int_lit' or ak =? 'binary' or ak =? 'field' or ak =? 'index' or ak =? 'str_lit' or ak =? 'bool_lit' or ak =? 'float_lit' or (ak =? 'call' and an[0].type not=? 0 and node_aux2(an[0].op_ext) not=? -1))) {
         if ctx_dependent(a) {return}
     }
     check_expr(a 0);
@@ -545,7 +545,7 @@ xe_charlike=(n:XEWord):>bool=>$unsafe {xe_nodes[0].ptr[n].kind =? 'str_lit' and 
 xe_quantity_literal=(e:XEWord):>bool=>$unsafe {
     if e =? 0 or xe_flag(e 128) {return false}
     if xe_nodes[0][e].kind =? 'unary' {return xe_quantity_literal(XEWord(xe_nodes[0][e].a))}
-    if xe_nodes[0][e].kind =? 'binary' and xe_nodes[0][e].op =? 60 {
+    if xe_nodes[0][e].kind =? 'binary' and node_op(xe_nodes[0][e].op_ext) =? 60 {
         let x=xe_nodes[0].ptr[XEWord(xe_nodes[0][e].a)].kind
         return (x =? 'int_lit' or x =? 'float_lit') and xe_nodes[0].ptr[XEWord(xe_nodes[0][e].b)].kind =? 'ident'
     }
@@ -568,7 +568,7 @@ xe_xor=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let ta=tu_prune(check_expr(xe_nodes[0].ptr[n].a 0))
     xe_nodes[0][n].a=int32<overflow='wrap'>(xe_last[0])
     xe_add_flag(XEWord(xe_nodes[0].ptr[n].a) 128)
-    xe_nodes[0][n].op=if ta =? xe_bool_type[0] {70} else {65}
+    xe_nodes[0][n].op_ext=node_with_op(xe_nodes[0][n].op_ext (if ta =? xe_bool_type[0] {70} else {65}))
     check_expr(n expected)
 }
 # 'a' =? c: the literal is a character code when the other side is an integer.
@@ -609,7 +609,7 @@ xe_first=(b:XEWord):>XEWord=>$unsafe {
 # then the second operand in the first's type. Two plain numbers go to the numeric leaf;
 # a secret, a quantity, text, an optional, a struct and every other pair to the host.
 xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
-    let op=XEWord(xe_nodes[0].ptr[n].op)
+    let op=XEWord(node_op(xe_nodes[0].ptr[n].op_ext))
     if op =? 85 {return check_dotted(n expected)}
     if op =? 60 and (XEWord(xe_nodes[0].ptr[n].flags) & 536870912) not=? 0 {binary_juxt(n); }
     if op =? 82 {return xe_xor(n expected)}
@@ -725,7 +725,7 @@ xe_word=(t0:XEWord):>bool=>$unsafe {
 # O(1) here plus the services; services may grow every arena, so nodes are reread by ID.
 check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let ex:XEWord=if expected =? 0 {0} else {xl_expected(expected)}
-    if xe_nodes[0].ptr[n].aux2 =? -1 {
+    if node_aux2(xe_nodes[0].ptr[n].op_ext) =? -1 {
         let r=call_int_literal(n ex)
         if r >=? 0 {return r}
     }
@@ -760,20 +760,20 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         return check_expr(n expected)
     }
     # AUX2_PARTIAL -10, AUX2_EMPTY_PARENS -13 (`f()` with no arguments: a style hint may follow); NF_JUXT 536870912
-    if xe_nodes[0].ptr[n].aux2 <=? -10 {
-        if xe_nodes[0].ptr[n].aux2 =? -10 {
+    if node_aux2(xe_nodes[0].ptr[n].op_ext) <=? -10 {
+        if node_aux2(xe_nodes[0].ptr[n].op_ext) =? -10 {
             if xe_flag(n 536870912) and juxt_head_numeric(n) {juxt_factor(n);}
             return dewy_partial(n expected)
         }
-        if xe_nodes[0].ptr[n].aux2 =? -13 {
-            xe_nodes[0][n].aux2=0
+        if node_aux2(xe_nodes[0].ptr[n].op_ext) =? -13 {
+            xe_nodes[0][n].op_ext=node_with_aux2(xe_nodes[0][n].op_ext 0)
             let style=call_style_form(n)
             let typed=check_expr(n expected)
             if style not=? 0 {call_style_check(n style typed)}
             return typed
         }
     }
-    if xe_nodes[0].ptr[n].nlist >? 0 and xe_nodes[0].ptr[n].aux2 =? 0 and xe_dewy_at(xe_nodes[0].ptr[n].pos) and not xe_numeric_head(n) {
+    if xe_nodes[0].ptr[n].nlist >? 0 and node_aux2(xe_nodes[0].ptr[n].op_ext) =? 0 and xe_dewy_at(xe_nodes[0].ptr[n].pos) and not xe_numeric_head(n) {
         if not values_settled(n) {
             let vt=values_call(n expected)
             if vt >=? 0 {return xl_finish(n vt expected)}

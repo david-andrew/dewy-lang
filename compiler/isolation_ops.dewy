@@ -5,7 +5,7 @@ from p"check.jo" import (FK_INIT LF_ADDR LF_CAPTURE fns locals)
 from p"expr.jo" import (IN)
 from p"isolation.jo" import (IsolationReason IsolationRow isolation_limit isolation_node_limit isolation_replayed isolation_rows isolation_seen isolation_serial isolation_stack)
 from p"ast.jo" import (NF_EXTERN NF_GLOBAL has_flag kid kid2 lists nkids nkids2 nodes)
-from p"node_store.dewy" import (NK Node)
+from p"node_store.dewy" import (NK Node node_aux2 node_list2 node_nlist2)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effects.jo" import (effect_summaries)
 from p"effect_library.jo" import EffectClass
@@ -144,12 +144,12 @@ isolation_effect=(n:IsolationWord @edges:array<int64>):>IsolationReason=>$unsafe
             return IsolationReason.none_
         }
         <'istype'> => {
-            if nodes.ptr[n].aux2 not=? 0 {edges.push(IsolationWord(nodes.ptr[n].aux2));}
+            if node_aux2(nodes.ptr[n].op_ext) not=? 0 {edges.push(IsolationWord(node_aux2(nodes.ptr[n].op_ext)));}
             return IsolationReason.none_
         }
         <'binary'> => {
             let aux=nodes.ptr[n].aux
-            if aux =? int32(6) and nodes.ptr[n].aux2 not=? 0 {edges.push(IsolationWord(nodes.ptr[n].aux2));}
+            if aux =? int32(6) and node_aux2(nodes.ptr[n].op_ext) not=? 0 {edges.push(IsolationWord(node_aux2(nodes.ptr[n].op_ext)));}
             if aux =? int32(4) or aux =? int32(5) {return IsolationReason.raw}
             loop f in value_helper_calls(n) {edges.push(f);}
             return IsolationReason.none_
@@ -276,8 +276,8 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
                 loop i in [0..nk) {let x=IsolationWord(lists.ptr[l0 + i]); if x not=? 0 {todo.push(x)}}
             }
             if mask & 32 not=? 0 {
-                let l2=IsolationWord(nodes.ptr[n].list2)
-                let nk2=IsolationWord(nodes.ptr[n].nlist2)
+                let l2=IsolationWord(node_list2(nodes.ptr[n].op_ext))
+                let nk2=IsolationWord(node_nlist2(nodes.ptr[n].op_ext))
                 loop i in [0..nk2) {let x=IsolationWord(lists.ptr[l2 + i]); if x not=? 0 {todo.push(x)}}
             }
         }

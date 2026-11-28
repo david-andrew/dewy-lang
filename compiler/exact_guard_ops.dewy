@@ -13,6 +13,7 @@ from p"lower.jo" import (cur_fn)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN)
 from p"types.jo" import (T_INT)
 from p"word_overflow.dewy" import (math_word_overflow)
+from p"node_store.dewy" import (node_op)
 
 GuardWord:type=int64<overflow='wrap'>
 eg_local=(n:GuardWord):>GuardWord=>$unsafe {
@@ -61,7 +62,7 @@ eg_condition=(n:GuardWord yes:bool @budget:GuardWord):>void=>$unsafe {
     if l =? 0 {return}
     let [known value]=integer_constant(GuardWord(nodes.ptr[n].b))
     if not known or has_flag(GuardWord(nodes.ptr[n].b) NF_U64) {return}
-    let op=cx_token(nodes.ptr[n].op)
+    let op=cx_token(node_op(nodes.ptr[n].op_ext))
     if not yes {
         if op =? 'lt' {op='ge'}
         else if op =? 'le' {op='gt'}
@@ -117,7 +118,7 @@ eg_nonneg=(n:GuardWord):>bool=>$unsafe {
 # no new relational state, recursive body walk or speculative proof is needed.
 eg_fits=(n:GuardWord):>bool=>$unsafe {
     if eg_stack.length =? 0 or nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 {return false}
-    let op=cx_token(nodes.ptr[n].op)
+    let op=cx_token(node_op(nodes.ptr[n].op_ext))
     if op not=? 'plus' and op not=? 'minus' {return false}
     let left=GuardWord(nodes.ptr[n].a)
     let right=GuardWord(nodes.ptr[n].b)

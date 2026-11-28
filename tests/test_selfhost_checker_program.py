@@ -239,12 +239,12 @@ pg_error = false
 pg_prepare = ():
     prepare(); events = []
     modules = [Module(is_prelude=true), Module(init_fn=11)]
-    d = cr_decl([]); nodes[d].mod = 1
+    d = cr_decl([]); nodes[d].op_ext = node_with_mod(nodes[d].op_ext, i32(1))
     s = syms.len(); syms.push(Sym(kind=.fns, decl=i32(d), ref=i32(d)))
     modules[1].names[1] = s; modules[1].decls = [d]
     prelude[2] = s
     # A used library discovers an export after the initial pending-body sweep.
-    libd = cr_decl([]); nodes[libd].mod = 0
+    libd = cr_decl([]); nodes[libd].op_ext = node_with_mod(nodes[libd].op_ext, i32(0))
     fns.push(FnInst(decl=i32(libd), state=2)); export_decls = [libd]
     runtime_names = ["needed"]; optional_runtime = ["optional", "__mac_syscall"]
     late_module_imports = true

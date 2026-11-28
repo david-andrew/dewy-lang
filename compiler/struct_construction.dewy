@@ -25,7 +25,7 @@ from p"check.jo" import (check_scopes ctxs cx)
 from p"checker_expr.dewy" import (check_args_untyped check_expr finish_arg)
 from p"checked_expression_nodes.dewy" import (capture_value)
 from p"types.jo" import (T_STR T_VOID fields has_var prune struct_targ structs tkind types)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_mod)
 from p"ast.jo" import (NF_CHECKED add_flag clone dewy_param_kinds kid kid2 mk nkids nkids2 nodes set_list)
 from p"ide.jo" import (IK_FIELD ide_on)
 from p"checker_import_discovery.dewy" import (ensure_bundled_import)
@@ -49,7 +49,7 @@ duration_reader=(n:int64 t:int64 args:array<int64> expected:int64):>int64=>$unsa
 struct_ctor=(n:int64 st_type:int64 decl:int64 args:array<int64> expected:int64):>int64=>$unsafe {
     let ctor_fills_zero_slot=@ctor_fills_zero
     if decl not=? 0 and dewy_at(nodes.ptr[n].pos) {
-        let module=StructConstructionWord(nodes.ptr[decl].mod)
+        let module=StructConstructionWord(node_mod(nodes.ptr[decl].op_ext))
         if module =? concurrency_thread_module and name_of(StructConstructionWord(nodes.ptr[decl].name)) =? "Atomic" {
             fatal(nodes.ptr[n].pos "construct Atomic with atomic(value); its storage is private")
         }
@@ -228,7 +228,7 @@ struct_ctor=(n:int64 st_type:int64 decl:int64 args:array<int64> expected:int64):
                 let d=clone(dv)
                 let context=@cx
                 let saved=context
-                ctxs.push(FnCtx(ctxs.ptr[saved].inst (-1) int32<overflow='wrap'>(T_VOID) false 0 nodes.ptr[decl].mod int32<overflow='wrap'>(check_scopes.names.length)))
+                ctxs.push(FnCtx(ctxs.ptr[saved].inst (-1) int32<overflow='wrap'>(T_VOID) false 0 node_mod(nodes.ptr[decl].op_ext) int32<overflow='wrap'>(check_scopes.names.length)))
                 context=ctxs.length - 1
                 let mark=scope_mark()
                 let targs:array<int64>=[]

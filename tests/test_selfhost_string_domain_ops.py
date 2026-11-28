@@ -71,7 +71,7 @@ str_set_const = (set: int, i: int, pos: int) -> int:
     loop nodes.len() % 4096 != 0: nodes.push(Node())
     nodes.push(Node())
     n = mk(.str_lit, pos)
-    nodes[n].sval = i32(set * 100)
+    nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(i32(set * 100)))
     n
 str_set_text = (set: int) -> str: "set{set}"
 mk_array = (t: int) -> int: t + 50
@@ -93,7 +93,7 @@ DRIVER = r'''
 use 'string_domains.jo'
 text_lit = (s: str) -> int:
     n = mk(.str_lit, 5)
-    nodes[n].sval = i32(intern(s))
+    nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(i32(intern(s))))
     n
 int_lit = (v: int) -> int:
     n = mk(.int_lit, 5)
@@ -218,9 +218,9 @@ everything = ():
     string_domain_conversion_stops[2] = stops + 100
     loop nodes.len() < stops + 101: nodes.push(Node())
     string_domains_materialize()
-    print("{nodes[stops].kind == .str_lit} {nodes[stops].sval} {made.state} {fns[int(nodes[seq].sym)].state}")
+    print("{nodes[stops].kind == .str_lit} {node_sval(nodes[stops].op_ext)} {made.state} {fns[int(nodes[seq].sym)].state}")
     arr = int(nodes[kid(int(made.body), 0)].a)
-    loop item in kids(arr): print("{name_of(int(nodes[item].sval))} {nodes[item].type} {nodes[item].flags}")
+    loop item in kids(arr): print("{name_of(int(node_sval(nodes[item].op_ext)))} {nodes[item].type} {nodes[item].flags}")
     # Integers: a site, declarations and writes, each log record.
     print(int_site())
     cx = 0

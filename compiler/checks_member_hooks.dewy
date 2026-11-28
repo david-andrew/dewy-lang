@@ -33,7 +33,7 @@ from p"ide.jo" import (IK_CONST IK_FIELD ide_on)
 from p"ide_index.dewy" import (ide_ref ide_variant_ref)
 from p"ide_ops.dewy" import (ide_field_ref)
 from p"juxtapose.dewy" import (juxt_member_check)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_with_aux2 node_with_fval)
 from p"refine.jo" import (ref_addr_type)
 from p"refine_ops.dewy" import (ref_addr_max)
 from p"reflect_ops.dewy" import (reflect_name)
@@ -139,7 +139,7 @@ member_type=(n:int64 bt:int64 expected:int64 is_callee:bool @bypass:bool):>int64
         let lit=mk('int_lit' nodes.ptr[n].pos)
         nodes.ptr[lit].ival=value
         # Keep the bound's type when a constant/default is cloned and checked again.
-        nodes.ptr[n]=Node(kind='conv' pos=nodes.ptr[n].pos a=int32(lit) aux=int32(int64(CV.int_)) aux2=1 type=int32(tt))
+        nodes.ptr[n]=Node(kind='conv' pos=nodes.ptr[n].pos a=int32(lit) aux=int32(int64(CV.int_)) op_ext=node_with_aux2(uint32(0) int32(1)) type=int32(tt))
         if not types.ptr[tt].sign and value <? 0 {add_flag(lit NF_U64)}
         check_expr(lit tt);
         t=tt
@@ -147,8 +147,8 @@ member_type=(n:int64 bt:int64 expected:int64 is_callee:bool @bypass:bool):>int64
     else if tt not=? 0 and is_float(tt) and float_constant_named(name_of(fname)) {
         if ide_on {ide_ref(nodes.ptr[n].pos fname IK_CONST 0 tt 0)}
         let lit=mk('float_lit' nodes.ptr[n].pos)
-        nodes.ptr[lit].fval=float_constant(name_of(fname) MemberHookWord(types.ptr[tt].bits) =? 64)
-        nodes.ptr[n]=Node(kind='conv' pos=nodes.ptr[n].pos a=int32(lit) aux=int32(int64(CV.float_)) aux2=1 type=int32(tt))
+        nodes.ptr[lit].op_ext=node_with_fval(nodes.ptr[lit].op_ext (float_constant(name_of(fname) MemberHookWord(types.ptr[tt].bits) =? 64)))
+        nodes.ptr[n]=Node(kind='conv' pos=nodes.ptr[n].pos a=int32(lit) aux=int32(int64(CV.float_)) op_ext=node_with_aux2(uint32(0) int32(1)) type=int32(tt))
         check_expr(lit tt);
         t=tt
     }
@@ -205,7 +205,7 @@ member_vector=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
         let method=mk('field' nodes.ptr[n].pos)
         nodes.ptr[method].a=nodes.ptr[n].a
         nodes.ptr[method].name=int32(fname)
-        nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos flags=nodes.ptr[n].flags & int32(NF_SPREAD) a=int32(method) aux2=-9)
+        nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos flags=nodes.ptr[n].flags & int32(NF_SPREAD) a=int32(method) op_ext=node_with_aux2(uint32(0) int32(-9)))
         bypass=true
         let t=check_expr(n expected)
         call_style_implicit(n fname*8 + 5 t)

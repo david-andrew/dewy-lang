@@ -127,7 +127,7 @@ local_of = (name: int, t: int):
     bind(name, .local, locals.len() - 1)
 show = (n: int) -> str:
     x = nodes[n]
-    "{x.kind == .binary}/{x.kind == .call} op={x.op} a={x.a} b={x.b} list={x.list != 0} nlist={x.nlist} sym={x.sym} aux={x.aux} aux2={x.aux2} flags={x.flags} pos={x.pos}"
+    "{x.kind == .binary}/{x.kind == .call} op={node_op(x.op_ext)} a={x.a} b={x.b} list={x.list != 0} nlist={x.nlist} sym={x.sym} aux={x.aux} aux2={node_aux2(x.op_ext)} flags={x.flags} pos={x.pos}"
 at = (file: int, off: int) -> int: (file << 40) | off
 main = ():
     # Numbers, callables, and the text of a head.
@@ -137,7 +137,7 @@ main = ():
     fx = field(x, 31)
     f0 = field(fresh(.call), 32)
     no_name = field(x, 0)
-    fl = fresh(.float_lit); nodes[fl].sval = 97
+    fl = fresh(.float_lit); nodes[fl].op_ext = node_with_sval(nodes[fl].op_ext, i32(97))
     fl0 = fresh(.float_lit)
     arg_call = call(x, [ident(33), lit(2)], 0)
     three = call(x, [lit(1), lit(2), lit(3)], 0)
@@ -221,7 +221,7 @@ main = ():
     print("{juxt_chain_numeric(marked)} {juxt_chain_numeric(chained)} {juxt_chain_numeric(twice)} {juxt_chain_numeric(call(chained, [], 0))} {juxt_chain_numeric(lit(1))} {juxt_chain_numeric(call(ident(40), [lit(1)], 0))}")
     # Factors, products and powers.
     print(juxt_factor(call(ident(40), [lit(1)], NF_JUXT)) != 0)
-    partial = call(ident(40), [lit(1)], NF_JUXT); nodes[partial].aux2 = i32(AUX2_PARTIAL)
+    partial = call(ident(40), [lit(1)], NF_JUXT); nodes[partial].op_ext = node_with_aux2(nodes[partial].op_ext, i32(i32(AUX2_PARTIAL)))
     print(juxt_factor(partial) != 0)
     empty = call(ident(40), [], NF_JUXT)
     nodes[empty].nlist = 0
@@ -234,7 +234,7 @@ main = ():
     spread_arg = ident(2); nodes[spread_arg].flags = i32(NF_SPREAD)
     print(juxt_factor(call(ident(40), [spread_arg], NF_JUXT)) != 0)
     product = call(ident(40), [lit(5)], NF_JUXT)
-    nodes[product].sym = 3; nodes[product].aux = 4; nodes[product].aux2 = 5; nodes[product].flags = 64
+    nodes[product].sym = 3; nodes[product].aux = 4; nodes[product].op_ext = node_with_aux2(nodes[product].op_ext, i32(5)); nodes[product].flags = 64
     juxt_product(product)
     print(show(product))
     power_call = call(ident(40), [lit(5)], NF_JUXT)

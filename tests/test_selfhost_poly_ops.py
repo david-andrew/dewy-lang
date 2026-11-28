@@ -188,7 +188,7 @@ decl_with_sig = (body: int, params: int[], sig: FnSig) -> int:
     d = mk(.fn_, 900)
     nodes[d].b = i32(body)
     nodes[d].aux = 1
-    nodes[d].mod = 3
+    nodes[d].op_ext = node_with_mod(nodes[d].op_ext, i32(3))
     set_list(d, params)
     decl_infos[decl_info(d)].sig = sig
     d
@@ -263,12 +263,12 @@ main = ():
     sig = FnSig(params=[900, 901], ret=0, mutmask=0, ntp=2)
     lam_body = mk(.block, 3)
     lam = mk(.lambda, 2)
-    nodes[lam].b = i32(lam_body); nodes[lam].sym = 7; nodes[lam].name = 8; nodes[lam].mod = 9
+    nodes[lam].b = i32(lam_body); nodes[lam].sym = 7; nodes[lam].name = 8; nodes[lam].op_ext = node_with_mod(nodes[lam].op_ext, i32(9))
     d0 = nodes.len()
     decl_infos[decl_info(d0)].sig = sig
     print(check_poly_lambda(lam, 0))
     print(family_text(2))
-    print("{nodes[d0].sym} {nodes[d0].mod} {nodes[d0].name} {nodes[d0].aux} {nodes[d0].b} {nodes[lam].aux} {nodes[lam].type}")
+    print("{nodes[d0].sym} {node_mod(nodes[d0].op_ext)} {nodes[d0].name} {nodes[d0].aux} {nodes[d0].b} {nodes[lam].aux} {nodes[lam].type}")
     print(fn_text(int(poly_families[2].envfn)))
     pending = poly_pending_warnings.keys(); pending.sort()
     print(pending)
@@ -393,13 +393,13 @@ main = ():
     dv = decl_with_sig(body, [p1, p2, p3, p4, under], FnSig(params=[1, 2, 3, 4, 5], ret=9, mutmask=0, ntp=0))
     loop args in [[1, 0, 1, 0, 1], [0, 1, 0, 1, 0], [1, 1, 1, 1, 0], [0, 0, 0, 0, 0]]:
         v = poly_default_variant(dv, args)
-        print("variant {v == dv} {poly_default_variant(dv, args) == v} {nodes[v].mod}")
+        print("variant {v == dv} {poly_default_variant(dv, args) == v} {node_mod(nodes[v].op_ext)}")
         vs = fn_sig(v)
         print("sig {vs.params} {vs.mutmask} {vs.ret} kids {nkids(v)}")
         vb = int(nodes[v].b)
         loop i in [0..nkids(vb)):
             b = kid(vb, i)
-            print("  {nodes[b].kind == .vardecl} {nodes[b].name} {nodes[b].a} {nodes[nodes[b].b].ival} {nodes[b].aux2}")
+            print("  {nodes[b].kind == .vardecl} {nodes[b].name} {nodes[b].a} {nodes[nodes[b].b].ival} {node_aux2(nodes[b].op_ext)}")
     # Under-score parameter's binding made anew, when no synthetic one exists for it.
     fn_mark = fn_sig(dv)
     print(fn_mark.params)

@@ -17,6 +17,7 @@ from p"lower_scalars.dewy" import (never_after)
 from p"spirv_stmts.dewy" import (spirv_compute spirv_kernel)
 from p"spirv_emit.dewy" import (spirv_build)
 from p"ir_builders.dewy" import (e_iconst e_slot e_store e_zero emit vreg)
+from p"node_store.dewy" import (node_sval)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LIWord:type=int64<overflow='wrap'>
 texture_offsets=(t0:LIWord base:LIWord @out:array<int64>):>void=>$unsafe {
@@ -47,7 +48,7 @@ gen_intrinsic_unreachable=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
     return never_after(e)
 }
 gen_intrinsic_embed=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
-    let s=name_of(LIWord(nodes.ptr[e].sval))
+    let s=name_of(LIWord(node_sval(nodes.ptr[e].op_ext)))
     return V(e_daddr(str_data(s)) false)
 }
 gen_intrinsic_argv=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
@@ -60,7 +61,7 @@ gen_intrinsic_gpu_kernel=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
     let arg1:LIWord=LIWord(lists.ptr[arg_start + 1])
     # (the GLSL program, then, past a 0 byte, the SPIR-V one for Vulkan: not on the web)
     let kf:LIWord=LIWord(nodes.ptr[arg0].sym)
-    let kd=name_of(LIWord(nodes.ptr[arg1].sval))
+    let kd=name_of(LIWord(node_sval(nodes.ptr[arg1].op_ext)))
     let ks=glsl_kernel(kf kd)
     # (on macOS, Metal's in place of SPIR-V)
     if target_macos {ks="{ks}\0{msl_kernel(kf kd)}"}

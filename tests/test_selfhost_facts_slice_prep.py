@@ -33,7 +33,7 @@ main = ():
     if children != [99, 2, 3, 4, 7, 8, 7]: exit(14)
     nodes[1] = Node(kind = .nil)
     if fact_slice_children(1) != []: exit(15)
-    nodes[1] = Node(kind = .for_, a = 2, b = 3, c = 9, d = 8)
+    nodes[1] = Node(kind = .for_, a = 2, b = 3, c = 9, op_ext=node_with_d(u32(0), i32(8)))
     if fact_slice_children(1) != [2, 3]: exit(16)
     nodes = fill(Node(), 4096)
     nodes[4095] = Node(kind = .array, b = 3, list = 0, nlist = 3)

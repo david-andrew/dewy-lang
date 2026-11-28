@@ -19,6 +19,7 @@ from p"type_constructors.dewy" import tb_mk_array
 from p"util.jo" import names
 from p"types.jo" import (T_INT T_MATH_INT is_int tkind types)
 from p"diagnostic_exit.dewy" import fatal
+from p"node_store.dewy" import (node_sval)
 
 ValueArgWord:type=int64<overflow='wrap'>
 # Demand-only: a non-type name in type syntax may name an integer constant.
@@ -29,9 +30,9 @@ named_integer_type=(tn:ValueArgWord s:ValueArgWord):>int64=>$unsafe {
     if binding_const_init(syms.ptr[s].kind ValueArgWord(syms.ptr[s].ref) nodes.ptr[tn].pos) =? 0 {return 0}
     let value=mk('ident' nodes.ptr[tn].pos)
     nodes.ptr[value].name=nodes.ptr[tn].name
-    if nodes.ptr[tn].sval not=? 0 {
+    if node_sval(nodes.ptr[tn].op_ext) not=? 0 {
         let base=mk('ident' nodes.ptr[tn].pos)
-        nodes.ptr[base].name=nodes.ptr[tn].sval
+        nodes.ptr[base].name=node_sval(nodes.ptr[tn].op_ext)
         nodes.ptr[value].kind='field'
         nodes.ptr[value].a=int32(base)
     }
@@ -56,9 +57,9 @@ checked_array_length=(n:ValueArgWord):>int64=>$unsafe {
     let value=clone(n)
     if nodes.ptr[value].kind =? 'tname' {
         nodes.ptr[value].kind='ident'
-        if nodes.ptr[value].sval not=? 0 {
+        if node_sval(nodes.ptr[value].op_ext) not=? 0 {
             let base=mk('ident' nodes.ptr[value].pos)
-            nodes.ptr[base].name=nodes.ptr[value].sval
+            nodes.ptr[base].name=node_sval(nodes.ptr[value].op_ext)
             nodes.ptr[value].kind='field'
             nodes.ptr[value].a=int32(base)
         }

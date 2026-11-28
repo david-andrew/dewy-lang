@@ -67,7 +67,7 @@ typed = (k: NK, t: int, a: int = 0) -> int:
 loop_of = (cond: int, body: int[], label: int = 0, let_name: int = 0) -> int:
     s = node(.while_, cond)
     nodes[s].b = i32(node(.block, 0, 0, 0, body))
-    nodes[s].sval = i32(label)
+    nodes[s].op_ext = node_with_sval(nodes[s].op_ext, i32(i32(label)))
     if let_name != 0:
         nodes[s].aux = 1
         nodes[s].name = i32(let_name)
@@ -92,9 +92,9 @@ main = ():
     s = loop_of(typed(.istype, T_BOOL), [])
     xb_names = 3
     xb_while(s); show(s)
-    eq = typed(.binary, T_BOOL, typed(.ident, opt)); nodes[eq].op = 70; nodes[eq].b = i32(typed(.none_lit, T_NONE))
+    eq = typed(.binary, T_BOOL, typed(.ident, opt)); nodes[eq].op_ext = node_with_op(nodes[eq].op_ext, i32(70)); nodes[eq].b = i32(typed(.none_lit, T_NONE))
     xb_while(loop_of(eq, []))
-    nodes[eq].op = 71
+    nodes[eq].op_ext = node_with_op(nodes[eq].op_ext, i32(71))
     xb_while(loop_of(eq, []))
     xb_rewrite = true
     xb_while(loop_of(typed(.not_, T_BOOL), []))

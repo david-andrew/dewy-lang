@@ -50,7 +50,7 @@ main = () -> int:
         else if p[0] == "C":
             c = ref_string_set_const(sets, set_types, nodes, host, read_i(p[1]), read_i(p[2]), read_i(p[3]))
             n = nodes[c]
-            print("C {c} {n.kind == .dotname} {n.name} {n.aux} {n.type} {n.pos} {n.flags} {n.a} {n.b} {n.sval}")
+            print("C {c} {n.kind == .dotname} {n.name} {n.aux} {n.type} {n.pos} {n.flags} {n.a} {n.b} {node_sval(n.op_ext)}")
         else if p[0] == "P":
             loop _ in [0..read_i(p[1])):
                 types.push(TypeInfo())

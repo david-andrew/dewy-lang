@@ -11,6 +11,7 @@ from p"refine_metadata.dewy" import (ref_storage_contract)
 from p"type_ops.dewy" import (get_struct_inst)
 from p"types.jo" import (T_MATH_INT fields is_union prune structs tkind type_eq types variants)
 from p"util.jo" import (intern name_of)
+from p"node_store.dewy" import (node_fval node_sval node_with_mod)
 
 RecordCtorWord:type=int64<overflow='wrap'>
 
@@ -57,7 +58,7 @@ dewy_record_schema=(n:RecordCtorWord args:array<int64>):>RecordCtorWord=>{
     if decl =? 0 {
         decl=mk('struct_' nodes[n].pos)
         nodes[decl].name=int32(intern("<record>"))
-        nodes[decl].mod=ctxs[cx].mod
+        nodes[decl].op_ext=node_with_mod(nodes[decl].op_ext (ctxs[cx].mod))
         add_flag(decl NF_RECORD)
         add_flag(decl NF_GENERIC)
         let members:array<int64>=[]
@@ -119,10 +120,10 @@ default_is_zero=(dv:RecordCtorWord ft:RecordCtorWord):>bool=>$unsafe {
     let fk=tkind(ft)
     if k =? 'none_lit' {return fk =? 'opt'}
     if k =? 'int_lit' and nodes.ptr[dv].ival =? 0 and not has_flag(dv NF_U64) {return fk =? 'int_' and prune(ft) not=? T_MATH_INT}
-    if k =? 'float_lit' and fk =? 'float_' {return nodes.ptr[dv].fval =? 0.0 and 1.0 / nodes.ptr[dv].fval >? 0.0}
+    if k =? 'float_lit' and fk =? 'float_' {return node_fval(nodes.ptr[dv].op_ext) =? 0.0 and 1.0 / node_fval(nodes.ptr[dv].op_ext) >? 0.0}
     if k =? 'bool_lit' and nodes.ptr[dv].ival =? 0 {return fk =? 'bool_'}
     let name:RecordCtorWord=0
-    if k =? 'str_lit' and nodes.ptr[dv].nlist =? 0 {name=RecordCtorWord(nodes.ptr[dv].sval)}
+    if k =? 'str_lit' and nodes.ptr[dv].nlist =? 0 {name=RecordCtorWord(node_sval(nodes.ptr[dv].op_ext))}
     else if k =? 'dotname' {name=RecordCtorWord(nodes.ptr[dv].name)}
     if name not=? 0 and fk =? 'enum_' and not is_union(ft) {
         let si=RecordCtorWord(types.ptr[prune(ft)].st)

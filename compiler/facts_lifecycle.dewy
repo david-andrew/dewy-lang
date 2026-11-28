@@ -261,7 +261,7 @@ facts_finalize=():>void=>$unsafe {
     loop request in fact_fixed_requests {demanded[request.owner]=true}
     loop request in refine_requests {
         demanded[request.owner]=true
-        if ref_named_locals.length >? 0 and fact_foreign_bound(LifeWord(nodes.ptr[request.node].aux2) request.owner 0) {mandatory[request.owner]=true}
+        if ref_named_locals.length >? 0 and fact_foreign_bound(LifeWord(node_aux2(nodes.ptr[request.node].op_ext)) request.owner 0) {mandatory[request.owner]=true}
     }
     loop [f _] in exact_proof_demands {demanded[f]=true}
     if fact_policy =? 'RequireStatic' or dir_floats_any or ff_conversions.length >? 0 {
@@ -708,7 +708,7 @@ fact_obligation_node=(n:LifeWord):>bool=>$unsafe {
     match k {
         <'index'> => {return not has_flag(n NF_INBOUNDS) and fact_bounded_index(n)}
         <'binary'> => {
-            if nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32(61) or nodes.ptr[n].op =? int32(62)) and is_int(ntype(LifeWord(nodes.ptr[n].b))) and not fact_literal_nonzero(LifeWord(nodes.ptr[n].b)) {return true}
+            if nodes.ptr[n].aux =? 0 and (node_op(nodes.ptr[n].op_ext) =? int32(61) or node_op(nodes.ptr[n].op_ext) =? int32(62)) and is_int(ntype(LifeWord(nodes.ptr[n].b))) and not fact_literal_nonzero(LifeWord(nodes.ptr[n].b)) {return true}
             return fact_shift_obliged(n)
         }
         <'assign'> => {return fact_shift_obliged(n)}
@@ -751,10 +751,11 @@ fact_obligation_node=(n:LifeWord):>bool=>$unsafe {
         }
         <'intrinsic'> => {
             let id=nodes.ptr[n].aux as IN
-            return id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) or id =? IN.lend or id =? IN.loan_length or id =? IN.loan_store or id =? IN.loan_address or id =? IN.loan_load or id =? IN.pop or id =? IN.remove or id =? IN.truncate
+            return id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or node_aux2(nodes.ptr[n].op_ext) =? int32(RANGE_EXHAUSTION) or id =? IN.lend or id =? IN.loan_length or id =? IN.loan_store or id =? IN.loan_address or id =? IN.loan_load or id =? IN.pop or id =? IN.remove or id =? IN.truncate
         }
         _ => {return false}
     }
 }
 
 from p"facts_compare.dewy" import (fact_add_fits)
+from p"node_store.dewy" import (node_aux2 node_op)

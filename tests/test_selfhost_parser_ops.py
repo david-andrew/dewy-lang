@@ -28,7 +28,7 @@ main = ():
         k = i as Tok
         b = lx_bin(k, i, i + 1, i * 3)
         a = lx_assign(b, k, i, i * 5)
-        print("ops:{b}:{nodes[b].op}:{nodes[b].a}:{nodes[b].b}:{nodes[b].pos}:{a}:{nodes[a].op}:{nodes[a].a}:{nodes[a].b}:{nodes[a].pos}:{int(nodes[a].kind)}")
+        print("ops:{b}:{node_op(nodes[b].op_ext)}:{nodes[b].a}:{nodes[b].b}:{nodes[b].pos}:{a}:{node_op(nodes[a].op_ext)}:{nodes[a].a}:{nodes[a].b}:{nodes[a].pos}:{int(nodes[a].kind)}")
 '''
 
 

@@ -73,6 +73,7 @@ from p"witness_ops.dewy" import (wit_op wit_ref_text)
 from p"x64.jo" import (code fn_addr fn_len)
 from p"x64_emit.dewy" import (call_fix call_sites int_arg_regs line_rows row_pos stub_fix)
 from p"x64_encode.dewy" import (CC_A CC_AE CC_B CC_BE CC_E CC_G CC_GE CC_L CC_LE CC_NE CC_P R10 R11 R8 R9 RAX RBP RBX RCX RDI RDX RSI RSP XWord b b16 b24 b32 jcc32 jmp32 lea lea_rbp load_sized mem modrr mov_imm mov_mr mov_mr_rbp mov_rm mov_rm_rbp mov_rr op_rm op_rm64 op_rr patch32 patch_branch patch_here rel_fixup_lea rex rsp_frame setcc sse_rm sse_rr store_sized use_index x_bytes x_code x_data_fix x_encode_begin x_encode_end x_pad_track)
+from p"node_store.dewy" import (node_aux2 node_d node_fval node_op node_sval)
 
 BlWord:type=int64<overflow='wrap'>
 const R12:XWord=12
@@ -935,12 +936,12 @@ bl_is_small_math=(e:BlWord):>bool=>$unsafe {
         if bl_is_small_math(a) {return true}
     }
     if k =? 'unary' {
-        let op=nodes.ptr[e].op
+        let op=node_op(nodes.ptr[e].op_ext)
         if op =? 58 or op =? 78 {if bl_is_small_math(BlWord(nodes.ptr[e].a)) {return true}}
         if op =? 59 {if bl_is_small_math_neg_safe(BlWord(nodes.ptr[e].a)) {return true}}
     }
     if k =? 'binary' and nodes.ptr[e].aux =? 0 {
-        let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
+        let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[e].op_ext))]
         if op =? 'amp' or op =? 'pipe' or op =? 'caret' {
             if bl_is_small_math(BlWord(nodes.ptr[e].a)) and bl_is_small_math(BlWord(nodes.ptr[e].b)) {return true}
         }
@@ -1222,7 +1223,7 @@ bl_expr_always_owned=(e:BlWord):>bool=>$unsafe {
         if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr or cv =? CV.refinement {return bl_expr_always_owned(BlWord(nodes.ptr[e].a))}
         return false
     }
-    if k =? 'unary' and nodes.ptr[e].op =? 58 {return bl_expr_always_owned(BlWord(nodes.ptr[e].a))}
+    if k =? 'unary' and node_op(nodes.ptr[e].op_ext) =? 58 {return bl_expr_always_owned(BlWord(nodes.ptr[e].a))}
     false
 }
 
@@ -1235,7 +1236,7 @@ bl_ensure_copies=():>void=>$unsafe {
     let nb=nkids(body)
     loop bi in [0..nb) {
         let st=kid(body bi)
-        if nodes.ptr[st].kind not=? 'vardecl' or nodes.ptr[st].aux2 not=? 1 {break}
+        if nodes.ptr[st].kind not=? 'vardecl' or node_aux2(nodes.ptr[st].op_ext) not=? 1 {break}
         if bl_is_param_view_decl(st) {
             let pl:BlWord=BlWord(nodes.ptr[st].sym)
             if (BlWord(locals.ptr[pl].flags) & LF_PARAM) =? 0 {
@@ -1263,7 +1264,7 @@ bl_copy_own_ok=(e:BlWord t0:BlWord):>bool=>$unsafe {
 }
 
 bl_is_param_view_decl=(s:BlWord):>bool=>$unsafe {
-    if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 or nodes.ptr[s].nlist >? 0 or has_flag(s NF_GLOBAL) {return false}
+    if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 or nodes.ptr[s].nlist >? 0 or has_flag(s NF_GLOBAL) {return false}
     let l:BlWord=BlWord(nodes.ptr[s].sym)
     if l <? 0 or (copies_on and copy_bindings.has(l)) {return false}
     let fl:BlWord=BlWord(locals.ptr[l].flags)
@@ -1286,12 +1287,12 @@ bl_scan_local=(n:BlWord):>BlWord=>$unsafe {
 bl_scan_inc=(s:BlWord l:BlWord):>bool=>$unsafe {
     if nodes.ptr[s].kind not=? 'assign' or bl_scan_local(BlWord(nodes.ptr[s].a)) not=? l {return false}
     let rhs:BlWord=BlWord(nodes.ptr[s].b)
-    if nodes.ptr[s].op =? int32(48) {
+    if node_op(nodes.ptr[s].op_ext) =? int32(48) {
         return nodes.ptr[rhs].kind =? 'int_lit' and nodes.ptr[rhs].ival =? 1
     }
-    if nodes.ptr[s].op not=? int32(47) {return false}
+    if node_op(nodes.ptr[s].op_ext) not=? int32(47) {return false}
     if nodes.ptr[rhs].kind =? 'conv' and nodes.ptr[rhs].aux =? int32(int64(CV.fixed_store)) {rhs=BlWord(nodes.ptr[rhs].a)}
-    if nodes.ptr[rhs].kind not=? 'binary' or nodes.ptr[rhs].aux not=? 0 or nodes.ptr[rhs].op not=? int32(58) {return false}
+    if nodes.ptr[rhs].kind not=? 'binary' or nodes.ptr[rhs].aux not=? 0 or node_op(nodes.ptr[rhs].op_ext) not=? int32(58) {return false}
     let one:BlWord=BlWord(nodes.ptr[rhs].b)
     bl_scan_local(BlWord(nodes.ptr[rhs].a)) =? l and nodes.ptr[one].kind =? 'int_lit' and nodes.ptr[one].ival =? 1
 }
@@ -1337,7 +1338,7 @@ bl_is_scan_loop=(s:BlWord):>bool=>$unsafe {
         predicate=BlWord(nodes.ptr[branch].a)
         increment=kid(body 1)
     } else {return false}
-    if nodes.ptr[bound].kind not=? 'binary' or nodes.ptr[bound].aux not=? 0 or nodes.ptr[bound].op not=? int32(71) {return false}
+    if nodes.ptr[bound].kind not=? 'binary' or nodes.ptr[bound].aux not=? 0 or node_op(nodes.ptr[bound].op_ext) not=? int32(71) {return false}
     let index:BlWord=BlWord(nodes.ptr[bound].a)
     let l=bl_scan_local(index)
     if l <? 0 or prune(ntype(index)) not=? T_INT or not bl_scan_inc(increment  l) {return false}
@@ -1376,7 +1377,7 @@ bl_exact_2word_ok=(n:BlWord):>bool=>$unsafe {
     bl_scan_nodes += 1
     let k=nodes.ptr[n].kind
     if k =? 'binary' and nodes.ptr[n].aux =? 0 {
-        let op=cx_token_values.ptr[BlWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[n].op_ext))]
         if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
             return bl_exact_2word_ok(BlWord(nodes.ptr[n].a)) and bl_exact_2word_ok(BlWord(nodes.ptr[n].b))
         }
@@ -1406,7 +1407,7 @@ bl_exact_2word_ok=(n:BlWord):>bool=>$unsafe {
         return false
     }
     if exact_bits(n) >? 128 {return false}
-    if k =? 'unary' and nodes.ptr[n].op =? 59 {return bl_exact_2word_ok(BlWord(nodes.ptr[n].a))}
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? 59 {return bl_exact_2word_ok(BlWord(nodes.ptr[n].a))}
     if k =? 'exprstmt' or (k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_)))) {
         return bl_exact_2word_ok(BlWord(nodes.ptr[n].a))
     }
@@ -1426,12 +1427,12 @@ bl_exact_low_ok=(n:BlWord):>bool=>$unsafe {
     bl_scan_nodes += 1
     let k=nodes.ptr[n].kind
     if k =? 'binary' and nodes.ptr[n].aux =? 0 {
-        let op=cx_token_values.ptr[BlWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[n].op_ext))]
         if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'amp' or op =? 'pipe' or op =? 'caret' {
             return bl_exact_low_ok(BlWord(nodes.ptr[n].a)) and bl_exact_low_ok(BlWord(nodes.ptr[n].b))
         }
     }
-    if k =? 'unary' and nodes.ptr[n].op =? 59 {return bl_exact_low_ok(BlWord(nodes.ptr[n].a))}
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? 59 {return bl_exact_low_ok(BlWord(nodes.ptr[n].a))}
     if k =? 'exprstmt' or (k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_)))) {
         return bl_exact_low_ok(BlWord(nodes.ptr[n].a))
     }
@@ -1448,16 +1449,16 @@ bl_exact_1word_ok=(n:BlWord):>bool=>$unsafe {
     bl_scan_nodes += 1
     let k=nodes.ptr[n].kind
     if k =? 'binary' and nodes.ptr[n].aux =? 0 {
-        let op=cx_token_values.ptr[BlWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[n].op_ext))]
         if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
             let ln:BlWord=BlWord(nodes.ptr[n].a)
             let rn:BlWord=BlWord(nodes.ptr[n].b)
             let [rk rval]=integer_constant(rn)
-            if rk and not has_flag(rn NF_U64) and rval =? 0 and exact_has_node(ln) and nodes.ptr[ln].kind =? 'binary' and nodes.ptr[ln].aux =? 0 and cx_token_values.ptr[BlWord(nodes.ptr[ln].op)] =? 'minus' {
+            if rk and not has_flag(rn NF_U64) and rval =? 0 and exact_has_node(ln) and nodes.ptr[ln].kind =? 'binary' and nodes.ptr[ln].aux =? 0 and cx_token_values.ptr[BlWord(node_op(nodes.ptr[ln].op_ext))] =? 'minus' {
                 if bl_exact_1word_ok(BlWord(nodes.ptr[ln].a)) and bl_exact_1word_ok(BlWord(nodes.ptr[ln].b)) {return true}
             }
             let [lk lval]=integer_constant(ln)
-            if lk and not has_flag(ln NF_U64) and lval =? 0 and exact_has_node(rn) and nodes.ptr[rn].kind =? 'binary' and nodes.ptr[rn].aux =? 0 and cx_token_values.ptr[BlWord(nodes.ptr[rn].op)] =? 'minus' {
+            if lk and not has_flag(ln NF_U64) and lval =? 0 and exact_has_node(rn) and nodes.ptr[rn].kind =? 'binary' and nodes.ptr[rn].aux =? 0 and cx_token_values.ptr[BlWord(node_op(nodes.ptr[rn].op_ext))] =? 'minus' {
                 if bl_exact_1word_ok(BlWord(nodes.ptr[rn].a)) and bl_exact_1word_ok(BlWord(nodes.ptr[rn].b)) {return true}
             }
             if bl_exact_1word_ok(ln) and bl_exact_1word_ok(rn) {return true}
@@ -1489,7 +1490,7 @@ bl_exact_1word_ok=(n:BlWord):>bool=>$unsafe {
         return false
     }
     if exact_bits(n) >? 64 {return false}
-    if k =? 'unary' and nodes.ptr[n].op =? 59 {return bl_exact_1word_ok(BlWord(nodes.ptr[n].a))}
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? 59 {return bl_exact_1word_ok(BlWord(nodes.ptr[n].a))}
     if k =? 'exprstmt' or (k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_)))) {
         return bl_exact_1word_ok(BlWord(nodes.ptr[n].a))
     }
@@ -1523,12 +1524,12 @@ bl_exact_store_ok=(e:BlWord):>bool=>$unsafe {
     }
     let bits=BlWord(types.ptr[t].bits)
     let signed=types.ptr[t].sign
-    if bits =? 64 and signed and nodes.ptr[source].kind =? 'unary' and nodes.ptr[source].op =? 59 {
+    if bits =? 64 and signed and nodes.ptr[source].kind =? 'unary' and node_op(nodes.ptr[source].op_ext) =? 59 {
         let opnd:BlWord=BlWord(nodes.ptr[source].a)
         if exact_bits(opnd) <=? 64 and bl_exact_low_ok(opnd) {return true}
     }
     if nodes.ptr[source].kind =? 'binary' and nodes.ptr[source].aux =? 0 {
-        let op=cx_token_values.ptr[BlWord(nodes.ptr[source].op)]
+        let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[source].op_ext))]
         if op =? 'plus' or op =? 'minus' or op =? 'star' {
             let a:BlWord=BlWord(nodes.ptr[source].a)
             let b0:BlWord=BlWord(nodes.ptr[source].b)
@@ -1715,7 +1716,7 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
             }
             <'vardecl'> => {
                 if not bl_fn_copies_maybe and nodes.ptr[e].nlist =? 0 and not has_flag(e NF_GLOBAL) {
-                    let a2=nodes.ptr[e].aux2
+                    let a2=node_aux2(nodes.ptr[e].op_ext)
                     if a2 =? 0 or a2 =? 1 {
                         let l:BlWord=BlWord(nodes.ptr[e].sym)
                         if l >=? 0 and (BlWord(locals.ptr[l].flags) & LF_ALIAS) =? 0 {
@@ -1730,7 +1731,7 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                 }
             }
             <'assign'> => {
-                if not bl_fn_copies_maybe and nodes.ptr[e].aux =? 0 and nodes.ptr[e].op =? 47 {
+                if not bl_fn_copies_maybe and nodes.ptr[e].aux =? 0 and node_op(nodes.ptr[e].op_ext) =? 47 {
                     let a:BlWord=BlWord(nodes.ptr[e].a)
                     if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? 1 {
                         let l:BlWord=BlWord(nodes.ptr[a].sym)
@@ -1800,7 +1801,7 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                 }
             }
             <'unary'> => {
-                let op=nodes.ptr[e].op
+                let op=node_op(nodes.ptr[e].op_ext)
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
                 let info:BlWord=tip[t0]
                 if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr}
@@ -1983,14 +1984,14 @@ bl_scan_assign=(e:BlWord):>bool=>$unsafe {
     let at0:BlWord=BlWord(nodes.ptr[a].type)
     let ainfo=bl_tinfo(at0)
     if (ainfo & 1) =? 0 or (ainfo & 12) =? 0 {return false}
-    if aux =? 0 and nodes.ptr[e].op =? 47 and bl_fn_copies_maybe and (ainfo & 32) not=? 0 and not bl_copy_own_ok(b0  at0) {return false}
+    if aux =? 0 and node_op(nodes.ptr[e].op_ext) =? 47 and bl_fn_copies_maybe and (ainfo & 32) not=? 0 and not bl_copy_own_ok(b0  at0) {return false}
     if (ainfo & 16) not=? 0 {bl_scan_managed=true}
     let ak=nodes.ptr[a].kind
     if ak not=? 'ident' and ak not=? 'field' and ak not=? 'index' and ak not=? 'unwrap' and ak not=? 'narrow' {return false}
     if ak =? 'ident' or ak =? 'field' or ak =? 'unwrap' or ak =? 'narrow' {
         let bf=if ak =? 'field' {boxed_field_of(a)} else {-1}
         if bf >=? 0 {
-            if aux not=? 0 or nodes.ptr[e].op not=? 47 or not bl_can_mut_place(BlWord(nodes.ptr[a].a)) {return false}
+            if aux not=? 0 or node_op(nodes.ptr[e].op_ext) not=? 47 or not bl_can_mut_place(BlWord(nodes.ptr[a].a)) {return false}
             bl_scan_calls += 1
             bl_scan_managed=true
         } else if not bl_can_mut_place(a) {return false}
@@ -2001,9 +2002,9 @@ bl_scan_assign=(e:BlWord):>bool=>$unsafe {
         if bk not=? 'array' and bk not=? 'ptr' and bk not=? 'fixed' {return false}
         if (bk =? 'array' or bk =? 'fixed') and not bl_can_mut_place(BlWord(nodes.ptr[a].a)) {return false}
     }
-    if aux =? 0 and nodes.ptr[e].op not=? 47 {
+    if aux =? 0 and node_op(nodes.ptr[e].op_ext) not=? 47 {
         if (ainfo & BL_TI_SAT) not=? 0 {return false}
-        let cop=compound_op(BlWord(nodes.ptr[e].op))
+        let cop=compound_op(BlWord(node_op(nodes.ptr[e].op_ext)))
         if cop =? 0 {return false}
         let avc=ainfo & 12
         if avc =? 8 {
@@ -2025,7 +2026,7 @@ bl_scan_assign=(e:BlWord):>bool=>$unsafe {
 
 bl_refinement_simple_ok=(e:BlWord):>bool=>$unsafe {
     if ref_self_active and nodes.ptr[e].b not=? 0 {return false}
-    let rt=zonk(BlWord(nodes.ptr[e].aux2))
+    let rt=zonk(BlWord(node_aux2(nodes.ptr[e].op_ext)))
     if rt <=? 0 or types.ptr[rt].kind not=? 'refined' {return false}
     let base=representation_type(rt)
     if base =? T_MATH_INT or not is_int(base) {return false}
@@ -2263,7 +2264,7 @@ bl_scan_call=(e:BlWord):>bool=>$unsafe {
         let t:BlWord=(tinfo >> 8) & 0xFFFFFF
         if (tinfo & 1) =? 0 or types.ptr[t].kind not=? 'enum_' {return false}
         let si:BlWord=BlWord(types.ptr[t].st)
-        let v:BlWord=BlWord(nodes.ptr[e].aux2)
+        let v:BlWord=BlWord(node_aux2(nodes.ptr[e].op_ext))
         let na:BlWord=BlWord(nodes.ptr[e].nlist)
         if structs.ptr[si].union_ and na =? 1 {
             let j=union_index(t  ntype(kid(e 0)))
@@ -2576,7 +2577,7 @@ bl_scan_for=(e:BlWord):>bool=>$unsafe {
         if bl_fn_copies_maybe and (cinfo & 32) not=? 0 and not bl_copy_own_ok(a  ct) {return false}
         let el:BlWord=BlWord(nodes.ptr[e].sym)
         let idx:BlWord=BlWord(nodes.ptr[e].c)
-        let snap:BlWord=BlWord(nodes.ptr[e].d)
+        let snap:BlWord=BlWord(node_d(nodes.ptr[e].op_ext))
         if el <=? 0 or idx <=? 0 or snap <=? 0 {return false}
         if (BlWord(locals.ptr[el].flags) & LF_BYREF) =? 0 {return false}
         if (BlWord(locals.ptr[idx].flags) & LF_BYREF) not=? 0 or (BlWord(locals.ptr[snap].flags) & LF_BYREF) not=? 0 {return false}
@@ -2604,8 +2605,8 @@ bl_scan_for=(e:BlWord):>bool=>$unsafe {
         if (bl_tinfo(BlWord(types.ptr[f0t].elem)) & 1) =? 0 or (bl_tinfo(BlWord(types.ptr[f1t].elem)) & 1) =? 0 {return false}
         let el:BlWord=BlWord(nodes.ptr[e].sym)
         let idx:BlWord=BlWord(nodes.ptr[e].c)
-        let snap:BlWord=BlWord(nodes.ptr[e].d)
-        let vl:BlWord=BlWord(nodes.ptr[e].aux2)
+        let snap:BlWord=BlWord(node_d(nodes.ptr[e].op_ext))
+        let vl:BlWord=BlWord(node_aux2(nodes.ptr[e].op_ext))
         if el <=? 0 or idx <=? 0 or snap <=? 0 {return false}
         if (BlWord(locals.ptr[el].flags) & LF_BYREF) =? 0 {return false}
         if (BlWord(locals.ptr[idx].flags) & LF_BYREF) not=? 0 or (BlWord(locals.ptr[snap].flags) & LF_BYREF) not=? 0 {return false}
@@ -2653,7 +2654,7 @@ bl_scan_match=(e:BlWord):>bool=>$unsafe {
             if pk =? 'plit' {
                 let pt=st
                 if is_union(pt) {
-                    let vi:BlWord=BlWord(nodes.ptr[p].aux2)
+                    let vi:BlWord=BlWord(node_aux2(nodes.ptr[p].op_ext))
                     let f:BlWord=BlWord(variants.ptr[BlWord(structs.ptr[BlWord(types.ptr[pt].st)].variants) + vi].fields)
                     if fields.ptr[f].boxed {return false}
                     pt=prune(BlWord(fields.ptr[f].type))
@@ -2662,7 +2663,7 @@ bl_scan_match=(e:BlWord):>bool=>$unsafe {
                     if nodes.ptr[pa].kind =? 'none_lit' {continue}
                     let u=prune(BlWord(types.ptr[pt].elem))
                     if not is_union(u) {return false}
-                    let vi:BlWord=BlWord(nodes.ptr[p].aux2)
+                    let vi:BlWord=BlWord(node_aux2(nodes.ptr[p].op_ext))
                     let f:BlWord=BlWord(variants.ptr[BlWord(structs.ptr[BlWord(types.ptr[u].st)].variants) + vi].fields)
                     if fields.ptr[f].boxed {return false}
                     pt=prune(BlWord(fields.ptr[f].type))
@@ -2756,7 +2757,7 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 bl_scan_push(iv)
                 return true
             }
-            let a2=nodes.ptr[e].aux2
+            let a2=node_aux2(nodes.ptr[e].op_ext)
             if a2 not=? 0 and a2 not=? 1 {return false}
             let l:BlWord=BlWord(nodes.ptr[e].sym)
             if l <? 0 or (BlWord(locals.ptr[l].flags) & LF_ALIAS) not=? 0 {return false}
@@ -2867,7 +2868,7 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
         <'binary'> => {
             let aux=nodes.ptr[e].aux
             if aux not=? 0 and aux not=? 1 and aux not=? 2 and aux not=? 4 and aux not=? 5 and aux not=? 6 {return false}
-            if aux =? 6 and nodes.ptr[e].aux2 not=? 0 {return false}
+            if aux =? 6 and node_aux2(nodes.ptr[e].op_ext) not=? 0 {return false}
             let a:BlWord=BlWord(nodes.ptr[e].a)
             let b0:BlWord=BlWord(nodes.ptr[e].b)
             let linfo=bl_tinfo(BlWord(nodes.ptr[a].type))
@@ -2889,16 +2890,16 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             if aux =? 0 {
                 let lvc=linfo & 12
                 if lvc =? 8 {
-                    let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
+                    let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[e].op_ext))]
                     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'slash' and op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
                     bl_scan_has_float=true
                 } else if lvc not=? 4 {return false}
                 else if (rinfo & BL_TI_SAT) not=? 0 {
-                    let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
+                    let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[e].op_ext))]
                     if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'shl' or op =? 'slash' or op =? 'percent' {return false}
                 }
                 else if (linfo & 64) not=? 0 {
-                    let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
+                    let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[e].op_ext))]
                     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'slash' and op not=? 'percent' and op not=? 'amp' and op not=? 'pipe' and op not=? 'caret' and op not=? 'shl' and op not=? 'shr' and op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
                     if pos_in_lib(nodes.ptr[e].pos) and (op =? 'shl' or op =? 'shr') and not (bl_is_small_math(a) and nodes.ptr[b0].kind =? 'int_lit' and not has_flag(b0 NF_U64) and nodes.ptr[b0].ival >=? 0 and nodes.ptr[b0].ival <? 64 and (op =? 'shr' or bl_is_small_math(e))) {return false}
                     if (op =? 'amp' or op =? 'pipe' or op =? 'caret') and bl_scan_loops >? 0 and not (bl_is_small_math(a) and bl_is_small_math(b0)) {bl_scan_math_bit_in_loop=true}
@@ -2956,7 +2957,7 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             false
         }
         <'istype'> => {
-            if nodes.ptr[e].aux2 not=? 0 {return false}
+            if node_aux2(nodes.ptr[e].op_ext) not=? 0 {return false}
             let vi:BlWord=BlWord(nodes.ptr[e].aux)
             if vi =? -3 {return true}
             let a:BlWord=BlWord(nodes.ptr[e].a)
@@ -3100,7 +3101,7 @@ bl_can_match_lookup=(m:BlWord):>bool=>$unsafe {
                 }
             } else if pk =? 'pvariant' {
                 let si:BlWord=BlWord(types.ptr[st].st)
-                let pv:BlWord=variants.ptr[BlWord(structs.ptr[si].variants) + BlWord(nodes.ptr[p].aux2)].value
+                let pv:BlWord=variants.ptr[BlWord(structs.ptr[si].variants) + BlWord(node_aux2(nodes.ptr[p].op_ext))].value
                 count += 1
                 if not have {lo=pv; hi=pv; have=true}
                 else {if pv <? lo {lo=pv}; if pv >? hi {hi=pv}}
@@ -3154,7 +3155,7 @@ bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
             let found=false
             loop bi in [0..nkids(body)) {
                 let st=kid(body bi)
-                if nodes.ptr[st].kind not=? 'vardecl' or nodes.ptr[st].aux2 not=? 1 {break}
+                if nodes.ptr[st].kind not=? 'vardecl' or node_aux2(nodes.ptr[st].op_ext) not=? 1 {break}
                 let bl:BlWord=BlWord(nodes.ptr[st].sym)
                 let biv:BlWord=BlWord(nodes.ptr[st].b)
                 if bl >=? 0 and copy_bindings.has(bl) and biv >? 0 and nodes.ptr[biv].kind =? 'ident' and nodes.ptr[biv].aux =? 1 and BlWord(nodes.ptr[biv].sym) =? p {found=true; break}
@@ -3218,7 +3219,7 @@ bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
             if not bl_scan_has_loop {
                 let first:BlWord=0
                 let nb=nkids(body)
-                loop first <? nb and nodes.ptr[kid(body first)].kind =? 'vardecl' and nodes.ptr[kid(body first)].aux2 =? 1 {first += 1}
+                loop first <? nb and nodes.ptr[kid(body first)].kind =? 'vardecl' and node_aux2(nodes.ptr[kid(body first)].op_ext) =? 1 {first += 1}
                 if first + 1 =? nb {
                     let s0=kid(body first)
                     let m0:BlWord=if nodes.ptr[s0].kind =? 'exprstmt' or nodes.ptr[s0].kind =? 'return_' {BlWord(nodes.ptr[s0].a)} else {s0}
@@ -3678,7 +3679,7 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
             bl_place_addr(a  write)
             layout(bt)
             let si:BlWord=BlWord(types.ptr[bt].st)
-            let f:BlWord=BlWord(variants.ptr[BlWord(structs.ptr[si].variants) + BlWord(nodes.ptr[e].aux2)].fields) + BlWord(nodes.ptr[e].ival)
+            let f:BlWord=BlWord(variants.ptr[BlWord(structs.ptr[si].variants) + BlWord(node_aux2(nodes.ptr[e].op_ext))].fields) + BlWord(nodes.ptr[e].ival)
             if fields.ptr[f].boxed {
                 mov_rm(RAX  RAX  XWord(fields.ptr[f].offset))
                 bl_box_val(BlWord(fields.ptr[f].type))
@@ -4308,7 +4309,7 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
     let b0:BlWord=BlWord(nodes.ptr[e].b)
     let lt=prune(ntype(a))
     let aux:BlWord=BlWord(nodes.ptr[e].aux)
-    let op_tok:BlWord=BlWord(nodes.ptr[e].op)
+    let op_tok:BlWord=BlWord(node_op(nodes.ptr[e].op_ext))
     let op=cx_token_values.ptr[op_tok]
     if aux =? 0 and quantity_base(lt) =? T_MATH_INT {
         if (op =? 'shl' or op =? 'shr') and bl_is_small_math(a) and nodes.ptr[b0].kind =? 'int_lit' and not has_flag(b0 NF_U64) and nodes.ptr[b0].ival >=? 0 and nodes.ptr[b0].ival <? 64 and (op =? 'shr' or bl_is_small_math(e)) {
@@ -4497,7 +4498,7 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
         bl_last_owned=false
         return
     }
-    let is_floor=nodes.ptr[e].aux2 =? -1
+    let is_floor=node_aux2(nodes.ptr[e].op_ext) =? -1
     let res_ty=prune(ntype(e))
     let sg=types.ptr[lt].kind =? 'int_' and types.ptr[lt].sign
     if aux =? 0 {
@@ -4653,7 +4654,7 @@ bl_eval_call_struct=(e:BlWord t:BlWord):>void=>$unsafe {
 bl_eval_call_enum=(e:BlWord t:BlWord):>void=>$unsafe {
     let si:BlWord=BlWord(types.ptr[t].st)
     layout(t)
-    let v:BlWord=BlWord(nodes.ptr[e].aux2)
+    let v:BlWord=BlWord(node_aux2(nodes.ptr[e].op_ext))
     if structs.ptr[si].union_ and nkids(e) =? 1 {
         let j=union_index(t  ntype(kid(e 0)))
         if j >=? 0 {v=j}
@@ -5017,7 +5018,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
     let na=nkids(e)
     if id =? IN.static_assert {bl_last_owned=false; return}
     if id =? IN.embed {
-        rel_fixup_lea(RAX  0  XWord(str_data(name_of(BlWord(nodes.ptr[e].sval)))))
+        rel_fixup_lea(RAX  0  XWord(str_data(name_of(BlWord(node_sval(nodes.ptr[e].op_ext))))))
         bl_last_owned=false
         return
     }
@@ -5844,7 +5845,7 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
     loop i in [0..nkids(e)) {
         let p=kid(e i)
         if nodes.ptr[p].kind =? 'str_lit' {
-            let s=name_of(BlWord(nodes.ptr[p].sval))
+            let s=name_of(BlWord(node_sval(nodes.ptr[p].op_ext)))
             if (s as array<uint8>).length =? 0 {continue}
             lea_rbp(RDI  -bs_off)
             rel_fixup_lea(RSI  0  XWord(str_data(s)))
@@ -5854,7 +5855,7 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
         let f:BlWord=BlWord(nodes.ptr[p].sym)
         let x:BlWord=BlWord(nodes.ptr[p].a)
         let xt=prune(ntype(x))
-        if f =? format_word_inst or (nodes.ptr[p].sval <? 0 and quantity_base(xt) =? T_MATH_INT and (bl_is_small_math(x) or not exact_count_bound(x).wide) and math_default_formatter(f)) {
+        if f =? format_word_inst or (node_sval(nodes.ptr[p].op_ext) <? 0 and quantity_base(xt) =? T_MATH_INT and (bl_is_small_math(x) or not exact_count_bound(x).wide) and math_default_formatter(f)) {
             bl_eval_borrowed(x)
             if quantity_base(xt) =? T_MATH_INT {
                 if bl_is_small_math(x) {bl_sh_imm(7  RAX  1)}
@@ -5868,8 +5869,8 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
         bl_eval(x)
         if vc(xt) =? VC_FLT {
             lea_rbp(RDI  -bs_off)
-            if nodes.ptr[p].sval >=? 0 {
-                rel_fixup_lea(RSI  0  XWord(str_data(name_of(BlWord(nodes.ptr[p].sval)))))
+            if node_sval(nodes.ptr[p].op_ext) >=? 0 {
+                rel_fixup_lea(RSI  0  XWord(str_data(name_of(BlWord(node_sval(nodes.ptr[p].op_ext))))))
             }
             bl_set_pos(nodes.ptr[p].pos)
             bl_call_pos(lf_of_inst(f))
@@ -5881,8 +5882,8 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
         bl_borrow(xt)
         mov_rr(RSI  RAX)
         lea_rbp(RDI  -bs_off)
-        if nodes.ptr[p].sval >=? 0 {
-            rel_fixup_lea(RDX  0  XWord(str_data(name_of(BlWord(nodes.ptr[p].sval)))))
+        if node_sval(nodes.ptr[p].op_ext) >=? 0 {
+            rel_fixup_lea(RDX  0  XWord(str_data(name_of(BlWord(node_sval(nodes.ptr[p].op_ext))))))
         }
         bl_set_pos(nodes.ptr[p].pos)
         bl_call_pos(lf_of_inst(f))
@@ -5955,7 +5956,7 @@ bl_eval_array=(e:BlWord):>void=>$unsafe {
         let z=kid(e 0)
         if nodes.ptr[z].kind =? 'conv' and (nodes.ptr[z].aux not=? int32(14) or nodes.ptr[z].ival =? 1) {z=BlWord(nodes.ptr[z].a)}
         let zk=nodes.ptr[z].kind
-        if (zk =? 'int_lit' and nodes.ptr[z].ival =? 0) or (zk =? 'bool_lit' and nodes.ptr[z].ival =? 0) or zk =? 'null_lit' or (zk =? 'float_lit' and nodes.ptr[z].fval =? 0.0 and f64_bits(nodes.ptr[z].fval) =? 0) {
+        if (zk =? 'int_lit' and nodes.ptr[z].ival =? 0) or (zk =? 'bool_lit' and nodes.ptr[z].ival =? 0) or zk =? 'null_lit' or (zk =? 'float_lit' and node_fval(nodes.ptr[z].op_ext) =? 0.0 and f64_bits(node_fval(nodes.ptr[z].op_ext)) =? 0) {
             bl_eval_borrowed(BlWord(nodes.ptr[e].b))
             mov_rr(RDI  RAX)
             mov_imm(RSI  esz)
@@ -6301,7 +6302,7 @@ bl_emit_cond_fail=(cond:BlWord invert:bool):>void=>$unsafe {
         return
     }
     if k =? 'binary' and nodes.ptr[cond].aux =? 0 and vc(prune(ntype(BlWord(nodes.ptr[cond].a)))) =? VC_INT and quantity_base(prune(ntype(BlWord(nodes.ptr[cond].a)))) not=? T_MATH_INT and not (bl_fn_exact and exact_has_node(cond)) {
-        let op=cx_token_values.ptr[BlWord(nodes.ptr[cond].op)]
+        let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[cond].op_ext))]
         if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
             let a:BlWord=BlWord(nodes.ptr[cond].a)
             let b0:BlWord=BlWord(nodes.ptr[cond].b)
@@ -6321,13 +6322,13 @@ bl_emit_cond_fail=(cond:BlWord invert:bool):>void=>$unsafe {
                 let v=nodes.ptr[b0].ival
                 # Direct (x & mask) == 0 / (x % pow2) == 0 -> test reg, mask; jcc
                 if v =? 0 and (op =? 'eq' or op =? 'ne') and nodes.ptr[a].kind =? 'binary' and nodes.ptr[a].aux =? 0 {
-                    let aop=cx_token_values.ptr[BlWord(nodes.ptr[a].op)]
+                    let aop=cx_token_values.ptr[BlWord(node_op(nodes.ptr[a].op_ext))]
                     let ax:BlWord=BlWord(nodes.ptr[a].a)
                     let ab:BlWord=BlWord(nodes.ptr[a].b)
                     let mask:BlWord=-1
                     if aop =? 'amp' and nodes.ptr[ab].kind =? 'int_lit' and nodes.ptr[ab].ival >=? 0 and nodes.ptr[ab].ival <=? 2147483647 {
                         mask=nodes.ptr[ab].ival
-                    } else if aop =? 'percent' and (nodes.ptr[a].aux2 =? -1 or not sg) {
+                    } else if aop =? 'percent' and (node_aux2(nodes.ptr[a].op_ext) =? -1 or not sg) {
                         let [known div]=integer_constant(ab)
                         if known and div >? 0 and (div & (div - 1)) =? 0 and div - 1 <=? 2147483647 {mask=div - 1}
                     }
@@ -6733,7 +6734,7 @@ bl_eval_exact_i128=(n:BlWord):>void=>$unsafe {
         return
     }
     if k =? 'binary' {
-        let op_tok:BlWord=BlWord(nodes.ptr[n].op)
+        let op_tok:BlWord=BlWord(node_op(nodes.ptr[n].op_ext))
         let op=cx_token_values.ptr[op_tok]
         let a:BlWord=BlWord(nodes.ptr[n].a)
         let b0:BlWord=BlWord(nodes.ptr[n].b)
@@ -6878,13 +6879,13 @@ bl_eval_exact_low=(n:BlWord):>void=>$unsafe {
         return
     }
     if k =? 'binary' {
-        let op_tok:BlWord=BlWord(nodes.ptr[n].op)
+        let op_tok:BlWord=BlWord(node_op(nodes.ptr[n].op_ext))
         let op=cx_token_values.ptr[op_tok]
         let a:BlWord=BlWord(nodes.ptr[n].a)
         let b0:BlWord=BlWord(nodes.ptr[n].b)
         if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
             let [rk rval]=integer_constant(b0)
-            if rk and not has_flag(b0 NF_U64) and rval =? 0 and exact_has_node(a) and nodes.ptr[a].kind =? 'binary' and nodes.ptr[a].aux =? 0 and cx_token_values.ptr[BlWord(nodes.ptr[a].op)] =? 'minus' and bl_exact_is_1word(BlWord(nodes.ptr[a].a)) and bl_exact_is_1word(BlWord(nodes.ptr[a].b)) {
+            if rk and not has_flag(b0 NF_U64) and rval =? 0 and exact_has_node(a) and nodes.ptr[a].kind =? 'binary' and nodes.ptr[a].aux =? 0 and cx_token_values.ptr[BlWord(node_op(nodes.ptr[a].op_ext))] =? 'minus' and bl_exact_is_1word(BlWord(nodes.ptr[a].a)) and bl_exact_is_1word(BlWord(nodes.ptr[a].b)) {
                 bl_eval_exact_pair(BlWord(nodes.ptr[a].a)  BlWord(nodes.ptr[a].b))
                 op_rr(0x39  true  RCX  RAX)
                 let cc:XWord=if op =? 'eq' {CC_E} else if op =? 'ne' {CC_NE} else if op =? 'lt' {CC_L} else if op =? 'le' {CC_LE} else if op =? 'gt' {CC_G} else {CC_GE}
@@ -6893,7 +6894,7 @@ bl_eval_exact_low=(n:BlWord):>void=>$unsafe {
                 return
             }
             let [lk lval]=integer_constant(a)
-            if lk and not has_flag(a NF_U64) and lval =? 0 and exact_has_node(b0) and nodes.ptr[b0].kind =? 'binary' and nodes.ptr[b0].aux =? 0 and cx_token_values.ptr[BlWord(nodes.ptr[b0].op)] =? 'minus' and bl_exact_is_1word(BlWord(nodes.ptr[b0].a)) and bl_exact_is_1word(BlWord(nodes.ptr[b0].b)) {
+            if lk and not has_flag(a NF_U64) and lval =? 0 and exact_has_node(b0) and nodes.ptr[b0].kind =? 'binary' and nodes.ptr[b0].aux =? 0 and cx_token_values.ptr[BlWord(node_op(nodes.ptr[b0].op_ext))] =? 'minus' and bl_exact_is_1word(BlWord(nodes.ptr[b0].a)) and bl_exact_is_1word(BlWord(nodes.ptr[b0].b)) {
                 bl_eval_exact_pair(BlWord(nodes.ptr[b0].a)  BlWord(nodes.ptr[b0].b))
                 op_rr(0x39  true  RCX  RAX)
                 let cc:XWord=if op =? 'eq' {CC_E} else if op =? 'ne' {CC_NE} else if op =? 'lt' {CC_G} else if op =? 'le' {CC_GE} else if op =? 'gt' {CC_L} else {CC_LE}
@@ -6972,7 +6973,7 @@ bl_eval_exact_store=(e:BlWord):>void=>$unsafe {
     }
     let bits=BlWord(types.ptr[t].bits)
     let signed=types.ptr[t].sign
-    if bits =? 64 and signed and nodes.ptr[source].kind =? 'unary' and nodes.ptr[source].op =? 59 and exact_bits(BlWord(nodes.ptr[source].a)) <=? 64 {
+    if bits =? 64 and signed and nodes.ptr[source].kind =? 'unary' and node_op(nodes.ptr[source].op_ext) =? 59 and exact_bits(BlWord(nodes.ptr[source].a)) <=? 64 {
         let opnd:BlWord=BlWord(nodes.ptr[source].a)
         bl_eval_exact_low(opnd)
         rex(true  0  0  RAX  false); b(0xF7); modrr(3  RAX) # neg rax
@@ -6983,7 +6984,7 @@ bl_eval_exact_store=(e:BlWord):>void=>$unsafe {
         return
     }
     if nodes.ptr[source].kind =? 'binary' and nodes.ptr[source].aux =? 0 {
-        let op=cx_token_values.ptr[BlWord(nodes.ptr[source].op)]
+        let op=cx_token_values.ptr[BlWord(node_op(nodes.ptr[source].op_ext))]
         if op =? 'plus' or op =? 'minus' or op =? 'star' {
             let a:BlWord=BlWord(nodes.ptr[source].a)
             let b0:BlWord=BlWord(nodes.ptr[source].b)
@@ -7050,7 +7051,7 @@ bl_eval_exact_store=(e:BlWord):>void=>$unsafe {
 bl_eval_exact_float=(a:BlWord to:BlWord pos:BlWord):>void=>$unsafe {
     let is_f32=tsize(quantity_base(to)) =? 4
     let pre=bl_fpre(to)
-    if nodes.ptr[a].kind =? 'binary' and nodes.ptr[a].aux =? 0 and cx_token_values.ptr[BlWord(nodes.ptr[a].op)] =? 'star' {
+    if nodes.ptr[a].kind =? 'binary' and nodes.ptr[a].aux =? 0 and cx_token_values.ptr[BlWord(node_op(nodes.ptr[a].op_ext))] =? 'star' {
         let x:BlWord=BlWord(nodes.ptr[a].a)
         let y:BlWord=BlWord(nodes.ptr[a].b)
         let [known scale]=integer_constant(y)
@@ -7103,7 +7104,7 @@ bl_eval_tuple=(e:BlWord):>void=>$unsafe {
 }
 
 bl_eval_unary=(e:BlWord):>void=>$unsafe {
-    let op=nodes.ptr[e].op
+    let op=node_op(nodes.ptr[e].op_ext)
     let a:BlWord=BlWord(nodes.ptr[e].a)
     if op =? 58 {bl_eval(a); return}
     let t=prune(ntype(e))
@@ -7282,7 +7283,7 @@ bl_eval_conv=(e:BlWord):>void=>$unsafe {
     if cv =? CV.refinement {
         bl_eval(a)
         if nodes.ptr[e].ival not=? 1 {
-            let reft=zonk(BlWord(nodes.ptr[e].aux2))
+            let reft=zonk(BlWord(node_aux2(nodes.ptr[e].op_ext)))
             let base=representation_type(reft)
             let biased=is_int(base) and not types.ptr[base].sign
             let shown=wit_text(a)
@@ -7420,7 +7421,7 @@ bl_eval_conv=(e:BlWord):>void=>$unsafe {
     }
     if cv =? CV.set_text {
         bl_eval_borrowed(a)
-        rel_fixup_lea(RCX  0  XWord(set_text_table(BlWord(nodes.ptr[e].aux2))))
+        rel_fixup_lea(RCX  0  XWord(set_text_table(BlWord(node_aux2(nodes.ptr[e].op_ext)))))
         bl_imul_imm(RAX  8)
         op_rr(0x01  true  RCX  RAX)
         mov_rm(RAX  RAX  0)
@@ -7818,7 +7819,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
         <'bool_lit'> => mov_imm(RAX  XWord(nodes.ptr[e].ival))
         <'float_lit'> => {
             let tinfo=bl_tinfo(BlWord(nodes.ptr[e].type))
-            bl_fconst(0  nodes.ptr[e].fval  bl_ti_size(tinfo) =? 4)
+            bl_fconst(0  node_fval(nodes.ptr[e].op_ext)  bl_ti_size(tinfo) =? 4)
         }
         <'null_lit'> => b16(0xC031)
         <'none_lit'> => {
@@ -7836,7 +7837,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
         }
         <'str_lit'> => {
             if nodes.ptr[e].aux not=? 0 {bl_eval_str_interp(e); return}
-            rel_fixup_lea(RAX  0  XWord(str_data(name_of(BlWord(nodes.ptr[e].sval)))))
+            rel_fixup_lea(RAX  0  XWord(str_data(name_of(BlWord(node_sval(nodes.ptr[e].op_ext))))))
         }
         <'fnref'> => {
             rex(true  RAX  0  0  false)
@@ -8005,12 +8006,12 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         bl_place_addr(a  true)
         mov_rm(RCX  RAX  0)
         mov_rm_rbp(RDX  -doff)
-        if nodes.ptr[s].op =? 48 {op_rr(0x01  true  RDX  RCX)}
+        if node_op(nodes.ptr[s].op_ext) =? 48 {op_rr(0x01  true  RDX  RCX)}
         else {op_rr(0x29  true  RDX  RCX)}
         mov_mr(RAX  0  RCX)
         return
     }
-    if nodes.ptr[s].op =? 47 {
+    if node_op(nodes.ptr[s].op_ext) =? 47 {
         # Plain = (match gen_assign: freeze Dewy destination indices before rhs; Jo evaluates rhs first)
         let fmark=bl_frozen_node.length
         if (nodes.ptr[a].kind =? 'index' or nodes.ptr[a].kind =? 'field') and dewy_at(nodes.ptr[s].pos) and (assign_rhs_effects(b0) or assign_rhs_effects(a)) {
@@ -8097,7 +8098,7 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
     }
     # Compound scalar arithmetic (+=, -=, *=, /=, %=, &=, |=, ^=, <<=, >>=)
     if t =? T_MATH_INT {
-        let op=cx_token_values.ptr[compound_op(BlWord(nodes.ptr[s].op))]
+        let op=cx_token_values.ptr[compound_op(BlWord(node_op(nodes.ptr[s].op_ext)))]
         let poff=bl_tmp_alloc(8)
         let coff=bl_tmp_alloc(8)
         let noff=bl_tmp_alloc(8)
@@ -8135,13 +8136,13 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         bl_eval_borrowed(b0)
         sse_rr(0  0x28  1  0)
         bl_load_res(t  coff)
-        bl_emit_falu(compound_op(BlWord(nodes.ptr[s].op))  t)
+        bl_emit_falu(compound_op(BlWord(node_op(nodes.ptr[s].op_ext)))  t)
         mov_rm_rbp(R10  -poff)
         bl_store_val(t  R10  0  RAX)
         return
     }
     let aoff=bl_plain_local_off(a)
-    let cop=nodes.ptr[s].op
+    let cop=node_op(nodes.ptr[s].op_ext)
     if aoff >? 0 and tsize(t) =? 8 and int_policy(t) not=? 1 and (cop =? 48 or cop =? 49) {
         if nodes.ptr[b0].kind =? 'int_lit' {
             let v=nodes.ptr[b0].ival
@@ -8234,7 +8235,7 @@ bl_emit_vardecl=(s:BlWord):>void=>$unsafe {
     let off=XWord(bl_loc_off.ptr[idx])
     let t=prune(BlWord(locals.ptr[l].type))
     let iv:BlWord=BlWord(nodes.ptr[s].b)
-    if copies_on and copy_bindings.has(l) and nodes.ptr[s].aux2 =? 1 {
+    if copies_on and copy_bindings.has(l) and node_aux2(nodes.ptr[s].op_ext) =? 1 {
         bl_eval(iv)
         bl_store_val(t  RBP  -off  RAX)
         bl_last_owned=false
@@ -8336,7 +8337,7 @@ bl_emit_match_test=(p:BlWord st0:BlWord subj_off:XWord disp:XWord):>void=>$unsaf
         let si:BlWord=BlWord(types.ptr[st].st)
         layout(st)
         load_sized(RAX  RBP  -subj_off + disp  4  false)
-        let want:BlWord=BlWord(nodes.ptr[p].aux2)
+        let want:BlWord=BlWord(node_aux2(nodes.ptr[p].op_ext))
         if structs.ptr[si].simple_enum {want=BlWord(variants.ptr[BlWord(structs.ptr[si].variants) + want].value)}
         mov_imm(RCX  XWord(want))
         op_rr(0x39  true  RCX  RAX)
@@ -8360,7 +8361,7 @@ bl_emit_match_test=(p:BlWord st0:BlWord subj_off:XWord disp:XWord):>void=>$unsaf
             patch_here(done_j)
             return
         }
-        if nodes.ptr[p].aux2 =? 1 {
+        if node_aux2(nodes.ptr[p].op_ext) =? 1 {
             let u=prune(telem(st))
             layout(u)
             bl_emit_opt_has(subj_off - disp  st)
@@ -8389,7 +8390,7 @@ bl_emit_match_test=(p:BlWord st0:BlWord subj_off:XWord disp:XWord):>void=>$unsaf
     if k =? 'plit' {
         if is_union(st) {
             layout(st)
-            let vi:BlWord=BlWord(nodes.ptr[p].aux2)
+            let vi:BlWord=BlWord(node_aux2(nodes.ptr[p].op_ext))
             let f:BlWord=BlWord(variants.ptr[BlWord(structs.ptr[BlWord(types.ptr[st].st)].variants) + vi].fields)
             load_sized(RCX  RBP  -subj_off + disp  4  false)
             bl_cmp_imm(RCX  XWord(vi))
@@ -8568,7 +8569,7 @@ bl_try_match_lookup=(m:BlWord st0:BlWord rtp0:BlWord):>bool=>$unsafe {
                 }
             } else if pk =? 'pvariant' {
                 let si:BlWord=BlWord(types.ptr[st].st)
-                let pv:BlWord=variants.ptr[BlWord(structs.ptr[si].variants) + BlWord(nodes.ptr[p].aux2)].value
+                let pv:BlWord=variants.ptr[BlWord(structs.ptr[si].variants) + BlWord(node_aux2(nodes.ptr[p].op_ext))].value
                 vals.push(pv)
                 arms.push(i)
                 if not have {lo=pv; hi=pv; have=true}
@@ -9276,7 +9277,7 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
     let ct=prune(ntype(a))
     let el:BlWord=BlWord(nodes.ptr[s].sym)
     let idx:BlWord=BlWord(nodes.ptr[s].c)
-    let snap:BlWord=BlWord(nodes.ptr[s].d)
+    let snap:BlWord=BlWord(node_d(nodes.ptr[s].op_ext))
     let el_off=XWord(bl_loc_off.ptr[bl_loc_idx(el)])
     let idx_off=XWord(bl_loc_off.ptr[bl_loc_idx(idx)])
     let snap_off=XWord(bl_loc_off.ptr[bl_loc_idx(snap)])
@@ -9329,7 +9330,7 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
         let vt=telem(BlWord(fields.ptr[f0 + 1].type))
         kstride=XWord(owner_stride(kt))
         vstride=XWord(owner_stride(vt))
-        vl=BlWord(nodes.ptr[s].aux2)
+        vl=BlWord(node_aux2(nodes.ptr[s].op_ext))
         if vl >? 0 and (BlWord(locals.ptr[vl].flags) & LF_BYREF) not=? 0 {
             vl_off=XWord(bl_loc_off.ptr[bl_loc_idx(vl)])
         } else {vl=0}
@@ -9597,7 +9598,7 @@ bl_emit_inst=(lf:BlWord fi:BlWord):>bool=>$unsafe {
     # Detect read-only Dewy synthetic value-parameter prefix (aux2 == 1).
     loop i in [0..nkids(body)) {
         let s=kid(body i)
-        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
         if not bl_is_param_view_decl(s) {continue}
         let l:BlWord=BlWord(nodes.ptr[s].sym)
         let src:BlWord=BlWord(nodes.ptr[BlWord(nodes.ptr[s].b)].sym)
@@ -9691,7 +9692,7 @@ bl_emit_inst=(lf:BlWord fi:BlWord):>bool=>$unsafe {
     let implicit_ret=fp[0].kind =? FK_NORMAL and nodes.ptr[body].aux not=? 0 and bl_cur_ret not=? T_NEVER and vc(bl_cur_ret) not=? VC_VOID
     loop i in [0..n) {
         let st=kid(body i)
-        if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].aux2 =? 1 {
+        if nodes.ptr[st].kind =? 'vardecl' and node_aux2(nodes.ptr[st].op_ext) =? 1 {
             let lidx=bl_loc_idx(BlWord(nodes.ptr[st].sym))
             if lidx >=? 0 and bl_loc_src.ptr[lidx] >=? 0 {continue}
         }

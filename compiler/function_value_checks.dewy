@@ -31,6 +31,7 @@ from p"coercion_queries.dewy" import (can_coerce)
 from p"checker_contexts.dewy" import (bound_here)
 from p"checks_compare_hints.dewy" import (bare_variant_hint)
 from p"ast.jo" import (NF_MUT has_flag kid nkids nodes)
+from p"node_store.dewy" import (node_sval)
 
 FunctionValueChecksWord:type=int64<overflow='wrap'>
 
@@ -178,7 +179,7 @@ fn_value=(n:int64 expected:int64 explicit_types:array<int64>=[] mod:int64=-1 clo
         t=mk_cfn(fns.ptr[f].ptypes ret)
         nodes[n].aux = 1
     }
-    if nodes.ptr[d].sval not=? 0 {t=mk_callable_contract(t effect_subst(FunctionValueChecksWord(fn_sig(d).contract) fns.ptr[f].targs))}
+    if node_sval(nodes.ptr[d].op_ext) not=? 0 {t=mk_callable_contract(t effect_subst(FunctionValueChecksWord(fn_sig(d).contract) fns.ptr[f].targs))}
     nodes[n].type = int32<overflow='wrap'>(t)
     if effects_active {t=effect_infer_callable(n expected)}
     if callable_contract(expected) not=? 0 and not has_var(expected) and not effect_contract_fits(t expected) {fatal(nodes.ptr[n].pos "cannot prove callable effect contract")}

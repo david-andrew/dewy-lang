@@ -27,7 +27,7 @@ main = ():
     loop text in ["abc", "(x)", "[x]", ")x", "([x])", "x)", "(x"]:
         print("balanced:{text}:{regroup_balanced(text)}")
     loop kind in [NK.and_, NK.or_, NK.not_, NK.binary]:
-        op = mk(kind, mkpos(0, 2)); nodes[op].op = i32(int(Tok.plus))
+        op = mk(kind, mkpos(0, 2)); nodes[op].op_ext = node_with_op(nodes[op].op_ext, i32(i32(int(Tok.plus))))
         print("op:{regroup_op_name(op)}")
     files[0].src = "\{  x}"
     nodes[a].pos = mkpos(0, 3)

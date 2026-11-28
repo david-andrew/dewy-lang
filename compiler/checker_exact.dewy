@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_op)
 from p"checker_types.dewy" import TypeInfo
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -64,7 +64,7 @@ ex_type=(t0:EXWord pos:int64):>bool=>$unsafe {
 ex_operation=(n:EXWord):>bool=>$unsafe {
     let nd=ex_nodes[0].ptr + n
     let k=nd[0].kind
-    let op=nd[0].op
+    let op=node_op(nd[0].op_ext)
     if k =? 'intrinsic' {return nd[0].aux =? 89}
     if k =? 'unary' {
         if op not=? 59 {return false}
@@ -84,15 +84,15 @@ exact_potential=(n0:int64):>bool=>$unsafe {
     if ex_operation(n) {return true}
     let nd=ex_nodes[0].ptr + n
     let k=nd[0].kind
-    if k =? 'binary' and (nd[0].op =? 63 or nd[0].op =? 64 or nd[0].op =? 65) {return exact_potential(int64(nd[0].a)) or exact_potential(int64(nd[0].b))}
+    if k =? 'binary' and (node_op(nd[0].op_ext) =? 63 or node_op(nd[0].op_ext) =? 64 or node_op(nd[0].op_ext) =? 65) {return exact_potential(int64(nd[0].a)) or exact_potential(int64(nd[0].b))}
     # An exact dividend or divisor can put a quotient outside its operands'
     # storage; a remainder takes its divisor's sign and stays below it.
-    if k =? 'binary' and nd[0].aux =? 0 and nd[0].op =? 61 {return exact_potential(int64(nd[0].a)) or exact_potential(int64(nd[0].b))}
-    if k =? 'binary' and nd[0].aux =? 0 and nd[0].op =? 62 {return exact_potential(int64(nd[0].b))}
+    if k =? 'binary' and nd[0].aux =? 0 and node_op(nd[0].op_ext) =? 61 {return exact_potential(int64(nd[0].a)) or exact_potential(int64(nd[0].b))}
+    if k =? 'binary' and nd[0].aux =? 0 and node_op(nd[0].op_ext) =? 62 {return exact_potential(int64(nd[0].b))}
     # (a right shift keeps an exact operand's excess: `(x * x) >> 33` with x:uint32)
-    if k =? 'binary' and nd[0].aux =? 0 and nd[0].op =? 68 {return exact_potential(int64(nd[0].a))}
+    if k =? 'binary' and nd[0].aux =? 0 and node_op(nd[0].op_ext) =? 68 {return exact_potential(int64(nd[0].a))}
     # (a negation keeps its exact operand's excess: `-(x << 49)` with x:int64)
-    if k =? 'unary' and nd[0].op =? 59 {return exact_potential(int64(nd[0].a))}
+    if k =? 'unary' and node_op(nd[0].op_ext) =? 59 {return exact_potential(int64(nd[0].a))}
     # CV.none_ 0, CV.int_ 1
     if k =? 'conv' and (nd[0].aux =? 1 or nd[0].aux =? 0) {return exact_potential(int64(nd[0].a))}
     if k =? 'if_' or k =? 'iflet' {return exact_potential(int64(nd[0].b)) or exact_potential(int64(nd[0].c))}
@@ -141,7 +141,7 @@ exact_candidate=(n0:int64):>bool=>$unsafe {
     let nd=ex_nodes[0].ptr + n
     let k=nd[0].kind
     if k =? 'binary' {
-        let op=nd[0].op
+        let op=node_op(nd[0].op_ext)
         return ex_operation(n) or ((op =? 63 or op =? 64 or op =? 65) and exact_potential(n0))
     }
     if k =? 'unary' or k =? 'intrinsic' {return ex_operation(n)}

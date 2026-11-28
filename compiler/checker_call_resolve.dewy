@@ -5,7 +5,7 @@ from p"checker_type_entries.dewy" import (get_fn_inst)
 from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (capture_value)
 
-from p"node_store.dewy" import (call_waits_hook)
+from p"node_store.dewy" import (call_waits_hook node_aux2 node_with_aux2)
 from p"checker_state.dewy" import (live_body_indexes decl_mono_enabled)
 from p"ast.jo" import (decl_has_rest lists rest_bundles nodes dewy_param_kinds nkids nkids2 kid has_flag add_flag set_list NF_MUT NF_CHECKED)
 from p"expr.jo" import (setting_site rational_module_found call_targs CallFailure AUX2_PARTIAL place_method dewy_literal_method_name)
@@ -61,7 +61,7 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
         let targs_here=call_targs
         call_targs=[]
         if args.length >? 0 {check_args_untyped(args)}
-        if targs_here.length =? 1 and args.length =? 1 and decls.length >? 0 and nodes.ptr[n].aux2 not=? int32(AUX2_PARTIAL) {
+        if targs_here.length =? 1 and args.length =? 1 and decls.length >? 0 and node_aux2(nodes.ptr[n].op_ext) not=? int32(AUX2_PARTIAL) {
             let grid=grid_convert_call(n name decls[0] args[0] targs_here[0])
             if grid >=? 0 {return grid}
         }
@@ -69,7 +69,7 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
     }
     let n_args=CRWord(args.length)
     if n_args >? 0 {check_args_untyped(args)}
-    if decls.length =? 1 and closure =? 0 and nodes.ptr[n].aux2 not=? int32(AUX2_PARTIAL) {
+    if decls.length =? 1 and closure =? 0 and node_aux2(nodes.ptr[n].op_ext) not=? int32(AUX2_PARTIAL) {
         let ap=args.ptr
         let np0=nodes.ptr
         let positional=true
@@ -106,7 +106,7 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                     let ak=an[0].kind
                     let afl=CRWord(an[0].flags)
                     let nt=CRWord(an[0].type)
-                    if not ((afl & 4096) =? 0 and (ak =? 'ident' or ak =? 'int_lit' or ak =? 'binary' or ak =? 'field' or ak =? 'index' or ak =? 'str_lit' or ak =? 'bool_lit' or ak =? 'float_lit' or (ak =? 'call' and nt not=? 0 and an[0].aux2 not=? -1))) {
+                    if not ((afl & 4096) =? 0 and (ak =? 'ident' or ak =? 'int_lit' or ak =? 'binary' or ak =? 'field' or ak =? 'index' or ak =? 'str_lit' or ak =? 'bool_lit' or ak =? 'float_lit' or (ak =? 'call' and nt not=? 0 and node_aux2(an[0].op_ext) not=? -1))) {
                         if ctx_dependent(a) {ok=false; break}
                     }
                     let pt=CRWord(decl_infos.ptr[di].sig.params.ptr[i])
@@ -324,7 +324,7 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
     let np:CRWord=nkids(decl)
     call_decl_checks(n name decl args cd.args np ufcs)
     # Bind holes, context-dependent arguments and expected result types.
-    let partial=(not cd.plain and has_hole(args)) or nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL)
+    let partial=(not cd.plain and has_hole(args)) or node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL)
     if partial and expected not=? 0 and tkind(expected) =? 'fn_' {
         let rb=cd.binds
         let ok=true
@@ -548,7 +548,7 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
     }
     if proof_active or wi_any or dir_floats_any {call_note_contracts(n f decl partial closure)}
     if partial {
-        nodes.ptr[n].aux2 = 0
+        nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
         return finish_partial(n fns.ptr[f].ptypes CRWord(cd.sig.mutmask) CRWord(fns.ptr[f].ret))
     }
     if not capture_defaults and not (positional and not cd.missing) {save_call_order(n args fin)}

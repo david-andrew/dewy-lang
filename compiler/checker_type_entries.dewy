@@ -8,6 +8,7 @@ from p"types.jo" import (T_VOID structs)
 from p"type_substitute.dewy" import (ts_subst)
 from p"checker_instances.dewy" import (ci_get_fn_inst)
 from p"checker_fields.dewy" import (cf_check_struct_fields)
+from p"node_store.dewy" import (node_mod)
 
 check_struct_fields=(si:int64):>void=>$unsafe {
     if not structs.ptr[si].resolved {cf_check_struct_fields(si)}
@@ -33,8 +34,8 @@ type_param_defaults=(d:CheckerTypeEntriesWord targs:array<int64> inferred:array<
         let fallback=CheckerTypeEntriesWord(nodes.ptr[kid2(d i)].b)
         if fallback =? 0 {return targs}
         let saved=context
-        let inst=new_inst(FK_INIT CheckerTypeEntriesWord(nodes.ptr[d].mod) "typedef")
-        ctxs.push(FnCtx(int32(inst) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+        let inst=new_inst(FK_INIT CheckerTypeEntriesWord(node_mod(nodes.ptr[d].op_ext)) "typedef")
+        ctxs.push(FnCtx(int32(inst) (-1) int32(T_VOID) false 0 node_mod(nodes.ptr[d].op_ext) int32(check_scopes.names.length)))
         context=CheckerTypeEntriesWord(ctxs.length) - 1
         let mark=scope_mark()
         out.push(resolve_type(fallback))

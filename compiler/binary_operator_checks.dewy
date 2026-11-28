@@ -45,7 +45,7 @@ from p"numeric_library_types.dewy" import (bundled_bigint_type)
 from p"checks_builders.dewy" import (bc_call)
 from p"checker_tokens.dewy" import (Tok)
 from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_STR T_U64 is_float is_int is_numeric is_union is_vec prune telem tkind type_eq types)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_fval node_op node_sval node_with_aux2 node_with_op)
 from p"ast.jo" import (NF_BROADCAST NF_SQUOTE NF_U64 has_flag kids mk nodes)
 
 BinaryOperatorChecksWord:type=int64<overflow='wrap'>
@@ -65,7 +65,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
         tb=BinaryOperatorChecksWord(types.ptr[tb].elem)
         coerce(b tb);
     }
-    let op=cx_token_values[BinaryOperatorChecksWord(nodes.ptr[n].op)]
+    let op=cx_token_values[BinaryOperatorChecksWord(node_op(nodes.ptr[n].op_ext))]
     let is_cmp=op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge'
     let is_shift=op =? 'shl' or op =? 'shr'
     let q_lit_a=flags & 1 not=? 0
@@ -137,14 +137,14 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
         coerce(count word);
         if ta =? T_STR {tb=word} else {ta = word}
     }
-    let pending_decimal=(nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0 and is_lit(a)) or (nodes.ptr[b].kind =? 'float_lit' and nodes.ptr[b].sval not=? 0 and is_lit(b))
+    let pending_decimal=(nodes.ptr[a].kind =? 'float_lit' and node_sval(nodes.ptr[a].op_ext) not=? 0 and is_lit(a)) or (nodes.ptr[b].kind =? 'float_lit' and node_sval(nodes.ptr[b].op_ext) not=? 0 and is_lit(b))
     # (a quantity operand is exact or floating by its number: 0.5 * 2s stays exact)
     let na=if types.ptr[ta].kind =? 'quantity' {quantity_base(ta)} else {ta}
     let nb=if types.ptr[tb].kind =? 'quantity' {quantity_base(tb)} else {tb}
     let exact_operands=pending_decimal and (is_numeric(na) or bundled_rational_type(na) or bundled_bigint_type(na)) and (is_numeric(nb) or bundled_rational_type(nb) or bundled_bigint_type(nb))
     if exact_operands and not is_float(hint) and not (is_float(na) and not is_lit(a)) and not (is_float(nb) and not is_lit(b)) {
-        if nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0 and is_lit(a) {ta=exact_decimal(a)}
-        if nodes.ptr[b].kind =? 'float_lit' and nodes.ptr[b].sval not=? 0 and is_lit(b) {tb=exact_decimal(b)}
+        if nodes.ptr[a].kind =? 'float_lit' and node_sval(nodes.ptr[a].op_ext) not=? 0 and is_lit(a) {ta=exact_decimal(a)}
+        if nodes.ptr[b].kind =? 'float_lit' and node_sval(nodes.ptr[b].op_ext) not=? 0 and is_lit(b) {tb=exact_decimal(b)}
     }
     # (a record's own operators take a quantity, Instant + 90minute: the record case below)
     if (types.ptr[ta].kind =? 'quantity' or types.ptr[tb].kind =? 'quantity') and not quantity_record_operand(ta tb) {
@@ -176,7 +176,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
     if op =? 'eq' and is_float(ta) and (nodes.ptr[a].kind =? 'ident' or nodes.ptr[a].kind =? 'field') and (nodes.ptr[b].kind =? 'int_lit' or nodes.ptr[b].kind =? 'float_lit') and cx >=? 0 and not pos_in_lib(nodes.ptr[n].pos) {
         let lv:float64=0.0
         if nodes.ptr[b].kind =? 'int_lit' {lv=float64(nodes.ptr[b].ival)}
-        else if nodes.ptr[b].kind =? 'float_lit' {lv=nodes.ptr[b].fval}
+        else if nodes.ptr[b].kind =? 'float_lit' {lv=node_fval(nodes.ptr[b].op_ext)}
         let ci=BinaryOperatorChecksWord(ctxs.ptr[cx].inst)
         if lv not=? 0.0 and ci >? 0 and fns.ptr[ci].decl not=? 0 and name_of(BinaryOperatorChecksWord(nodes.ptr[BinaryOperatorChecksWord(fns.ptr[ci].decl)].name)) =? "update" and not dewy_is_method(BinaryOperatorChecksWord(fns.ptr[ci].decl)) {
             let lt="{lv}"
@@ -189,7 +189,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
     }
     # (s[0] + "!": a byte and a character's code added, which reads like text joined)
     if b_char and is_int(ta) and not is_lit(a) and is_int(tb) and not has_flag(b NF_SQUOTE) {
-        let ch=name_of(BinaryOperatorChecksWord(nodes.ptr[b].sval))
+        let ch=name_of(BinaryOperatorChecksWord(node_sval(nodes.ptr[b].op_ext)))
         if nodes.ptr[a].kind =? 'ident' {
             let an=name_of(BinaryOperatorChecksWord(nodes.ptr[a].name))
             warn(nodes.ptr[n].pos "this adds the character code of {ch} to a number, not text to text: for text, write `\"\{{an}}{ch}\"` (and when {an} is a character from s[i], `chr({an}) + \"{ch}\"`)")
@@ -254,7 +254,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
         if r not=? 0 {return r}
         if op =? 'ne' {
             let eqn=mk('binary' nodes.ptr[n].pos)
-            nodes[eqn].op = 69
+            nodes[eqn].op_ext=node_with_op(nodes[eqn].op_ext 69)
             nodes[eqn].a = int32<overflow='wrap'>(a)
             nodes[eqn].b = int32<overflow='wrap'>(b)
             let r2=op_overload(eqn "==")
@@ -266,7 +266,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
         if op =? 'gt' or op =? 'le' or op =? 'ge' {
             # from `<` alone: a > b is b < a, a <= b is not (b < a), a >= b is not (a < b)
             let ltn=mk('binary' nodes.ptr[n].pos)
-            nodes[ltn].op = 71
+            nodes[ltn].op_ext=node_with_op(nodes[ltn].op_ext 71)
             nodes[ltn].a = int32<overflow='wrap'>(b)
             nodes[ltn].b = int32<overflow='wrap'>(a)
             if op =? 'ge' {
@@ -314,7 +314,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
         if not is_int(ta) or not is_int(tb) {fatal(nodes.ptr[n].pos "shift operands must be integers")}
         # An unsigned subtraction may be negative before the shift. Keep its
         # exact signed value instead of first narrowing it to an unsigned word.
-        if op =? 'shr' and ta =? T_U64 and nodes.ptr[a].kind =? 'binary' and nodes.ptr[a].op =? 59 and exact_operation(a) {
+        if op =? 'shr' and ta =? T_U64 and nodes.ptr[a].kind =? 'binary' and node_op(nodes.ptr[a].op_ext) =? 59 and exact_operation(a) {
             ta=exact_int_result(a true)
         }
         if ta =? T_MATH_INT {
@@ -400,7 +400,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
                 }
                 if tkind(ntype(BinaryOperatorChecksWord(nodes.ptr[n].a))) not=? 'opt' {fatal(nodes.ptr[n].pos "only optionals can be compared with none")}
                 nodes[n].aux = 6
-                nodes[n].aux2 = int32<overflow='wrap'>(map_presence_fn(BinaryOperatorChecksWord(nodes.ptr[n].a)))
+                nodes[n].op_ext=node_with_aux2(nodes[n].op_ext (int32<overflow='wrap'>(map_presence_fn(BinaryOperatorChecksWord(nodes.ptr[n].a)))))
                 nodes[n].type = int32<overflow='wrap'>(T_BOOL)
                 return T_BOOL
             }
@@ -481,9 +481,9 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
             let tested=if tkb =? 'bool_' {b} else {a}
             let other=if tkb =? 'bool_' {a} else {b}
             let shown=wit_text(other)
-            let left=if nodes.ptr[tested].kind =? 'binary' and fact_comparison_raw(nodes.ptr[tested].op) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].a))} else {""}
-            let right=if nodes.ptr[tested].kind =? 'binary' and fact_comparison_raw(nodes.ptr[tested].op) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].b))} else {""}
-            let mask=if shown not=? "" and left not=? "" and right not=? "" {": to test a mask, group it first, `({shown} {word} {left}) {op_text(cx_token_values[BinaryOperatorChecksWord(nodes.ptr[tested].op)] nodes.ptr[n].pos)} {right}`"} else {""}
+            let left=if nodes.ptr[tested].kind =? 'binary' and fact_comparison_raw(node_op(nodes.ptr[tested].op_ext)) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].a))} else {""}
+            let right=if nodes.ptr[tested].kind =? 'binary' and fact_comparison_raw(node_op(nodes.ptr[tested].op_ext)) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].b))} else {""}
+            let mask=if shown not=? "" and left not=? "" and right not=? "" {": to test a mask, group it first, `({shown} {word} {left}) {op_text(cx_token_values[BinaryOperatorChecksWord(node_op(nodes.ptr[tested].op_ext))] nodes.ptr[n].pos)} {right}`"} else {""}
             fatal(nodes.ptr[n].pos "`{word}` joins two truth values or two integers, not {dt(ta)} and {dt(tb)}, and a test binds tighter than it{mask}; to test an integer, compare it, as `x not=? 0`")
         }
         # (square(4) + 1 with a square that prints: it gives nothing back)

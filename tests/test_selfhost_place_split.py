@@ -29,7 +29,7 @@ kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 nkids = (n: int) -> int: int(nodes[n].nlist)
 kid_c = (n: int) -> int: if nodes[n].kind == .for_: 0 else: int(nodes[n].c)
-kid_d = (n: int) -> int: int(nodes[n].d)
+kid_d = (n: int) -> int: int(node_d(nodes[n].op_ext))
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 add_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) | f)
 mk = (k: NK, pos: int) -> int:
@@ -84,7 +84,7 @@ stmt = (e: int) -> int:
 local = (name: str, sub: int[] = []) -> int:
     n = mk(.vardecl, 43); nodes[n].name = i32(intern(name)); set_list(n, sub); n
 param_bind = (name: str) -> int:
-    n = local(name); nodes[n].aux2 = 1; n
+    n = local(name); nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(1)); n
 function = (statements: int[], written: int = 0) -> int:
     f = mk(.fn_, 44)
     nodes[f].name = i32(intern("lend"))
@@ -123,7 +123,7 @@ main = ():
     values: int[]
     good = at_flag(field(self_at(), "balance"))
     tree = mk(.if_, 1)
-    nodes[tree].a = i32(gives(good)); nodes[tree].b = i32(value()); nodes[tree].c = i32(value()); nodes[tree].d = i32(value())
+    nodes[tree].a = i32(gives(good)); nodes[tree].b = i32(value()); nodes[tree].c = i32(value()); nodes[tree].op_ext = node_with_d(nodes[tree].op_ext, i32(i32(value())))
     hidden = mk(.lambda, 2); nodes[hidden].a = i32(value())
     set_list(tree, [hidden, mk(.fn_, 3), value()])
     place_returns_in(tree, self, places, values)

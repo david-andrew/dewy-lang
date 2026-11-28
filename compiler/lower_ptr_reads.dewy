@@ -17,6 +17,7 @@ from p"check.jo" import (locals fns LF_CAPTURED LF_CAPTURE LF_SHARED LF_ADDR LF_
 from p"expr.jo" import (IN)
 from p"types.jo" import (tkind)
 from p"lower.jo" import (cur_fn)
+from p"node_store.dewy" import (node_d)
 # Node.aux stores the existing SK.local ordinal (1), not a Dewy string value.
 PRWord:type=int64<overflow='wrap'>
 let pr_parent:dict<int64 int64>=dict<int64 int64>()
@@ -149,7 +150,7 @@ pr_walk=(n:PRWord):>void=>$unsafe {
     pr_child(n PRWord(nodes.ptr[n].b) -1)
     if k not=? 'for_' {
         pr_child(n PRWord(nodes.ptr[n].c) -1)
-        if k not=? 'partial' {pr_child(n PRWord(nodes.ptr[n].d) -1)}
+        if k not=? 'partial' {pr_child(n PRWord(node_d(nodes.ptr[n].op_ext)) -1)}
     }
     let m:PRWord=nkids(n)
     if m >? 0 {

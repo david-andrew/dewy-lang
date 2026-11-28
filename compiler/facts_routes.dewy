@@ -40,6 +40,7 @@ from p"types.jo" import (T_INT T_MATH_INT T_STR struct_targ telem tkind types)
 from p"type_ops.dewy" import (fixed_len)
 from p"util.jo" import (name_of)
 from p"witness_ops.dewy" import (wit_index)
+from p"node_store.dewy" import (node_sval)
 
 RouteWord:type=int64<overflow='wrap'>
 # A seed-language declaration without an initializer zero-initializes its
@@ -153,7 +154,7 @@ fact_constant_tree=(n:RouteWord @budget:RouteWord scope:dict<int64 bool>=dict<in
     if rational_constants.has(n) {return true}
     let k=nodes.ptr[n].kind
     if k =? 'int_lit' or k =? 'bool_lit' or k =? 'float_lit' or k =? 'none_lit' {return true}
-    if k =? 'str_lit' {return nkids(n) =? 0 and nodes.ptr[n].sval >=? 0}
+    if k =? 'str_lit' {return nkids(n) =? 0 and node_sval(nodes.ptr[n].op_ext) >=? 0}
     # A comprehension is closed value construction too. The scope contains
     # only its private binders; true marks an accumulator eligible for push.
     # No user call, outer local, mutable global or other write is admitted.
@@ -254,8 +255,8 @@ fact_global_length=(g:RouteWord):>RouteWord=>$unsafe {
     if d =? 0 or nodes.ptr[d].kind not=? 'vardecl' {return -1}
     let init=RouteWord(nodes.ptr[d].b)
     if kind =? 'str_' {
-        if init =? 0 or nodes.ptr[init].kind not=? 'str_lit' or nkids(init) not=? 0 or nodes.ptr[init].sval <? 0 {return -1}
-        let text=name_of(RouteWord(nodes.ptr[init].sval))
+        if init =? 0 or nodes.ptr[init].kind not=? 'str_lit' or nkids(init) not=? 0 or node_sval(nodes.ptr[init].op_ext) <? 0 {return -1}
+        let text=name_of(RouteWord(node_sval(nodes.ptr[init].op_ext)))
         loop c in (text as array<uint8>) {
             if c >=? 128 or c =? 13 {return -1}
         }

@@ -146,6 +146,8 @@ def corpus(seed, rounds=40, steps=160):
                     continue
                 if field in 'abcd':
                     v = rng.randrange(0, target) if target > 1 else 0
+                elif field == 'op':
+                    v = rng.choice([0, 1, 7, 127, 128, 255, rng.randrange(0, 256)])
                 elif field == 'ival':
                     v = rng.choice([0, -1, 2**62, rng.randrange(-2**63, 2**63)])
                 elif field == 'fval':

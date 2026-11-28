@@ -13,7 +13,7 @@ DEWY = 1 << 40
 # A node of kind k typed t (op and aux as given), in a Dewy file or not.
 mk = (k: NK, t: int, op: int = 0, aux: int = 0, dewy: bool = true, kids: int[] = []) -> int:
     n = node(k, 0, 0, aux, kids)
-    nodes[n].type = i32(t); nodes[n].op = i32(op)
+    nodes[n].type = i32(t); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(op)))
     if dewy: nodes[n].pos = DEWY + n
     n
 wire = (n: int, a: int, b: int = 0, c: int = 0) -> int:

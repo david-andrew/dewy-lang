@@ -10,6 +10,7 @@ from p"diagnostic_exit.dewy" import (fatal)
 from p"dewy_node_ops.dewy" import (dw_finish_function)
 from p"place_methods.jo" import (PlaceMethod place_methods place_written)
 from p"place_method_ops.dewy" import (place_names_used)
+from p"node_store.dewy" import (node_aux2)
 
 SplitWord:type=int64<overflow='wrap'>
 # The member names of `@$self.a.b`, or none when v is not a place inside the receiver.
@@ -80,7 +81,7 @@ place_method_split=(fn_:SplitWord receiver:SplitWord name:string):>array<int64>=
     if route =? none {fatal(nodes.ptr[given].pos "a method lends a field of its object for now (`@balance`, `@account.balance`), not an element or the object itself")}
     # value parameters' bindings lead the body (dw_finish_function)
     let first:SplitWord=0
-    loop first <? last and nodes.ptr[stmts[first]].kind =? 'vardecl' and nodes.ptr[stmts[first]].aux2 =? 1 {first+=1}
+    loop first <? last and nodes.ptr[stmts[first]].kind =? 'vardecl' and node_aux2(nodes.ptr[stmts[first]].op_ext) =? 1 {first+=1}
     let split:SplitWord=-1
     loop i in [first..last) {
         let found:array<int64>=[]

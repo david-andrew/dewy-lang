@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"fixed_index.dewy" import (fi_begin fi_event fi_template fi_children fi_declaration fi_index fi_finish FI_OPEN FI_CLOSE FI_RANGE)
-from p"node_store.dewy" import (NK Node)
+from p"node_store.dewy" import (NK Node node_d node_list2 node_nlist2)
 from p"checker_types.dewy" import TypeInfo
 from p"checker_state.dewy" import (FnInst Local Global live_body_indexes live_body_user_globals live_body_global_mod)
 from p"type_inference.dewy" import (tu_prune tu_zonk)
@@ -114,14 +114,14 @@ xz_summary=(root:XZWord):>void=>$unsafe {
         # Every child, so the first pops first: the lists (second, then first), then d,
         # c, b and a, as a recursive walk visits them.
         let n1=XZWord(xz_nodes[0][n].nlist)
-        let n2=XZWord(xz_nodes[0][n].nlist2)
+        let n2=XZWord(node_nlist2(xz_nodes[0][n].op_ext))
         if sp + n1 + n2 + 4 >? cap {
             cap=(sp + n1 + n2 + 4) * 2
             xz_summary_stack.resize(cap)
             st=xz_summary_stack.ptr
         }
         if n2 >? 0 {
-            let l2=XZWord(xz_nodes[0][n].list2)
+            let l2=XZWord(node_list2(xz_nodes[0][n].op_ext))
             let i=n2 - 1
             loop i >=? 0 {
                 let x=xz_lists[0][l2 + i]
@@ -145,8 +145,8 @@ xz_summary=(root:XZWord):>void=>$unsafe {
             }
         }
         if k not=? 'for_' {
-            if k not=? 'partial' and xz_nodes[0][n].d not=? 0 {
-                st[sp]=int64(xz_nodes[0][n].d)
+            if k not=? 'partial' and node_d(xz_nodes[0][n].op_ext) not=? 0 {
+                st[sp]=int64(node_d(xz_nodes[0][n].op_ext))
                 sp=sp + 1
             }
             if xz_nodes[0][n].c not=? 0 {
@@ -276,7 +276,7 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
         # Every child, so the first pops first: the lists (second, then first), then d,
         # c, b and a, as a recursive walk visits them.
         let n1=XZWord(node[0].nlist)
-        let n2=XZWord(node[0].nlist2)
+        let n2=XZWord(node_nlist2(node[0].op_ext))
         let slots:XZWord=if Proofs =? 1 {7} else {4}
         if sp + n1 + n2 + slots >? cap {
             cap=(sp + n1 + n2 + slots) * 2
@@ -284,7 +284,7 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             st=xz_stack.ptr
         }
         if n2 >? 0 {
-            let l2=XZWord(node[0].list2)
+            let l2=XZWord(node_list2(node[0].op_ext))
             let i=n2 - 1
             loop i >=? 0 {
                 let x=lists_p[l2 + i]
@@ -308,8 +308,8 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             }
         }
         if k not=? 'for_' {
-            if k not=? 'partial' and node[0].d not=? 0 {
-                st[sp]=int64(node[0].d)
+            if k not=? 'partial' and node_d(node[0].op_ext) not=? 0 {
+                st[sp]=int64(node_d(node[0].op_ext))
                 sp=sp + 1
             }
             if node[0].c not=? 0 {

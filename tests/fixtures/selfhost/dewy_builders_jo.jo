@@ -22,7 +22,7 @@ dump = (result: int):
     print("result {result}")
     loop i in [0..ns.len()):
         d = ns[i]
-        print("{i} {d.kind} {d.op} {d.flags} {d.pos} {d.a} {d.b} {d.c} {d.d} {d.list} {d.nlist} {d.list2} {d.nlist2} {d.name} {d.sval} {d.ival} {d.fval} {d.type} {d.sym} {d.aux} {d.aux2} {d.mod}")
+        print("{i} {d.kind} {node_op(d.op_ext)} {d.flags} {d.pos} {d.a} {d.b} {d.c} {node_d(d.op_ext)} {d.list} {d.nlist} {node_list2(d.op_ext)} {node_nlist2(d.op_ext)} {d.name} {node_sval(d.op_ext)} {d.ival} {node_fval(d.op_ext)} {d.type} {d.sym} {d.aux} {node_aux2(d.op_ext)} {node_mod(d.op_ext)}")
     print("{runs}")
     print("{texts}")
 

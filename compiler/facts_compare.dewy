@@ -18,6 +18,7 @@ from p"facts_value_queries.dewy" import (fact_bound fact_index_get fact_index_ge
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"types.jo" import (T_BOOL T_INT T_U64)
 from p"word_overflow.dewy" import (math_word_overflow)
+from p"node_store.dewy" import (node_op)
 
 CompareWord:type=int64<overflow='wrap'>
 
@@ -855,7 +856,7 @@ fact_assume=(@s:FactState v:CompareWord truth:bool):>void=>$unsafe {
         # This Boolean remembers the evaluated operands' lengths, not their
         # mutable source places. Reassigning either operand cannot reuse it.
         if t.origin not=? 0 and fact_length_comparison(t.origin) {
-            let equal=truth =? (nodes.ptr[t.origin].op =? int32(69))
+            let equal=truth =? (node_op(nodes.ptr[t.origin].op_ext) =? int32(69))
             if equal {
                 fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('eq' t.a t.b)) true)
                 # (equal int arrays of a small known length have equal elements: `m.length =? [33 33]`)

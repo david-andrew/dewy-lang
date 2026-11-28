@@ -67,13 +67,13 @@ MAIN = r'''main = ():
     # Dewy formals are read through their generated local binding.
     stack_closure_params.clear(); files[0].is_dewy = true
     local = lp_local(); li = lp_ident(local, T_INT)
-    bind = lp_node(.vardecl, 0, ident); nodes[bind].sym = i32(local); nodes[bind].aux2 = 1
+    bind = lp_node(.vardecl, 0, ident); nodes[bind].sym = i32(local); nodes[bind].op_ext = node_with_aux2(nodes[bind].op_ext, i32(1))
     fns[f].body = i32(lp_node(.block, 0, 0, [bind, cb_invoke(li)]))
     assert(closure_borrow_param(f, 0))
     stack_closure_params.clear(); locals[local].flags = i32(LF_SHARED)
     assert(not closure_borrow_param(f, 0)); locals[local].flags = 0
-    stack_closure_params.clear(); nodes[bind].aux2 = 0
-    assert(not closure_borrow_param(f, 0)); nodes[bind].aux2 = 1
+    stack_closure_params.clear(); nodes[bind].op_ext = node_with_aux2(nodes[bind].op_ext, i32(0))
+    assert(not closure_borrow_param(f, 0)); nodes[bind].op_ext = node_with_aux2(nodes[bind].op_ext, i32(1))
     stack_closure_params.clear(); fns[f].body = i32(lp_node(.block, 0, 0, [bind, lp_node(.return_, li)]))
     assert(not closure_borrow_param(f, 0))
     # The existing scoped fork-join contract remains a special case.

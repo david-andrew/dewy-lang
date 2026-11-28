@@ -77,6 +77,7 @@ from p"warn_if.jo" import wi_fact_calls
 from p"warn_if_facts.dewy" import wi_fact_check
 from p"witness.jo" import (WitSide wit_obligation)
 from p"witness_ops.dewy" import (wit_assertion wit_fail wit_index wit_operation wit_side wit_slice)
+from p"node_store.dewy" import (node_aux2 node_op node_sval)
 
 
 # Bind Jo-owned write places once. Recursive calls never copy this shared state.
@@ -157,7 +158,7 @@ fact_capture_marked=(n:CaptureWord @s:FactState marks:CaptureWord):>int64=>$unsa
         }
         return fact_unmodeled(@s n 'unsupported')
     }
-    if n >? 0 and exact_has_node(n) and nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].op =? int32(79) {
+    if n >? 0 and exact_has_node(n) and nodes.ptr[n].kind =? 'binary' and node_op(nodes.ptr[n].op_ext) =? int32(79) {
         fact_capture(CaptureWord(nodes.ptr[n].a) @s);
         let exponent=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
         exact_shift_fact(n exponent s)
@@ -242,7 +243,7 @@ fact_pure_cond=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
         }
         <'binary'> => {
             if nd[0].aux not=? 0 {return false}
-            let op=capture_tokens[nd[0].op]
+            let op=capture_tokens[node_op(nd[0].op_ext)]
             if op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' and op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return false}
             return fact_pure_cond(CaptureWord(nd[0].a) @budget) and fact_pure_cond(CaptureWord(nd[0].b) @budget)
         }
@@ -419,8 +420,8 @@ fc_opaque_fallback=(n:CaptureWord @s:FactState):>int64=>$unsafe {
 }
 fc_str_lit=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     if fact_member_template >=? 0 and fact_member_literal(n) {return fact_new(@s FactBound() FactTerm(type=T_STR))}
-    if nodes.ptr[n].aux not=? 1 and fact_type(ntype(n)) =? T_STR and nodes.ptr[n].sval >=? 0 {
-        let text=name_of(CaptureWord(nodes.ptr[n].sval))
+    if nodes.ptr[n].aux not=? 1 and fact_type(ntype(n)) =? T_STR and node_sval(nodes.ptr[n].op_ext) >=? 0 {
+        let text=name_of(CaptureWord(node_sval(nodes.ptr[n].op_ext)))
         let ascii=true
         loop c in (text as array<uint8>) {
             if c >=? 128 or c =? 13 {ascii=false}
@@ -703,13 +704,13 @@ fc_vardecl=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     }
     if nkids(n) >? 0 or l =? 0 {fact_forget(@s n 'write' true); return 0}
     if has_flag(n NF_GLOBAL) {fact_bind(@s PlaceIdentity('global' 0 l) r)}
-    else if not (nodes.ptr[n].aux2 =? 1 and CaptureWord(locals.ptr[l].flags) & LF_PARAM not=? 0) {fact_bind(@s PlaceIdentity('local' CaptureWord(locals.ptr[l].owner) l) r)}
+    else if not (node_aux2(nodes.ptr[n].op_ext) =? 1 and CaptureWord(locals.ptr[l].flags) & LF_PARAM not=? 0) {fact_bind(@s PlaceIdentity('local' CaptureWord(locals.ptr[l].owner) l) r)}
     return r
 }
 fc_assign=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     let a=CaptureWord(nodes.ptr[n].a)
     let old:CaptureWord=0
-    let compound=nodes.ptr[n].op not=? int32(47)
+    let compound=node_op(nodes.ptr[n].op_ext) not=? int32(47)
     if compound {
         # (the read keeps its selectors' values, tagged with this update,
         # and the store's route reuses them: each selector runs once)
@@ -720,7 +721,7 @@ fc_assign=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     }
     let r=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
     if ownership_decls.length not=? 0 {r=fact_owner_value(CaptureWord(nodes.ptr[n].b) r @s)}
-    let op=capture_tokens[nodes.ptr[n].op]
+    let op=capture_tokens[node_op(nodes.ptr[n].op_ext)]
     if (op =? 'shleq' or op =? 'shreq') and fact_shift_obliged(n) {fact_nonnegative(n @s r CaptureWord(nodes.ptr[n].b) "the shift count")}
     if nodes.ptr[a].kind =? 'tuple' and op =? 'assign' {
         fact_store_pattern(@s a r n)
@@ -1030,16 +1031,16 @@ fc_loop=(n:CaptureWord @s:FactState):>int64=>$unsafe {
 }
 fc_binary=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     let sum_operand=fact_sum_operand
-    if nodes.ptr[n].op =? int32(68) or nodes.ptr[n].op =? int32(61) {capture_sum_operand[0]=fact_sum_source(CaptureWord(nodes.ptr[n].a))}
+    if node_op(nodes.ptr[n].op_ext) =? int32(68) or node_op(nodes.ptr[n].op_ext) =? int32(61) {capture_sum_operand[0]=fact_sum_source(CaptureWord(nodes.ptr[n].a))}
     let a=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
     capture_sum_operand[0]=sum_operand
     if result_active and nodes.ptr[CaptureWord(nodes.ptr[n].b)].kind =? 'none_lit' and tkind(ntype(CaptureWord(nodes.ptr[n].a))) =? 'opt' {
         let tag=fact_project(@s a (-3) false T_INT)
         let zero=fact_constant(@s 0)
-        return fact_new(@s fact_domain(T_BOOL) FactTerm(capture_tokens[nodes.ptr[n].op] tag zero))
+        return fact_new(@s fact_domain(T_BOOL) FactTerm(capture_tokens[node_op(nodes.ptr[n].op_ext)] tag zero))
     }
     let b=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
-    let op=capture_tokens[nodes.ptr[n].op]
+    let op=capture_tokens[node_op(nodes.ptr[n].op_ext)]
     let set_proof=string_set_owners.length >? 0 and string_set_owners.has(fact_owner)
     if set_proof and string_set_tests.has(n) {return fact_string_set(n @s)}
     if (op =? 'shl' or op =? 'shr') and fact_shift_obliged(n) {fact_nonnegative(n @s b CaptureWord(nodes.ptr[n].b) "the shift count")}
@@ -1114,8 +1115,8 @@ fc_conv=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$unsafe {
     capture_covered[0]=outer
     # Only parser-originated oversized literals carry this sign marker.
     # O(1) at a demanded conversion; open endpoints are not exact values.
-    if nodes.ptr[n].aux =? int32(int64(CV.big2math)) and nodes.ptr[n].aux2 not=? 0 {
-        let bound=if nodes.ptr[n].aux2 <? 0 {FactBound(FACT_MIN (-1) true)} else {FactBound(1 FACT_MAX true)}
+    if nodes.ptr[n].aux =? int32(int64(CV.big2math)) and node_aux2(nodes.ptr[n].op_ext) not=? 0 {
+        let bound=if node_aux2(nodes.ptr[n].op_ext) <? 0 {FactBound(FACT_MIN (-1) true)} else {FactBound(1 FACT_MAX true)}
         return fact_new(@s bound FactTerm(origin=n type=T_MATH_INT))
     }
     # Widening a signed word/exact word expression to int is the same
@@ -1485,7 +1486,7 @@ fc_intrinsic=(n:CaptureWord @s:FactState):>int64=>$unsafe {
         s.live=false
         return 0
     }
-    if id =? IN.assert and nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) {
+    if id =? IN.assert and node_aux2(nodes.ptr[n].op_ext) =? int32(RANGE_EXHAUSTION) {
         let no_s=FactState(live=false)
         fact_cond_out(kid(n 0) @s @no_s true (fact_speculating =? 0) true);
         if fact_speculating =? 0 {
@@ -1508,7 +1509,7 @@ fc_intrinsic=(n:CaptureWord @s:FactState):>int64=>$unsafe {
         if not paths.yes.live or paths.no.live {wit_assertion(kid(n 0) (if nkids(n) >? 1 {kid(n 1)} else {0}) paths s)}
         return 0
     }
-    if id =? IN.assert and nodes.ptr[n].aux2 =? int32(UNPACK_OBLIGATION) and fact_speculating =? 0 and nkids(n) >? 0 {
+    if id =? IN.assert and node_aux2(nodes.ptr[n].op_ext) =? int32(UNPACK_OBLIGATION) and fact_speculating =? 0 and nkids(n) >? 0 {
         # (an unpacking's or a spread's length: proven, its check goes; unproven, it stays
         # where the scope allows a runtime check, and is an error elsewhere)
         capture_validated[0][n]=true
@@ -1552,13 +1553,13 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
         # explicit integer conversion. No payload expression executes.
         if tkind(fact_type(ntype(n))) =? 'enum_' and simple_enum(fact_type(ntype(n))) {
             let si=CaptureWord(types.ptr[fact_type(ntype(n))].st)
-            return fact_constant(@s variants.ptr[CaptureWord(structs.ptr[si].variants) + CaptureWord(nodes.ptr[n].aux2)].value n)
+            return fact_constant(@s variants.ptr[CaptureWord(structs.ptr[si].variants) + CaptureWord(node_aux2(nodes.ptr[n].op_ext))].value n)
         }
         let payload=fact_capture(kid(n 0) @s)
         if ownership_decls.length not=? 0 {payload=fact_owner_value(kid(n 0) payload @s)}
         let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
         if CaptureWord(s.projections.length) + 2 <? FACT_CAP {
-            fact_add_projection(@s FactProjection(value (-3) false fact_constant(@s CaptureWord(nodes.ptr[n].aux2))))
+            fact_add_projection(@s FactProjection(value (-3) false fact_constant(@s CaptureWord(node_aux2(nodes.ptr[n].op_ext)))))
             fact_add_projection(@s FactProjection(value (-4) false payload))
         }
         return value
@@ -2097,7 +2098,7 @@ fc_coalesce_iflet=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$unsafe 
         let optional=prune(ntype(CaptureWord(nodes.ptr[n].a)))
         let payload=if tkind(optional) =? 'opt' {prune(telem(optional))} else {0}
         let fallback=CaptureWord(nodes.ptr[n].b)
-        let checked=nodes.ptr[fallback].kind =? 'conv' and nodes.ptr[fallback].aux =? int32(int64(CV.refinement)) and prune(CaptureWord(nodes.ptr[fallback].aux2)) =? payload
+        let checked=nodes.ptr[fallback].kind =? 'conv' and nodes.ptr[fallback].aux =? int32(int64(CV.refinement)) and prune(CaptureWord(node_aux2(nodes.ptr[fallback].op_ext))) =? payload
         if payload not=? 0 and tkind(payload) =? 'refined' and (checked or prune(ntype(fallback)) =? payload) {ref_assume(payload joined [] @s)}
     }
     return joined
@@ -2250,7 +2251,7 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
         }
         <'unary'> => {
             let a=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
-            if nodes.ptr[n].op =? int32(59) and fact_scalar(ntype(n)) {
+            if node_op(nodes.ptr[n].op_ext) =? int32(59) and fact_scalar(ntype(n)) {
                 return fact_arithmetic(@s n 'minus' fact_constant(@s 0) a)
             }
             return fact_unmodeled(@s n 'unsupported')

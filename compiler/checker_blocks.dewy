@@ -3,7 +3,7 @@ from p"checker_scope_symbols.dewy" import (scope_reset)
 
 from p"checker_hooks.dewy" import (block_sibling)
 from p"checker_sinks.dewy" import (sink_close)
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_aux2 node_op)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (CheckerScope StatementWatch)
 from p"checker_types.dewy" import TypeInfo
@@ -98,14 +98,14 @@ bk_flag=(n:BWord f:BWord):>bool=>$unsafe {BWord(bk_nodes[0].ptr[n].flags) & f no
 # spawn's call aux2 17).
 bk_assign=(s:BWord):>void=>$unsafe {
     let lhs=BWord(bk_nodes[0].ptr[s].a)
-    let op=bk_nodes[0].ptr[s].op
+    let op=node_op(bk_nodes[0].ptr[s].op_ext)
     let lk=bk_nodes[0].ptr[lhs].kind
     if lk =? 'hole' and op =? 47 {st_drop(s); return}
     if op =? 47 and (lk =? 'ident' or lk =? 'tuple') {
         if stmt_assign(s) {vd_decl(s); return}
     } else {
         let b=BWord(bk_nodes[0].ptr[s].b)
-        if bk_nodes[0].ptr[b].kind =? 'call' and bk_nodes[0].ptr[b].aux2 =? 17 {stmt_error(s 3)}
+        if bk_nodes[0].ptr[b].kind =? 'call' and node_aux2(bk_nodes[0].ptr[b].op_ext) =? 17 {stmt_error(s 3)}
     }
     let r=va_assign(s)
     if r not=? s {bk_nodes[0].ptr[s]=bk_nodes[0].ptr[r]}
@@ -114,8 +114,8 @@ bk_assign=(s:BWord):>void=>$unsafe {
 # ran; a shaped parameter's dimension is aux2 1789).
 bk_stmt=(s:BWord):>void=>$unsafe {
     let k=bk_nodes[0].ptr[s].kind
-    if bk_exact[0] and k =? 'assign' and bk_nodes[0].ptr[s].op not=? 47 and bk_context[0] >=? 0 {stmt_special(s 1)}
-    if k =? 'vardecl' and bk_nodes[0].ptr[s].aux2 =? 1789 {
+    if bk_exact[0] and k =? 'assign' and node_op(bk_nodes[0].ptr[s].op_ext) not=? 47 and bk_context[0] >=? 0 {stmt_special(s 1)}
+    if k =? 'vardecl' and node_aux2(bk_nodes[0].ptr[s].op_ext) =? 1789 {
         stmt_special(s 2)
         k=bk_nodes[0].ptr[s].kind
     }
@@ -183,7 +183,7 @@ bk_final=(b:BWord i:BWord expected:BWord mode:BWord):>BWord=>$unsafe {
     if k =? 'if_' or k =? 'iflet' {return block_final(b i expected mode)}
     if k not=? 'exprstmt' {return -1}
     let e=BWord(bk_nodes[0].ptr[s].a)
-    if bk_nodes[0].ptr[e].kind =? 'call' and bk_nodes[0].ptr[e].aux2 =? 17 {return -1}
+    if bk_nodes[0].ptr[e].kind =? 'call' and node_aux2(bk_nodes[0].ptr[e].op_ext) =? 17 {return -1}
     if mode =? 2 or mode =? 3 or mode =? 6 {return block_final(b i expected mode)}
     if bk_nodes[0].ptr[e].kind =? 'match_' {bk_nodes[0].ptr[e].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[e].flags) & -17)}
     let result=BWord(check_expr(e expected))
@@ -214,7 +214,7 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     # Mark synthetic sequencing unscoped only after parsing: parser-level lifting
     # would detach the receiving context. Ownership/lowering still see the scope.
     let bn0=bk_nodes[0].ptr + b
-    let baux2=bn0[0].aux2
+    let baux2=node_aux2(bn0[0].op_ext)
     if baux2 =? -17 or baux2 =? -20 or baux2 =? -21 {
         bn0[0].flags=int32<overflow='wrap'>(BWord(bn0[0].flags) | 4)
         if want_value and baux2 =? -17 {literal_snapshot_context(b expected)}

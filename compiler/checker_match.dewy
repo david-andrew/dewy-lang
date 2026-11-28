@@ -2,7 +2,7 @@ $runtime_checks
 
 from p"scope_joins.dewy" import (scope_join_begin scope_join_end)
 
-from p"node_store.dewy" import (Node node_mk node_set_list)
+from p"node_store.dewy" import (Node node_mk node_set_list node_with_aux2)
 from p"checker_types.dewy" import (TypeInfo StructInfo Field Variant TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local CheckerScope)
@@ -248,7 +248,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
             # x:A where the value is an (A | B)?: present, and holding an A.
             let u=tu_prune(xh_elem(st))
             xh_nodes[0][p].type=int32<overflow='wrap'>(pt)
-            xh_nodes[0][p].aux2=1
+            xh_nodes[0][p].op_ext=node_with_aux2(xh_nodes[0][p].op_ext 1)
             let pms:array<int64>=[int64(pt)]
             if xh_union(pt) {pms=xh_members(pt)}
             loop member in pms {
@@ -272,7 +272,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
         let pt=XHWord(xh_members(st)[vi])
         if not xh_literal_member(pt) {xh_host[0].error(p 4 0 0 "")}
         xh_host[0].coerce(e pt);
-        xh_nodes[0][p].aux2=int32<overflow='wrap'>(vi)
+        xh_nodes[0][p].op_ext=node_with_aux2(xh_nodes[0][p].op_ext (int32<overflow='wrap'>(vi)))
         arm_state.members.push(int64(pt))
         if xh_types[0].ptr[pt].kind =? 'refined' or xh_set(pt) not=? 0 {xh_host[0].literal_seen(p e vi pt @ms.union_lits @ms.seen)}
         # A value pattern only covers part of a member. Both boolean literals together
@@ -294,7 +294,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
         let pt=XHWord(xh_members(u)[vi])
         if not xh_literal_member(pt) {xh_host[0].error(p 4 0 0 "")}
         xh_host[0].coerce(e pt);
-        xh_nodes[0][p].aux2=int32<overflow='wrap'>(vi)
+        xh_nodes[0][p].op_ext=node_with_aux2(xh_nodes[0][p].op_ext (int32<overflow='wrap'>(vi)))
         if pt =? xh_bool_type[0] {
             ms.union_bool=ms.union_bool | (if xh_nodes[0].ptr[e].ival not=? 0 {1} else {2})
             if ms.union_bool =? 3 and not ms.opt_members.contains(pt) {
@@ -333,7 +333,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
         let vi=typed_variant
         if vi <? 0 {vi=xh_find_variant(si XHWord(xh_nodes[0].ptr[p].name))}
         if vi <? 0 {xh_host[0].error(p 5 st 0 "")}
-        xh_nodes[0][p].aux2=int32<overflow='wrap'>(vi)
+        xh_nodes[0][p].op_ext=node_with_aux2(xh_nodes[0][p].op_ext (int32<overflow='wrap'>(vi)))
         if dewy and xh_structs[0].ptr[si].union_ and ms.seen[vi] {xh_host[0].error(p 6 xh_struct_targ(si vi) 0 "")}
         ms.seen[vi]=true
         let v=XHWord(xh_structs[0].ptr[si].variants) + vi
@@ -351,7 +351,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
                 let base=xh_host[0].ident(hidden xh_nodes[0].ptr[b].pos)
                 xh_nodes[0][fa].a=int32<overflow='wrap'>(base)
                 xh_nodes[0][fa].aux=-3
-                xh_nodes[0][fa].aux2=int32<overflow='wrap'>(vi)
+                xh_nodes[0][fa].op_ext=node_with_aux2(xh_nodes[0][fa].op_ext (int32<overflow='wrap'>(vi)))
                 xh_nodes[0][fa].ival=int64(f)
                 xh_nodes[0][fa].type=int32<overflow='wrap'>(ft)
                 xh_flag(fa 128)
@@ -577,7 +577,7 @@ xh_match_body=(m:XHWord expected:XHWord):>XHWord=>$unsafe {
     }
     if not exhaustive and dewy and st =? xh_string_type[0] and xh_host[0].string_domain(m) {exhaustive=true}
     if not exhaustive and dewy and st =? xh_math_int[0] and xh_host[0].int_domain(m ms.covered) {exhaustive=true}
-    xh_nodes[0][m].aux2=if exhaustive {1} else {0}
+    xh_nodes[0][m].op_ext=node_with_aux2(xh_nodes[0][m].op_ext (if exhaustive {1} else {0}))
     # An enum's or a union's match names each of its variants, or has `_`; a statement
     # too, so that a state added later is not left out quietly.
     if is_stmt and (exhaustive or (not dewy and xh_types[0].ptr[st].kind not=? 'enum_')) {

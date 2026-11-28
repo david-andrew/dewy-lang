@@ -11,13 +11,14 @@ from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (refine_storage representation_type)
 from p"types.jo" import (prune types)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_sval)
 
 SliceWord:type=int64<overflow='wrap'>
 # Bind end once per axis of an NDArray. Other receivers still compute their
 # length only once, even if several custom index arguments contain end.
 dewy_index_end_bindings=(index:SliceWord source:SliceWord source_type:SliceWord):>array<int64>=>$unsafe {
     let pos=nodes.ptr[index].pos
-    let base=name_of(SliceWord(nodes.ptr[index].sval))
+    let base=name_of(SliceWord(node_sval(nodes.ptr[index].op_ext)))
     let out:array<int64>=[]
     loop axis in [0..max(nkids(index) 1)) {
         let name=if axis =? 0 {base} else {"{base}_{axis}"}

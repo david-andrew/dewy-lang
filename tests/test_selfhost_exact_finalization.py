@@ -61,19 +61,19 @@ main = ():
     # Isolate operator rules from syntax- and interval-derived upper bounds.
     exact_type_widths.resize(nodes.len())
     exact_type_widths[n] = -1
-    nodes[n].op = i32(int(Tok.percent))
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(Tok.percent))))
     assert(exact_bits(n) == 7)
     nodes[n].pos = mkpos(1, 1)
     exact_widths[n] = 0
     assert(exact_bits(n) == 13)
-    nodes[n].op = i32(int(Tok.slash))
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(Tok.slash))))
     exact_widths[n] = 0
     assert(exact_bits(n) == 8)
     exact_range_meta.resize(nodes.len())
     exact_range_meta[a] = u8(2)
     exact_widths[n] = 0
     assert(exact_bits(n) == 7)
-    nodes[n].op = if args()[1] == "shift": i32(int(Tok.shl)) else: i32(int(Tok.starstar))
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(if args()[1] == "shift": i32(int(Tok.shl)) else: i32(int(Tok.starstar))))
     exact_widths[n] = 0
     if args()[1] == "bound":
         exact_shifts[n] = 3

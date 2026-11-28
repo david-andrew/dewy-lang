@@ -13,7 +13,7 @@ bindings = RefineBindings(fields = [3], formals = [4], self = 1, base_type = 1)
 host = RefResolveHost(value_term, type_limit, fail)
 
 make = (kind: NK, a: int = 0, b: int = 0, op: Tok = .eof, flags: int = 0, name: int = 0, value: int = 0) -> int:
-    nodes.push(Node(kind = kind, a = i32(a), b = i32(b), op = i32(int(op)), flags = i32(flags), name = i32(name), ival = value, pos = 700))
+    nodes.push(Node(kind = kind, a = i32(a), b = i32(b), op_ext = node_with_op(u32(0), i32(int(op))), flags = i32(flags), name = i32(name), ival = value, pos = 700))
     nodes.len() - 1
 lit = (value: int, flags: int = 0) -> int: make(.int_lit, value = value, flags = flags)
 ident = (name: int) -> int: make(.ident, name = name)

@@ -23,6 +23,7 @@ from p"spirv_ops.dewy" import (sv_addr_at sv_begin sv_bool sv_builtin_var sv_cap
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
 from p"types.jo" import (T_FLOAT T_I32 T_IVEC2 T_IVEC3 T_MAT4 T_MATH_INT T_VEC4 fields is_vec prune structs tkind tsize types)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_aux2 node_d node_fval node_mod node_op)
 
 SpirvStmtWord:type=int64<overflow='wrap'>
 # the SPIR-V type of a Sloppy type (ints are 32-bit and floats f32, as in GLSL; a Texture is the
@@ -237,7 +238,7 @@ sv_stmt=(s:SpirvStmtWord):>void=>$unsafe {
     }
     else if k =? 'assign' {
         if nodes.ptr[s].aux not=? 0 {sv_err(nodes.ptr[s].pos "unsupported assignment in shader")}
-        sv_assign(SpirvStmtWord(nodes.ptr[s].a) cx_token_values.ptr[SpirvStmtWord(nodes.ptr[s].op)] SpirvStmtWord(nodes.ptr[s].b) nodes.ptr[s].pos)
+        sv_assign(SpirvStmtWord(nodes.ptr[s].a) cx_token_values.ptr[SpirvStmtWord(node_op(nodes.ptr[s].op_ext))] SpirvStmtWord(nodes.ptr[s].b) nodes.ptr[s].pos)
     }
     else if k =? 'exprstmt' {
         let e=SpirvStmtWord(nodes.ptr[s].a)
@@ -311,7 +312,7 @@ sv_for_fixed=(s:SpirvStmtWord):>void=>$unsafe {
         r=sv_ref(SpirvStmtWord(nodes.ptr[s].a))
         if r.base =? 0 {
             copy=sv_var(sv_type(ct nodes.ptr[s].pos))
-            sv_lvar[SpirvStmtWord(nodes.ptr[s].d)]=copy
+            sv_lvar[SpirvStmtWord(node_d(nodes.ptr[s].op_ext))]=copy
             sv_store(copy sv_expr(SpirvStmtWord(nodes.ptr[s].a)))
         }
     }
@@ -634,7 +635,7 @@ sv_expr=(e:SpirvStmtWord):>int64=>$unsafe {
         if nodes.ptr[e].ival <? -2147483648 or nodes.ptr[e].ival >? 4294967295 {sv_err(nodes.ptr[e].pos "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")}
         return sv_ci(SpirvStmtWord(nodes.ptr[e].ival))
     }
-    if k =? 'float_lit' {return sv_cf(nodes.ptr[e].fval)}
+    if k =? 'float_lit' {return sv_cf(node_fval(nodes.ptr[e].op_ext))}
     if k =? 'bool_lit' {return sv_cbool(nodes.ptr[e].ival not=? 0)}
     if k =? 'ident' {
         if nodes.ptr[e].aux not=? int32(1) {sv_err(pos "shaders can only use local variables, parameters and constants (a value of the program's: `const SPEED = 2.0` at the top, or a field of the uniforms struct, given at each draw)")}
@@ -677,7 +678,7 @@ sv_expr=(e:SpirvStmtWord):>int64=>$unsafe {
     if k =? 'binary' {
         let a=SpirvStmtWord(nodes.ptr[e].a)
         let b=SpirvStmtWord(nodes.ptr[e].b)
-        let op=cx_token_values.ptr[SpirvStmtWord(nodes.ptr[e].op)]
+        let op=cx_token_values.ptr[SpirvStmtWord(node_op(nodes.ptr[e].op_ext))]
         let ta=ntype(a)
         let tb=ntype(b)
         if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
@@ -702,14 +703,14 @@ sv_expr=(e:SpirvStmtWord):>int64=>$unsafe {
             if op =? 'caret' {return sv_val(165 sv_bool() [x y])}
         }
         # (Dewy's `//` and `%` of signed integers floor, as on the CPU)
-        if nodes.ptr[e].aux2 =? -1 and (op =? 'slash' or op =? 'percent') and types.ptr[t].kind =? 'int_' and types.ptr[t].sign {return sv_floor(op =? 'percent' x y t pos)}
+        if node_aux2(nodes.ptr[e].op_ext) =? -1 and (op =? 'slash' or op =? 'percent') and types.ptr[t].kind =? 'int_' and types.ptr[t].sign {return sv_floor(op =? 'percent' x y t pos)}
         return sv_arith(op ta x tb y t pos)
     }
     if k =? 'unary' {
-        if nodes.ptr[e].op =? int32(58) {return sv_expr(SpirvStmtWord(nodes.ptr[e].a))}
+        if node_op(nodes.ptr[e].op_ext) =? int32(58) {return sv_expr(SpirvStmtWord(nodes.ptr[e].a))}
         let v=sv_expr(SpirvStmtWord(nodes.ptr[e].a))
         let ty=sv_type(t pos)
-        if nodes.ptr[e].op =? int32(59) {
+        if node_op(nodes.ptr[e].op_ext) =? int32(59) {
             if t =? T_MAT4 {return sv_val(143 ty [v sv_cf(-1.0)])}
             if sv_is_floaty(t) {return sv_val(127 ty [v])}
             return sv_narrow(sv_val(126 ty [v]) t)
@@ -877,7 +878,7 @@ sv_call=(e:SpirvStmtWord):>int64=>$unsafe {
     let f=SpirvStmtWord(nodes.ptr[e].sym)
     let decl=SpirvStmtWord(fns.ptr[f].decl)
     let nm=name_of(SpirvStmtWord(nodes.ptr[decl].name))
-    if modules[SpirvStmtWord(nodes.ptr[decl].mod)].is_prelude {
+    if modules[SpirvStmtWord(node_mod(nodes.ptr[decl].op_ext))].is_prelude {
         if nm =? "discard" {
             if sv_stage not=? "fragment" {sv_err(pos "discard() can only be used in the fragment shader")}
             sv_code(252 [])

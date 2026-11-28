@@ -81,7 +81,7 @@ is_test = (at: int, tt: int, k: NK = .ident) -> int:
     n = node(.istype, operand(at, k)); nodes[n].b = i32(node(.tname, 0, tt, 3)); n
 run = (n: int):
     t = xi_check(n)
-    print("{n}:{t}:{nodes[n].a}:{nodes[n].aux}:{nodes[n].aux2}:{xi_seen}")
+    print("{n}:{t}:{nodes[n].a}:{nodes[n].aux}:{node_aux2(nodes[n].op_ext)}:{xi_seen}")
 prepare_tests = () -> int[]:
     prepare()
     refine = false

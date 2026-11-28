@@ -432,7 +432,7 @@ dir_panics_finalize=():>void=>$unsafe {
     fact_retry_owner=saved_retry
     loop f in [1..fns.length) {
         let d=DirWord(fns.ptr[f].decl)
-        if d =? 0 or nodes.ptr[d].sval =? 0 or fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {continue}
+        if d =? 0 or node_sval(nodes.ptr[d].op_ext) =? 0 or fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {continue}
         let contract=if fns.ptr[f].kind =? FK_LAMBDA and not has_flag(d NF_GENERIC) {callable_contract(DirWord(fns.ptr[f].fntype))} else {effect_subst(DirWord(decl_infos[decl_info(d)].sig.contract) fns.ptr[f].targs)}
         if contract =? 0 or not effect_contracts[contract].exclusions.contains(EffectAtom('panic')) {continue}
         if not effect_panics(f) or wit_measure {continue}
@@ -525,3 +525,4 @@ dir_row_origin=(d:DirWord):>string=>{
 }
 
 from p"facts_lifecycle.dewy" import (fn_in_lib)
+from p"node_store.dewy" import (node_sval)

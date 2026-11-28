@@ -28,6 +28,7 @@ from p"ir_builders.dewy" import (e_addi e_bin e_call2 e_fconst e_iconst e_load e
 from p"math_ops.dewy" import (math_call math_word)
 from p"member_ops.dewy" import (member_lower_word)
 from p"refine_metadata.dewy" import (ref_storage_contract)
+from p"node_store.dewy" import (node_aux2 node_fval node_op)
 # Scalar arithmetic, constants and range lowering; state stays in lower.jo.
 LCWord:type=int64<overflow='wrap'>
 LCUWord:type=uint64<overflow='wrap'>
@@ -45,7 +46,7 @@ push_i64=(@b:array<uint8> v:LCWord):>void=>$unsafe {
     q[0]=v
 }
 positive_modulus=(n:LCWord):>int64=>$unsafe {
-    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32<overflow='wrap'>(62) and nodes.ptr[n].aux2 =? -1 {
+    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and node_op(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(62) and node_aux2(nodes.ptr[n].op_ext) =? -1 {
         let [known divisor]=integer_constant(LCWord(nodes.ptr[n].b))
         return if known and divisor >? 0 {divisor} else {0}
     }
@@ -383,7 +384,7 @@ shift_count_bound=(n:LCWord):>int64=>$unsafe {
     loop nodes.ptr[n].kind =? 'conv' {n=LCWord(nodes.ptr[n].a)}
     let k=nodes.ptr[n].kind
     if k =? 'int_lit' {return if nodes.ptr[n].ival <? 0 {64} else {min(nodes.ptr[n].ival 64)}}
-    if k =? 'binary' and (cx_token_values.ptr[LCWord(nodes.ptr[n].op)]) =? 'amp' {
+    if k =? 'binary' and (cx_token_values.ptr[LCWord(node_op(nodes.ptr[n].op_ext))]) =? 'amp' {
         let a=shift_count_bound(LCWord(nodes.ptr[n].a))
         let b=shift_count_bound(LCWord(nodes.ptr[n].b))
         if nodes.ptr[LCWord(nodes.ptr[n].b)].kind =? 'int_lit' and b >=? 0 and b <? 64 {return b}
@@ -443,7 +444,7 @@ gen_value_int_lit=(e:LCWord):>Val=>$unsafe {
 }
 gen_value_float_lit=(e:LCWord):>Val=>$unsafe {
     let t=prune(ntype(e))
-    return V(e_fconst(nodes.ptr[e].fval vt_of(t)) false)
+    return V(e_fconst(node_fval(nodes.ptr[e].op_ext) vt_of(t)) false)
 }
 gen_value_none_lit=(e:LCWord):>Val=>$unsafe {
     let t=prune(ntype(e))
@@ -515,8 +516,8 @@ const_array=(e:LCWord et:LCWord):>int64=>$unsafe {
         let c=kid(e i)
         let bits:LCWord=0
         if nodes.ptr[c].kind =? 'float_lit' {
-            if sz =? 4 {bits=LCWord(f32_bits(float32(nodes.ptr[c].fval)))}
-            else {bits=LCWord(f64_bits(nodes.ptr[c].fval))}
+            if sz =? 4 {bits=LCWord(f32_bits(float32(node_fval(nodes.ptr[c].op_ext))))}
+            else {bits=LCWord(f64_bits(node_fval(nodes.ptr[c].op_ext)))}
         }
         else {
             bits=nodes.ptr[c].ival
@@ -548,7 +549,7 @@ same_range_read=(a:LCWord b:LCWord):>bool=>$unsafe {
 }
 range_cmp=(e:LCWord):>[int64 Tok int64]=>$unsafe {
     if nodes.ptr[e].kind not=? 'binary' or nodes.ptr[e].aux not=? 0 {return [0 'eq' 0]}
-    let op=cx_token_values.ptr[LCWord(nodes.ptr[e].op)]
+    let op=cx_token_values.ptr[LCWord(node_op(nodes.ptr[e].op_ext))]
     if op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return [0 'eq' 0]}
     let a=word_integer_value(LCWord(nodes.ptr[e].a))
     let b=word_integer_value(LCWord(nodes.ptr[e].b))

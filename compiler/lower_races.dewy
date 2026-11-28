@@ -13,6 +13,7 @@ from p"lower.jo" import (race_done race_item)
 from p"types.jo" import (tkind)
 from p"lower_helpers.dewy" import (value_helper_calls)
 from p"concurrency_parsafe.dewy" import (parsafe_demand_task parsafe_is_param parsafe_vouched)
+from p"node_store.dewy" import (node_d)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LRWord:type=int64<overflow='wrap'>
 race_check=(callee:LRWord args:array<int64> pos:LRWord):>void=>$unsafe {
@@ -182,7 +183,7 @@ race_scan=(n:LRWord f:LRWord who:string captures:bool):>void=>$unsafe {
     race_scan(LRWord(nodes.ptr[n].b) f who captures);
     if k not=? 'for_' {
         race_scan(LRWord(nodes.ptr[n].c) f who captures);
-        if k not=? 'partial' {race_scan(LRWord(nodes.ptr[n].d) f who captures);}
+        if k not=? 'partial' {race_scan(LRWord(node_d(nodes.ptr[n].op_ext)) f who captures);}
     }
     loop i in [0..nkids(n)) {race_scan(kid(n i) f who captures);}
     loop i in [0..nkids2(n)) {race_scan(kid2(n i) f who captures);}

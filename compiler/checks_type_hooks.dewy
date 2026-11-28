@@ -50,6 +50,7 @@ from p"util.jo" import (err_notes files intern name_of pl_inst_decls pl_on pos_f
 from p"diagnostic_exit.dewy" import (fatal)
 from p"warn_if_ops.dewy" import (wi_read_decl)
 from p"refine_metadata.dewy" import (ref_storage_contract ref_validate_signature ref_intern)
+from p"node_store.dewy" import (node_mod node_sval)
 
 TypeHookWord:type=int64<overflow='wrap'>
 resolve_type_ide=(tn:int64):>void=>$unsafe {
@@ -104,7 +105,7 @@ alias_enter=(d:int64 targs:array<int64>):>CheckerAliasScope=>$unsafe {
     if nodes.ptr[d].kind =? 'struct_' {
         loop i in [0..nkids(d)) {ref_holder_candidate(kid(d i))}
     }
-    ctxs.push(FnCtx(int32(new_inst(FK_INIT TypeHookWord(nodes.ptr[d].mod) "typedef")) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT TypeHookWord(node_mod(nodes.ptr[d].op_ext)) "typedef")) (-1) int32(T_VOID) false 0 node_mod(nodes.ptr[d].op_ext) int32(check_scopes.names.length)))
     cx=ctxs.length - 1
     let mark=scope_mark()
     push_type_params(d targs)
@@ -126,14 +127,14 @@ alias_note=(d:int64 t:int64):>void=>$unsafe {
     if dewy_at(nodes.ptr[d].pos) and not pos_in_lib(nodes.ptr[d].pos) {union_alias_note(t TypeHookWord(nodes.ptr[d].name))}
 }
 field_enter=(d:int64 si:int64):>CheckerFieldScope=>$unsafe {
-    if refine_deferred.length >? 0 and d not=? 0 {refine_resume(TypeHookWord(nodes.ptr[d].mod))}
+    if refine_deferred.length >? 0 and d not=? 0 {refine_resume(TypeHookWord(node_mod(nodes.ptr[d].op_ext)))}
     let targs:array<int64>=[]
     loop i in [0..TypeHookWord(structs.ptr[si].ntargs)) {targs.push(struct_targ(si i))}
     let saved=cx
     if nodes.ptr[d].kind =? 'struct_' {
         loop i in [0..nkids(d)) {ref_holder_candidate(kid(d i))}
     }
-    ctxs.push(FnCtx(int32(new_inst(FK_INIT TypeHookWord(nodes.ptr[d].mod) "fielddef")) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT TypeHookWord(node_mod(nodes.ptr[d].op_ext)) "fielddef")) (-1) int32(T_VOID) false 0 node_mod(nodes.ptr[d].op_ext) int32(check_scopes.names.length)))
     cx=ctxs.length - 1
     let mark=scope_mark()
     push_type_params(d targs)
@@ -182,13 +183,13 @@ field_intersection_error=(pos:int64 name:int64 a:int64 b:int64):>void=>{
 }
 # fn_sig (a declaration's signature, cached in its DeclInfo) is checker_signature.dewy's.
 signature_resume=(decl:int64):>void=>$unsafe {
-    if refine_deferred.length >? 0 and not refine_active and refine_deferred.has(TypeHookWord(nodes.ptr[decl].mod)) and written_refinement(decl) {refine_resume(TypeHookWord(nodes.ptr[decl].mod))}
+    if refine_deferred.length >? 0 and not refine_active and refine_deferred.has(TypeHookWord(node_mod(nodes.ptr[decl].op_ext))) and written_refinement(decl) {refine_resume(TypeHookWord(node_mod(nodes.ptr[decl].op_ext)))}
 }
 signature_enter=(decl:int64):>CheckerSignatureScope=>$unsafe {
     let saved=cx
     let parent=if nodes.ptr[decl].kind =? 'lambda' {cx} else {-1}
     let floor=if parent >=? 0 {ctxs[parent].floor} else {int32(check_scopes.names.length)}
-    ctxs.push(FnCtx(0 int32(parent) int32(T_VOID) false 0 nodes.ptr[decl].mod floor))
+    ctxs.push(FnCtx(0 int32(parent) int32(T_VOID) false 0 node_mod(nodes.ptr[decl].op_ext) floor))
     cx=ctxs.length - 1
     let mark=scope_mark()
     loop i in [0..nkids(decl)) {ref_holder_candidate(kid(decl i))}
@@ -236,7 +237,7 @@ signature_finish=(decl:int64 @sig:FnSig shaped:bool mask:int64):>void=>$unsafe {
         let seen:array<int64>=[]
         if effect_qualified_type(int64(sig.ret) @seen) {fatal(nodes.ptr[decl].pos "extern callable effect contracts require a checked implementation")}
     }
-    if nodes.ptr[decl].sval not=? 0 {sig.contract=int32(effect_decl_contract(decl sig.params))}
+    if node_sval(nodes.ptr[decl].op_ext) not=? 0 {sig.contract=int32(effect_decl_contract(decl sig.params))}
     if nodes.ptr[decl].c not=? 0 and nodes.ptr[decl].kind =? 'fn_' {
         wi_read_decl(decl)
         cc_read_decl(decl)
@@ -267,10 +268,10 @@ instance_preflight=(decl:int64 use_pos:int64):>void=>$unsafe {
     if target_wasm and nodes.ptr[decl].c not=? 0 {no_web_check(decl use_pos)}
 }
 instance_create=(decl:int64 use_pos:int64):>int64=>$unsafe {
-    let f=new_inst(FK_NORMAL TypeHookWord(nodes.ptr[decl].mod) sanitize(name_of(TypeHookWord(nodes.ptr[decl].name))))
+    let f=new_inst(FK_NORMAL TypeHookWord(node_mod(nodes.ptr[decl].op_ext)) sanitize(name_of(TypeHookWord(nodes.ptr[decl].name))))
     fns.ptr[f].decl=int32(decl)
-    fns.ptr[f].atomic_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_thread_module
-    fns.ptr[f].task_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_task_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["__task_spawn" "__item_spawn" "__item_spawn_failing" "within" "select"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_protocol_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["serve" "pipeline"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_first_ok_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["first_ok" "race"]
+    fns.ptr[f].atomic_api=TypeHookWord(node_mod(nodes.ptr[decl].op_ext)) =? concurrency_thread_module
+    fns.ptr[f].task_api=TypeHookWord(node_mod(nodes.ptr[decl].op_ext)) =? concurrency_task_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["__task_spawn" "__item_spawn" "__item_spawn_failing" "within" "select"] or TypeHookWord(node_mod(nodes.ptr[decl].op_ext)) =? concurrency_protocol_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["serve" "pipeline"] or TypeHookWord(node_mod(nodes.ptr[decl].op_ext)) =? concurrency_first_ok_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["first_ok" "race"]
     fns.ptr[f].use_pos=use_pos
     if cx >=? 0 {fns.ptr[f].made_in=ctxs[cx].inst}
     f
@@ -326,11 +327,11 @@ instance_attributes=(decl:int64 f:int64 zt:array<int64> use_pos:int64):>void=>$u
                     }
                 }
                 if la =? 0 or nodes.ptr[la].kind not=? 'str_lit' {fatal(nodes.ptr[at].pos "@lib needs a library name, e.g. @lib(\"libGL.so.1\") or a constant holding one")}
-                fns.ptr[f].clib=name_of(TypeHookWord(nodes.ptr[la].sval))
+                fns.ptr[f].clib=name_of(TypeHookWord(node_sval(nodes.ptr[la].op_ext)))
             }
             else if an =? "symbol" {
                 if nodes.ptr[at].a =? 0 or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].kind not=? 'str_lit' {fatal(nodes.ptr[at].pos "@symbol needs the C name, e.g. @symbol(\"glClear\")")}
-                fns.ptr[f].csym=name_of(TypeHookWord(nodes.ptr[TypeHookWord(nodes.ptr[at].a)].sval))
+                fns.ptr[f].csym=name_of(TypeHookWord(node_sval(nodes.ptr[TypeHookWord(nodes.ptr[at].a)].op_ext)))
             }
             else if an =? "variadic" {
                 if not has_flag(decl NF_EXTERN) or nodes.ptr[at].a =? 0 or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].kind not=? 'int_lit' or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].ival <? 0 or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].ival >? fns.ptr[f].ptypes.length {
@@ -340,7 +341,7 @@ instance_attributes=(decl:int64 f:int64 zt:array<int64> use_pos:int64):>void=>$u
             }
             else if an =? "export" {
                 fns.ptr[f].cabi=true
-                if nodes.ptr[at].a not=? 0 {fns.ptr[f].export_name=name_of(TypeHookWord(nodes.ptr[TypeHookWord(nodes.ptr[at].a)].sval))} else {fns.ptr[f].export_name=name_of(TypeHookWord(nodes.ptr[decl].name))}
+                if nodes.ptr[at].a not=? 0 {fns.ptr[f].export_name=name_of(TypeHookWord(node_sval(nodes.ptr[TypeHookWord(nodes.ptr[at].a)].op_ext)))} else {fns.ptr[f].export_name=name_of(TypeHookWord(nodes.ptr[decl].name))}
             }
             else if an not=? "no_web" {
                 let why=""

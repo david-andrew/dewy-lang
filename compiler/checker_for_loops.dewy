@@ -4,7 +4,7 @@ from p"map_entry_places.dewy" import (is_map_entries_type)
 from p"literal_context.dewy" import (lit_default)
 from p"checker_scope_symbols.dewy" import (new_local scope_reset)
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_with_aux2 node_with_d)
 from p"checker_types.dewy" import (TypeInfo StructInfo Field TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local CheckerScope ValueLoop)
@@ -146,7 +146,7 @@ fl_elements=(s:FWord it:FWord t:FWord k:TK nv:FWord n1:FWord n2:FWord is_mut:boo
     }
     fl_nodes[0][s].sym=int32<overflow='wrap'>(el)
     fl_nodes[0][s].c=int32<overflow='wrap'>(index)
-    fl_nodes[0][s].d=int32<overflow='wrap'>(snapshot)
+    fl_nodes[0][s].op_ext=node_with_d(fl_nodes[0][s].op_ext (int32<overflow='wrap'>(snapshot)))
 }
 # A dictionary's (or its entries') keys, and values by reference or in place.
 fl_entries=(s:FWord it:FWord t:FWord nv:FWord n1:FWord n2:FWord is_mut:bool pos:FWord):>void=>$unsafe {
@@ -172,8 +172,8 @@ fl_entries=(s:FWord it:FWord t:FWord nv:FWord n1:FWord n2:FWord is_mut:bool pos:
     fl_nodes[0][s].aux=3
     fl_nodes[0][s].sym=int32<overflow='wrap'>(kl)
     fl_nodes[0][s].c=int32<overflow='wrap'>(index)
-    fl_nodes[0][s].d=int32<overflow='wrap'>(snapshot)
-    fl_nodes[0][s].aux2=int32<overflow='wrap'>(vl)
+    fl_nodes[0][s].op_ext=node_with_d(fl_nodes[0][s].op_ext (int32<overflow='wrap'>(snapshot)))
+    fl_nodes[0][s].op_ext=node_with_aux2(fl_nodes[0][s].op_ext (int32<overflow='wrap'>(vl)))
 }
 # (NF_MUT 1; aux: 0 range, 1 elements, 2 elements in place, 3 dictionary, 4 range value)
 fl_for=(s:FWord):>void=>$unsafe {

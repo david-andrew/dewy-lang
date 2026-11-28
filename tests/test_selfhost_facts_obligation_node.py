@@ -12,12 +12,12 @@ LEAF = ('facts_lifecycle',)
 CLASSIFIER = '''    init_types()
     nodes[20] = Node(kind=.int_lit, type=i32(T_INT), ival=0)
     nodes[21] = Node(kind=.int_lit, type=i32(T_INT), ival=3)
-    nodes[22] = Node(kind=.binary, type=i32(T_INT), a=21, b=20, op=i32(int(Tok.slash)))
+    nodes[22] = Node(kind=.binary, type=i32(T_INT), a=21, b=20, op_ext=node_with_op(u32(0), i32(i32(int(Tok.slash)))))
     if not fact_obligation_node(22): exit(40)
     nodes[22].b = 21
     if fact_obligation_node(22): exit(41)
     nodes[22].b = 20
-    nodes[22].op = i32(int(Tok.percent))
+    nodes[22].op_ext = node_with_op(nodes[22].op_ext, i32(i32(int(Tok.percent))))
     if not fact_obligation_node(22): exit(42)
     nodes[22].aux = 1
     if fact_obligation_node(22): exit(43)
@@ -30,7 +30,7 @@ CLASSIFIER = '''    init_types()
     if not fact_obligation_node(24): exit(46)
     nodes[24].aux = i32(int(CV.arr2fixed))
     if not fact_obligation_node(24): exit(47)
-    nodes[25] = Node(kind=.binary, type=i32(T_MATH_INT), a=23, b=20, op=i32(int(Tok.shl)))
+    nodes[25] = Node(kind=.binary, type=i32(T_MATH_INT), a=23, b=20, op_ext=node_with_op(u32(0), i32(i32(int(Tok.shl)))))
     if not fact_obligation_node(25): exit(48)
     nodes[25].a = 21
     if fact_obligation_node(25): exit(49)

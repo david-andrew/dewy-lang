@@ -29,6 +29,7 @@ from p"facts.jo" import (FactStorage fact_storage_cache)
 from p"isolation_ops.dewy" import (ambient_storage_stable isolation_children isolation_node_children isolation_intrinsic)
 from p"lower.jo" import (fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written)
 from p"lower_analysis.dewy" import (checked_call_mutmask lpath_key raw_view)
+from p"node_store.dewy" import (node_list2 node_nlist2 node_op)
 
 IndexWord:type=int64<overflow='wrap'>
 # A loop's control counter stays in range, but its user-visible variable can
@@ -98,8 +99,8 @@ same_value=(x:IndexWord y:IndexWord):>bool=>$unsafe {
         return IndexWord(locals.ptr[IndexWord(nodes.ptr[x].sym)].flags) & LF_ASSIGNED =? 0
     }
     if k =? 'binary' {
-        let op=cx_token(IndexWord(nodes.ptr[x].op))
-        if nodes.ptr[y].op not=? nodes.ptr[x].op or (op not=? 'plus' and op not=? 'minus' and op not=? 'star') {return false}
+        let op=cx_token(IndexWord(node_op(nodes.ptr[x].op_ext)))
+        if node_op(nodes.ptr[y].op_ext) not=? node_op(nodes.ptr[x].op_ext) or (op not=? 'plus' and op not=? 'minus' and op not=? 'star') {return false}
         return same_value(IndexWord(nodes.ptr[x].a) IndexWord(nodes.ptr[y].a)) and same_value(IndexWord(nodes.ptr[x].b) IndexWord(nodes.ptr[y].b))
     }
     if k =? 'intrinsic' {
@@ -149,7 +150,7 @@ lower_length_guard=(n0:IndexWord):>void=>$unsafe {
     if nodes.ptr[body].kind not=? 'block' or nkids(body) not=? 1 or nodes.ptr[kid(body 0)].kind not=? 'return_' {return}
     let condition=IndexWord(nodes.ptr[n].a)
     if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].aux not=? 0 {return}
-    if nodes.ptr[condition].op not=? int32(71) {return}
+    if node_op(nodes.ptr[condition].op_ext) not=? int32(71) {return}
     let array=fixed_array_len(IndexWord(nodes.ptr[condition].a))
     if array <? 0 {return}
     let flags=IndexWord(locals.ptr[array].flags)
@@ -464,7 +465,7 @@ positive_bound_value=(n:IndexWord use_locals:bool):>IndexWord=>$unsafe {
     let modulus:IndexWord=positive_modulus(n)
     if modulus >? 0 {return modulus - 1}
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return -1}
-    let op=cx_token(IndexWord(nodes.ptr[n].op))
+    let op=cx_token(IndexWord(node_op(nodes.ptr[n].op_ext)))
     if op =? 'amp' {
         let a=positive_bound(IndexWord(nodes.ptr[n].a) use_locals)
         let b=positive_bound(IndexWord(nodes.ptr[n].b) use_locals)
@@ -555,7 +556,7 @@ positive_local_rhs=(rhs0:IndexWord):>[int64 bool]=>$unsafe {
         return [0 false]
     }
     if rk =? 'binary' and nodes.ptr[r].aux =? 0 {
-        let op=nodes.ptr[r].op
+        let op=node_op(nodes.ptr[r].op_ext)
         if op =? int32(58) or op =? int32(60) {
             let a=IndexWord(nodes.ptr[r].a)
             let b=IndexWord(nodes.ptr[r].b)
@@ -631,14 +632,14 @@ positive_write=(n:IndexWord):>void=>$unsafe {
         let old=positive_bounds.get(l0)
         if old not=? none and old <? 0 {return}
         let bound:IndexWord=-1
-        if nodes.ptr[n].op =? int32(47) and nodes.ptr[n].aux =? 0 {
+        if node_op(nodes.ptr[n].op_ext) =? int32(47) and nodes.ptr[n].aux =? 0 {
             let rhs=IndexWord(nodes.ptr[n].b)
             bound=positive_bound(rhs false)
             if bound <? 0 and positive_is_dewy and ok =? 1 {
                 let rb=rhs
                 if rb >? 0 and nodes.ptr[rb].kind =? 'conv' and nodes.ptr[rb].aux =? int32(int64(CV.fixed_store)) {rb=IndexWord(nodes.ptr[rb].a)}
                 rb=word_integer_value(rb)
-                if rb >? 0 and nodes.ptr[rb].kind =? 'binary' and nodes.ptr[rb].aux =? 0 and nodes.ptr[rb].op =? int32(58) {
+                if rb >? 0 and nodes.ptr[rb].kind =? 'binary' and nodes.ptr[rb].aux =? 0 and node_op(nodes.ptr[rb].op_ext) =? int32(58) {
                     let ra=word_integer_value(IndexWord(nodes.ptr[rb].a))
                     let rc=word_integer_value(IndexWord(nodes.ptr[rb].b))
                     if ra >? 0 and nodes.ptr[ra].kind =? 'ident' and nodes.ptr[ra].aux =? int32(1) and IndexWord(nodes.ptr[ra].sym) =? l0 {
@@ -673,7 +674,7 @@ positive_write=(n:IndexWord):>void=>$unsafe {
                 }
             }
         }
-        else if nodes.ptr[n].op =? int32(48) and nodes.ptr[n].aux =? 0 {
+        else if node_op(nodes.ptr[n].op_ext) =? int32(48) and nodes.ptr[n].aux =? 0 {
             if positive_is_dewy and ok =? 1 {
                 if positive_bound(IndexWord(nodes.ptr[n].b) false) >=? 0 {
                     bound=9223372036854775807
@@ -957,8 +958,8 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
                 loop i in [0..nk) {fact_storage_scan(StorageWord(lists.ptr[l0 + i]) 0)}
             }
             if mask & 32 not=? 0 {
-                let nk2=StorageWord(nodes.ptr[n].nlist2)
-                let l2=StorageWord(nodes.ptr[n].list2)
+                let nk2=StorageWord(node_nlist2(nodes.ptr[n].op_ext))
+                let l2=StorageWord(node_list2(nodes.ptr[n].op_ext))
                 loop i in [0..nk2) {fact_storage_scan(StorageWord(lists.ptr[l2 + i]) 0)}
             }
         }

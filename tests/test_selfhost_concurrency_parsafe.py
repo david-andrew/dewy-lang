@@ -49,8 +49,8 @@ main = ():
     assert(parsafe_param_name(1, 0) == "f")
     call = mk(.call, 0); nodes[call].sym = 1
     assert(parsafe_parallel_name(call) == "`parallel`")
-    partial = mk(.partial, 0); nodes[partial].sym = 2; nodes[partial].d = 999
-    loopn = mk(.for_, 0); nodes[loopn].c = 999; nodes[loopn].d = 999
+    partial = mk(.partial, 0); nodes[partial].sym = 2; nodes[partial].op_ext = node_with_d(nodes[partial].op_ext, i32(999))
+    loopn = mk(.for_, 0); nodes[loopn].c = 999; nodes[loopn].op_ext = node_with_d(nodes[loopn].op_ext, i32(999))
     block = mk(.block, 0)
     node_set_list(mut nodes, mut lists, block, [call, partial, loopn])
     head: {int: int}; calls: int[]; next: int[]; values: int[]

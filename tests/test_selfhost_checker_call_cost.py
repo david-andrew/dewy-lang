@@ -26,7 +26,7 @@ cost_rest = (a: int, p: int, bs: mut int[]) -> int:
     int(nodes[a].ival)
 cost_mutable = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int:
     events.push("mutable:{a}:{p}:{receiver}")
-    if receiver and nodes[a].aux2 != -1: recv = true
+    if receiver and node_aux2(nodes[a].op_ext) != -1: recv = true
     if bs.len() > 0: bs[0] += 10
     int(nodes[a].ival)
 cost_node = (kind: NK, t: int, score: int = 4, literal: bool = false, context: bool = false) -> int:
@@ -80,7 +80,7 @@ main = ():
     score([bad, ctx], [T_INT, T_INT])
     score([typed, lit, ctx], [T_INT, T_INT, T_INT], 7)
     score([bad], [T_INT], 1)
-    nodes[bad].aux2 = -1
+    nodes[bad].op_ext = node_with_aux2(nodes[bad].op_ext, i32(-1))
     score([bad], [T_INT], 1)
     print("ok")
 '''

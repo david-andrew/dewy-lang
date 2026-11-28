@@ -11,6 +11,7 @@ from p"policy_value_queries.dewy" import (setting_value_target)
 from p"type_ops.dewy" import (mk_fn)
 from p"types.jo" import (types)
 from p"util.jo" import (intern)
+from p"node_store.dewy" import (node_with_aux2)
 
 PolicyWord:type=int64<overflow='wrap'>
 setting_value_body=(body:PolicyWord snapshot:string pos:PolicyWord):>PolicyWord=>{
@@ -18,7 +19,7 @@ setting_value_body=(body:PolicyWord snapshot:string pos:PolicyWord):>PolicyWord=
     let enter=bc_let(active bc_call("__settings_policy_enter" [bc_ident(snapshot pos)] pos) pos)
     let cleanup=mk('defer_' pos)
     # This compiler cleanup restores policy only; it never borrows a user owner.
-    nodes[cleanup].aux2=1788  # SETTING_SCOPE_PREFIX in setting_scopes.dewy
+    nodes[cleanup].op_ext=node_with_aux2(nodes[cleanup].op_ext 1788)  # SETTING_SCOPE_PREFIX in setting_scopes.dewy
     nodes[cleanup].a=int32(bc_stmt(bc_call("__settings_policy_leave" [bc_ident(active pos)] pos) pos))
     if nodes[body].kind =? 'block' {
         let statements=[enter cleanup]

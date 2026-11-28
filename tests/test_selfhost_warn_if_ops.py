@@ -94,7 +94,7 @@ DRIVER = r'''
 use 'warn_if.jo'
 term = (k: NK, a: int, b: int, name: int, op: int) -> int:
     n = mk(k, nodes.len())
-    nodes[n].a = i32(a); nodes[n].b = i32(b); nodes[n].name = i32(name); nodes[n].op = i32(op)
+    nodes[n].a = i32(a); nodes[n].b = i32(b); nodes[n].name = i32(name); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(op)))
     n
 ident = (name: int) -> int: term(.ident, 0, 0, name, 0)
 lit = (v: int) -> int:
@@ -106,7 +106,7 @@ kind_only = (k: NK) -> int: mk(k, nodes.len())
 attr = (name: int, cond: int, msg: int) -> int: term(.dotname, cond, msg, name, 0)
 text = (sval: int, aux: int) -> int:
     n = mk(.str_lit, 5)
-    nodes[n].sval = i32(sval); nodes[n].aux = i32(aux)
+    nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(i32(sval))); nodes[n].aux = i32(aux)
     n
 decl_of = (params: int[], attrs: int[]) -> int:
     d = mk(.fn_, 1)

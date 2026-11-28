@@ -11,6 +11,7 @@ from p"types.jo" import (T_NONE prune structs telem tkind types)
 from p"checks_thin_expr.dewy" import is_fn_type
 from p"diagnostic_exit.dewy" import fatal
 from p"util.jo" import (files intern pos_file)
+from p"node_store.dewy" import (node_aux2 node_mod node_with_aux2)
 
 MergeCheckWord:type=int64<overflow='wrap'>
 # A nested inbox ends with none, while a receive ends with Closed<T>. Normalize only a
@@ -33,7 +34,7 @@ merged_nested_waits=(n:MergeCheckWord):>void=>$unsafe {
         } else {
             field=a
             let prepared=false
-            if nodes.ptr[a].kind =? 'call' and nodes.ptr[a].aux2 =? int32(AUX2_PARTIAL) and nkids(a) =? 0 {
+            if nodes.ptr[a].kind =? 'call' and node_aux2(nodes.ptr[a].op_ext) =? int32(AUX2_PARTIAL) and nkids(a) =? 0 {
                 field=MergeCheckWord(nodes.ptr[a].a)
                 prepared=true
             }
@@ -48,8 +49,8 @@ merged_nested_waits=(n:MergeCheckWord):>void=>$unsafe {
         let decl=MergeCheckWord(structs.ptr[MergeCheckWord(types.ptr[t].st)].decl)
         if decl =? 0 or nodes.ptr[decl].name not=? int32(intern("Merged")) or files[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/prelude/inbox.dewy" {continue}
         let adapted=bc_call("__merged_receive" [receiver] nodes.ptr[a].pos)
-        nodes.ptr[adapted].aux2=int32(AUX2_PARTIAL)
-        check_expr_in_module(adapted MergeCheckWord(nodes.ptr[decl].mod));
+        nodes.ptr[adapted].op_ext=node_with_aux2(nodes.ptr[adapted].op_ext (int32(AUX2_PARTIAL)))
+        check_expr_in_module(adapted MergeCheckWord(node_mod(nodes.ptr[decl].op_ext)));
         args[i]=last_checked
         add_flag(last_checked NF_CHECKED)
     }

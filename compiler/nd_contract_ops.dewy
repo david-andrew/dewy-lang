@@ -45,6 +45,7 @@ from p"diagnostic_exit.dewy" import (fatal)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_unknown)
 from p"word_overflow.dewy" import (math_word_overflow)
+from p"node_store.dewy" import (node_op)
 
 NdWord:type=int64<overflow='wrap'>
 # Keep shape detection available to the implementation-language bootstrap.
@@ -56,12 +57,12 @@ nd_shape_term=(n:NdWord bound:dict<int64 RefTerm>):>RefTerm=>$unsafe {
         let term=bound.get(NdWord(nodes.ptr[n].name))
         if term not=? none {return term}
     }
-    if nodes.ptr[n].kind =? 'binary' and (nodes.ptr[n].op =? int32(58) or nodes.ptr[n].op =? int32(59)) {
+    if nodes.ptr[n].kind =? 'binary' and (node_op(nodes.ptr[n].op_ext) =? int32(58) or node_op(nodes.ptr[n].op_ext) =? int32(59)) {
         let a=nd_shape_term(NdWord(nodes.ptr[n].a) bound)
         let b=nd_shape_term(NdWord(nodes.ptr[n].b) bound)
         if b.kind =? 1 {
             if b.value <? -4294967296 or b.value >? 4294967296 {fatal(nodes.ptr[n].pos "unsupported shape dimension offset")}
-            let offset=if nodes.ptr[n].op =? int32(59) {-b.value} else {b.value}
+            let offset=if node_op(nodes.ptr[n].op_ext) =? int32(59) {-b.value} else {b.value}
             if not fact_add_fits(a.offset offset) {fatal(nodes.ptr[n].pos "shape dimension offset is too large")}
             a.offset += offset
             if a.offset <? -4294967296 or a.offset >? 4294967296 {fatal(nodes.ptr[n].pos "unsupported shape dimension offset")}

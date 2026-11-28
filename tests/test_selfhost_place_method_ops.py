@@ -54,7 +54,7 @@ kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 set_kid = (n: int, i: int, v: int): lists[int(nodes[n].list) + i] = i32(v)
 nkids = (n: int) -> int: int(nodes[n].nlist)
 kid_c = (n: int) -> int: int(nodes[n].c)
-kid_d = (n: int) -> int: int(nodes[n].d)
+kid_d = (n: int) -> int: int(node_d(nodes[n].op_ext))
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 mk = (k: NK, pos: int) -> int:
     nodes.push(Node(kind=k, pos=pos))
@@ -161,7 +161,7 @@ member = (base: int, text: str) -> int:
     n
 call = (callee: int, args: int[], aux2: int) -> int:
     n = mk(.call, 11)
-    nodes[n].a = i32(callee); nodes[n].aux2 = i32(aux2)
+    nodes[n].a = i32(callee); nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(i32(aux2)))
     set_list(n, args)
     n
 take = (recv: int, method: str, args: int[]) -> int: call(member(recv, method), args, AUX2_PLACE)
@@ -184,7 +184,7 @@ shape = (n: int) -> str:
     else if x.kind == .vardecl: s = "let {name_of(int(x.name))}"
     else if x.kind == .exprstmt: s = "stmt"
     else if x.kind == .assign: s = "assign"
-    out = "{s}/{x.aux}/{x.aux2}/{x.flags}"
+    out = "{s}/{x.aux}/{node_aux2(x.op_ext)}/{x.flags}"
     if x.a != 0: out = "{out}(a {shape(int(x.a))})"
     if x.b != 0: out = "{out}(b {shape(int(x.b))})"
     loop i in [0..nkids(n)): out = "{out} [{shape(kid(n, i))}]"
@@ -194,7 +194,7 @@ everything = ():
     wanted: {int: bool} = {}
     wanted[intern("x")] = true
     deep = mk(.if_, 1); nodes[deep].c = i32(ident("x"))
-    deeper = mk(.if_, 1); nodes[deeper].d = i32(ident("x"))
+    deeper = mk(.if_, 1); nodes[deeper].op_ext = node_with_d(nodes[deeper].op_ext, i32(i32(ident("x"))))
     listed = mk(.block, 1); set_list(listed, [ident("y"), ident("x")])
     aslot = mk(.if_, 1); nodes[aslot].a = i32(ident("x"))
     bslot = mk(.if_, 1); nodes[bslot].b = i32(ident("x"))
@@ -333,7 +333,7 @@ everything = ():
     no_root = let_of("z", take(ident("r"), "lock", []))
     place_scan(no_root, intern("a"), 0, false, false)
     place_scan(ident("r"), intern("a"), 0, false, false)
-    slots = mk(.if_, 1); nodes[slots].a = i32(ident("z")); nodes[slots].b = i32(ident("z")); nodes[slots].c = i32(ident("z")); nodes[slots].d = i32(ident("z"))
+    slots = mk(.if_, 1); nodes[slots].a = i32(ident("z")); nodes[slots].b = i32(ident("z")); nodes[slots].c = i32(ident("z")); nodes[slots].op_ext = node_with_d(nodes[slots].op_ext, i32(i32(ident("z"))))
     scan(slots, false, false)
     # Ranges.
     range_block = mk(.block, 1)

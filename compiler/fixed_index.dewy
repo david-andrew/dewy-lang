@@ -6,6 +6,7 @@ from p"directives.jo" import (DIR_STATIC)
 from p"expression_types.dewy" import ntype
 from p"member_replay.jo" import (member_compact_owners)
 from p"types.jo" import (T_BOOL T_INT T_MATH_INT prune types)
+from p"node_store.dewy" import (node_aux2 node_d node_nlist2 node_op)
 
 IndexWord:type=int64<overflow='wrap'>
 # Only a static fixed-array subscript requests range state for its owner.
@@ -113,7 +114,7 @@ fi_guard=(n:IndexWord holds:bool depth:IndexWord):>void=>$unsafe {
     if l =? 0 or not fi_requested.has(l) {return}
     let v=fi_constant(IndexWord(nodes.ptr[n].b))
     if v <? 0 {return}
-    let op=nodes.ptr[n].op
+    let op=node_op(nodes.ptr[n].op_ext)
     if op =? FI_LT or op =? FI_GE {
         if holds =? (op =? FI_GE) {fi_refine(l true 0)}
         else {fi_refine(l false v)}
@@ -169,7 +170,7 @@ fi_declaration=(s:IndexWord):>void=>$unsafe {
         let r=fi_bounds.get(source) ?? FixedIndexRange[]
         fi_refine(l r.nonnegative r.limit)
     }
-    else if fi_requested.has(l) and nodes.ptr[b].kind =? 'binary' and nodes.ptr[b].op =? FI_MODULO and nodes.ptr[b].aux =? 0 and nodes.ptr[b].aux2 =? -1 {
+    else if fi_requested.has(l) and nodes.ptr[b].kind =? 'binary' and node_op(nodes.ptr[b].op_ext) =? FI_MODULO and nodes.ptr[b].aux =? 0 and node_aux2(nodes.ptr[b].op_ext) =? -1 {
         let divisor=fi_constant(IndexWord(nodes.ptr[b].b))
         if divisor >? 0 {fi_refine(l true divisor)}
     }
@@ -219,7 +220,7 @@ fi_finish=():>void=>$unsafe {
 # Pushing in reverse keeps zonking and write events in their original order.
 fi_children=(n:IndexWord @stack:array<int64> start:IndexWord):>IndexWord=>$unsafe {
     let k=nodes.ptr[n].kind
-    if nodes.ptr[n].d not=? 0 or nodes.ptr[n].nlist2 not=? 0 {return -1}
+    if node_d(nodes.ptr[n].op_ext) not=? 0 or node_nlist2(nodes.ptr[n].op_ext) not=? 0 {return -1}
     let sp=start
     if k =? 'block' {
         if nodes.ptr[n].a not=? 0 or nodes.ptr[n].b not=? 0 or nodes.ptr[n].c not=? 0 {return -1}

@@ -17,6 +17,7 @@ from p"type_ops.dewy" import (dt)
 from p"checker_types.dewy" import (TK)
 from p"types.jo" import (T_NEVER has_var prune structs tkind type_eq types)
 from p"util.jo" import (files name_of pos_file pos_in_lib)
+from p"node_store.dewy" import (node_mod)
 
 WarningWord:type=int64<overflow='wrap'>
 # xs.sorted(), s.trim() as a statement: a library function that gives a new value of its first
@@ -27,7 +28,7 @@ unused_result=(x:int64 pos:int64):>void=>$unsafe {
     let f=WarningWord(nodes.ptr[x].sym)
     let d=WarningWord(fns.ptr[f].decl)
     # (the library's: a program's own may well do more, as writing files, and give back something)
-    if d =? 0 or not modules[WarningWord(nodes.ptr[d].mod)].is_prelude {return}
+    if d =? 0 or not modules[WarningWord(node_mod(nodes.ptr[d].op_ext))].is_prelude {return}
     if fns.ptr[f].ptypes.length =? 0 or nkids(d) not=? fns.ptr[f].ptypes.length or has_flag(d NF_EXTERN) {return}
     let r=prune(WarningWord(fns.ptr[f].ret))
     if tkind(r) =? 'void_' or r =? T_NEVER or not type_eq(r prune(fns.ptr[f].ptypes[0])) {return}

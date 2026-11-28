@@ -19,6 +19,7 @@ from p"isolation_ops.dewy" import isolation_children
 from p"ownership_types.dewy" import ownership_fact_type
 from p"util.jo" import (intern name_of)
 from p"diagnostic_exit.dewy" import fatal
+from p"node_store.dewy" import (node_aux2 node_d node_sval node_with_aux2 node_with_d node_with_sval)
 
 # Lexical binding groups, not a second initialization analysis. The existing DA
 # walk proves the resulting stores. Union/find indexes declaration groups; a
@@ -97,10 +98,10 @@ scope_join_scan=(n:SJWord @join:ScopeJoin):>dict<int64 int64>=>$unsafe {
     if (k =? 'vardecl' or k =? 'const_') and nodes.ptr[n].nlist >? 0 {
         loop leaf in binding_leaves(kids(n)) {
             if nodes.ptr[leaf].kind =? 'hole' {continue}
-            let declaration=if nodes.ptr[leaf].aux2 =? 1798 {SJWord(nodes.ptr[leaf].c)} else {mk('vardecl' nodes.ptr[leaf].pos)}
+            let declaration=if node_aux2(nodes.ptr[leaf].op_ext) =? 1798 {SJWord(nodes.ptr[leaf].c)} else {mk('vardecl' nodes.ptr[leaf].pos)}
             nodes.ptr[declaration].name=nodes.ptr[leaf].name
             nodes.ptr[declaration].flags=nodes.ptr[n].flags
-            nodes.ptr[leaf].aux2=1798
+            nodes.ptr[leaf].op_ext=node_with_aux2(nodes.ptr[leaf].op_ext 1798)
             nodes.ptr[leaf].c=int32(declaration)
             scope_join_merge(@bindings scope_join_scan(declaration @join) false @join)
         }
@@ -120,7 +121,7 @@ scope_join_scan=(n:SJWord @join:ScopeJoin):>dict<int64 int64>=>$unsafe {
 # only demands a plan when one of its actual arms has an unscoped body.
 scope_join_needed=(body:SJWord):>bool=>$unsafe {
     if body =? 0 or not has_flag(body NF_UNSCOPED) {return false}
-    if nodes.ptr[body].aux2 not=? 1794 {return true}
+    if node_aux2(nodes.ptr[body].op_ext) not=? 1794 {return true}
     loop child in kids(body) {
         let control=if nodes.ptr[child].kind =? 'exprstmt' {SJWord(nodes.ptr[child].a)} else {child}
         if nodes.ptr[control].kind =? 'match_' {
@@ -149,7 +150,7 @@ scope_join_begin=(n:SJWord):>SJWord=>$unsafe {
         let root=scope_join_root(declaration @join)
         let cell=cells.get(root) ?? 0
         if cell =? 0 {
-            if nodes.ptr[declaration].aux2 =? 1792 {cell=SJWord(nodes.ptr[declaration].c)}
+            if node_aux2(nodes.ptr[declaration].op_ext) =? 1792 {cell=SJWord(nodes.ptr[declaration].c)}
             else {
                 let pos=nodes.ptr[declaration].pos
                 cell=mk('vardecl' pos)
@@ -159,10 +160,10 @@ scope_join_begin=(n:SJWord):>SJWord=>$unsafe {
                 locals.ptr[l].name=nodes.ptr[declaration].name
                 locals.ptr[l].flags=int32(LF_DECL)
                 nodes.ptr[cell].name=int32(hidden)
-                nodes.ptr[cell].sval=nodes.ptr[declaration].name
+                nodes.ptr[cell].op_ext=node_with_sval(nodes.ptr[cell].op_ext (nodes.ptr[declaration].name))
                 nodes.ptr[cell].sym=int32(l)
                 nodes.ptr[cell].type=int32(t)
-                nodes.ptr[cell].aux2=1791
+                nodes.ptr[cell].op_ext=node_with_aux2(nodes.ptr[cell].op_ext 1791)
                 add_flag(cell NF_CHECKED)
                 da_record(cell)
                 join.owned.push(cell)
@@ -170,12 +171,12 @@ scope_join_begin=(n:SJWord):>SJWord=>$unsafe {
             cells[root]=cell
         }
         if nodes.ptr[declaration].kind =? 'const_' or has_flag(declaration 262144) {add_flag(cell 262144)}
-        if nodes.ptr[declaration].aux2 not=? 1792 {nodes.ptr[declaration].d=if nodes.ptr[declaration].b =? 0 {1} else {0}}
+        if node_aux2(nodes.ptr[declaration].op_ext) not=? 1792 {nodes.ptr[declaration].op_ext=node_with_d(nodes.ptr[declaration].op_ext (if nodes.ptr[declaration].b =? 0 {1} else {0}))}
         if nodes.ptr[declaration].kind =? 'const_' {
             nodes.ptr[declaration].kind='vardecl'
             add_flag(declaration 262144) # NF_RDONLY
         }
-        nodes.ptr[declaration].aux2=1792
+        nodes.ptr[declaration].op_ext=node_with_aux2(nodes.ptr[declaration].op_ext 1792)
         nodes.ptr[declaration].c=int32(cell)
     }
     loop [name declaration] in bindings {join.cells.push(cells[scope_join_root(declaration @join)])}
@@ -191,7 +192,7 @@ scope_join_decl=(s:SJWord l:SJWord t:SJWord):>void=>$unsafe {
     if nodes.ptr[s].b not=? 0 and not can_coerce(SJWord(nodes.ptr[s].b) t shared) {fatal(nodes.ptr[s].pos "unscoped binding '{name_of(name)}' has incompatible types across paths: {dt(shared)} and {dt(t)}; use a scoped body `\{ ... }` or declare its type before the construct")}
     let flags=SJWord(locals.ptr[target].flags)
     locals.ptr[target].flags=int32(flags & ~131072) # initialization may write a const
-    if nodes.ptr[s].d =? 0 {
+    if node_d(nodes.ptr[s].op_ext) =? 0 {
         let assign=bc_assign(mk_ident_local(target nodes.ptr[s].pos) SJWord(nodes.ptr[s].b) nodes.ptr[s].pos)
         check_stmt(assign)
         let readonly=SJWord(nodes.ptr[s].flags) & 262144 not=? 0
@@ -210,7 +211,7 @@ scope_join_end=(n:SJWord state:SJWord t0:SJWord):>void=>$unsafe {
     let t=if t0 =? 0 {T_VOID} else {t0}
     let join=scope_joins.pop()
     loop cell in join.cells {
-        let name=SJWord(nodes.ptr[cell].sval)
+        let name=SJWord(node_sval(nodes.ptr[cell].op_ext))
         if has_flag(cell 262144) {let local=SJWord(nodes.ptr[cell].sym);locals.ptr[local].flags=locals.ptr[local].flags | 131072}
         push_scope_sym(name new_sym(name 'local' SJWord(nodes.ptr[cell].sym) 0))
     }
@@ -256,11 +257,11 @@ scope_join_pattern=(s:SJWord):>void=>$unsafe {
     add_flag(original NF_CHECKED)
     let statements=[original]
     loop leaf in kids(s) {
-        if nodes.ptr[leaf].aux2 not=? 1798 {continue}
+        if node_aux2(nodes.ptr[leaf].op_ext) not=? 1798 {continue}
         let declaration=SJWord(nodes.ptr[leaf].c)
         let local=SJWord(nodes.ptr[leaf].sym)
         nodes.ptr[declaration].b=int32(mk_ident_local(local nodes.ptr[leaf].pos))
-        nodes.ptr[declaration].d=0
+        nodes.ptr[declaration].op_ext=node_with_d(nodes.ptr[declaration].op_ext 0)
         scope_join_decl(declaration local SJWord(locals.ptr[local].type))
         statements.push(declaration)
     }

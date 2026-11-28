@@ -3,6 +3,7 @@ from p"ast.jo" import (nodes)
 from p"util.jo" import (intern name_of)
 from p"checker_state.dewy" import (SK Sym Local)
 from p"check.jo" import (PositionGuard check_scopes ctxs cx fns locals loop_serials position_guards syms)
+from p"node_store.dewy" import (node_op)
 
 CheckerScopeSymbolsWord:type=int64<overflow='wrap'>
 
@@ -124,7 +125,7 @@ new_local=(name:int64 t:int64 pos:int64):>int64=>$unsafe {
 # entry so that the branch's reset takes it back. O(1).
 let id_position_guard:CheckerScopeSymbolsWord=0
 position_guard_note=(c:int64 holds:bool):>void=>$unsafe {
-    let op=nodes.ptr[c].op
+    let op=node_op(nodes.ptr[c].op_ext)
     # Frozen Tok.eq and Tok.ne ordinals.
     if not (op =? 69 and holds or op =? 70 and not holds) {return}
     let a=CheckerScopeSymbolsWord(nodes.ptr[c].a)

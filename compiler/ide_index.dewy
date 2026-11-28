@@ -21,6 +21,7 @@ from p"type_ops.dewy" import (zonk)
 from p"types.jo" import (T_NEVER prune structs types)
 from p"util.jo" import (files intern mkpos more_errors name_of pos_file pos_off quiet_errors)
 from p"diagnostic_exit.dewy" import (stop)
+from p"node_store.dewy" import (node_aux2 node_mod)
 
 IdeIndexWord:type=int64<overflow='wrap'>
 ide_esc=(s:string):>string=>{
@@ -175,7 +176,7 @@ ide_module_decls=(m:IdeIndexWord):>void=>$unsafe {
 ide_hint_local=(s:IdeIndexWord l:IdeIndexWord):>void=>$unsafe {
     if not ide_on or not ide_indexed(pos_file(nodes.ptr[s].pos)) {return}
     # (a Dewy value parameter's binding: its type is the parameter's)
-    if nodes.ptr[s].aux2 =? 1 {return}
+    if node_aux2(nodes.ptr[s].op_ext) =? 1 {return}
     let b=IdeIndexWord(nodes.ptr[s].b)
     if b =? 0 or has_flag(b NF_LITERAL) {return}
     let k=nodes.ptr[b].kind
@@ -274,7 +275,7 @@ ide_complete_module=(m:IdeIndexWord):>void=>$unsafe {
         let nms=name_of(nm)
         if starts_with(nms "__") {continue}
         let d=IdeIndexWord(syms.ptr[s].decl)
-        if modules[m].is_prelude and (d =? 0 or IdeIndexWord(nodes.ptr[d].mod) not=? m) {continue}
+        if modules[m].is_prelude and (d =? 0 or IdeIndexWord(node_mod(nodes.ptr[d].op_ext)) not=? m) {continue}
         let o=ide_offered(s)
         if o =? 0 {continue}
         let [kind detail]=ide_sym_detail(o)

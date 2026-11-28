@@ -5,7 +5,7 @@ from p"expr_rare.dewy" import (rename_idents type_sequence)
 from p"checker_scope_symbols.dewy" import (new_sym push_scope_sym scope_mark scope_reset)
 from p"prelude_ops.dewy" import (dewy_prelude_lookup)
 from p"checker_contexts.dewy" import (cur_mod)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2)
 from p"checker_state.dewy" import (Global)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_constant_queries.dewy" import (ceval)
@@ -181,7 +181,7 @@ type_sequence_call=(n:int64 expected:int64):>int64=>$unsafe {
     }
     loop st in kids(AggregateSourceWord(nodes.ptr[d].b)) {
         # (the parameters' own bindings: given above)
-        if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].aux2 =? 1 {continue}
+        if nodes.ptr[st].kind =? 'vardecl' and node_aux2(nodes.ptr[st].op_ext) =? 1 {continue}
         let copy=clone(st)
         if renames.length >? 0 {rename_idents(copy renames)}
         statements.push(copy)

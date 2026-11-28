@@ -144,7 +144,7 @@ main = ():
     run(array([lit(.int_lit, T_INT), lit(.int_lit, T_INT)]))
     run(array([lit(.int_lit, T_INT), lit(.int_lit, T_INT)], true))
     run(array([lit(.int_lit, T_INT), lit(.float_lit, T_FLOAT)]))
-    decimal = lit(.float_lit, T_FLOAT); nodes[decimal].sval = 3
+    decimal = lit(.float_lit, T_FLOAT); nodes[decimal].op_ext = node_with_sval(nodes[decimal].op_ext, i32(3))
     run(array([lit(.int_lit, T_INT), decimal]))
     char = item(T_STR, .str_lit, 256 | 512)
     run(array([char, item(T_STR, .str_lit, 256 | 512)]))

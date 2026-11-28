@@ -15,7 +15,7 @@ main = ():
         nodes[n].type = i32(T_INT)
         nodes[n].aux = 1
         nodes[n].flags = i32(NF_U64)
-        nodes[n].op = i32(int(Tok.plus))
+        nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(Tok.plus))))
         print(members_type(n))
 '''
 

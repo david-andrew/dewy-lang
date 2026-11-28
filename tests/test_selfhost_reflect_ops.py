@@ -48,7 +48,7 @@ scope_count = 0
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
 kid_c = (n: int) -> int: int(nodes[n].c)
-kid_d = (n: int) -> int: int(nodes[n].d)
+kid_d = (n: int) -> int: int(node_d(nodes[n].op_ext))
 mk = (k: NK, pos: int) -> int:
     nodes.push(Node(kind=k, pos=pos))
     nodes.len() - 1
@@ -91,7 +91,7 @@ ct_run = (n: int) -> int:
     next_ct
 bc_str = (s: str, pos: int) -> int:
     n = mk(.str_lit, pos)
-    nodes[n].sval = i32(intern(s))
+    nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(i32(intern(s))))
     n
 bc_int = (v: int, pos: int) -> int:
     n = mk(.int_lit, pos)
@@ -103,7 +103,7 @@ bc_ident = (s: str, pos: int) -> int:
     n
 bc_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     n = mk(.binary, pos)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 bc_block = (items: int[], pos: int) -> int:
     # (making a node can move the arena under a caller's chosen destination)
@@ -203,7 +203,7 @@ members_of = (t: int) -> int: call_of(named("members"), [tname(t)])
 fields_of = (t: int) -> int: call_of(named("fields"), [tname(t)])
 slit = (text: str) -> int:
     n = mk(.str_lit, 12)
-    nodes[n].sval = i32(intern(text))
+    nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(i32(intern(text))))
     n
 ilit = (v: int) -> int:
     n = mk(.int_lit, 13)
@@ -211,19 +211,19 @@ ilit = (v: int) -> int:
     n
 pipe = (a: int, b: int) -> int:
     n = mk(.binary, 14)
-    nodes[n].op = i32(int(Tok.pipe)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(Tok.pipe)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 neg = (a: int) -> int:
     n = mk(.unary, 15)
-    nodes[n].op = i32(int(Tok.minus)); nodes[n].a = i32(a)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(Tok.minus)))); nodes[n].a = i32(a)
     n
 show_values = (values: int[], singles: int[]):
     s = ""
     loop v in values:
-        if nodes[v].kind == .str_lit: s = "{s} '{name_of(int(nodes[v].sval))}'"
+        if nodes[v].kind == .str_lit: s = "{s} '{name_of(int(node_sval(nodes[v].op_ext)))}'"
         else: s = "{s} {nodes[v].ival}"
     print("values{s} {singles}")
-scope_text = (s: int) -> str: "{nodes[s].kind == .reflect_scope} name={nodes[s].name} a={nodes[s].a != 0} ival={nodes[s].ival} aux={nodes[s].aux} aux2={nodes[s].aux2}"
+scope_text = (s: int) -> str: "{nodes[s].kind == .reflect_scope} name={nodes[s].name} a={nodes[s].a != 0} ival={nodes[s].ival} aux={nodes[s].aux} aux2={node_aux2(nodes[s].op_ext)}"
 everything = ():
     # The source of a loop, and whether it's a fields or members call.
     plain = mk(.int_lit, 1)
@@ -308,7 +308,7 @@ everything = ():
     reflect_bind(field_scope)
     value_scope = mk(.reflect_scope, 3); nodes[value_scope].name = 61; nodes[value_scope].a = i32(ilit(1)); nodes[nodes[value_scope].a].type = i32(T_INT)
     reflect_bind(value_scope)
-    single_scope = mk(.reflect_scope, 3); nodes[single_scope].name = 62; nodes[single_scope].a = i32(ilit(1)); nodes[single_scope].aux2 = 55
+    single_scope = mk(.reflect_scope, 3); nodes[single_scope].name = 62; nodes[single_scope].a = i32(ilit(1)); nodes[single_scope].op_ext = node_with_aux2(nodes[single_scope].op_ext, i32(55))
     reflect_bind(single_scope)
     loop g in [globals.len() - 2, globals.len() - 1]: print("{globals[g].name} {globals[g].type} {globals[g].init != 0} {globals[g].mod} {globals[g].is_const} {globals[g].state}")
     # A computed field name.
@@ -334,7 +334,7 @@ everything = ():
     print(reflect_member(member(named("nothing"), "name")))
     print(reflect_member(member(named("loc"), "name")))
     m1 = member(named("fd"), "name")
-    print("{reflect_member(m1)} {nodes[m1].kind == .str_lit} {nodes[m1].sval} {nodes[m1].type} {nodes[m1].flags} {last_checked == m1}")
+    print("{reflect_member(m1)} {nodes[m1].kind == .str_lit} {node_sval(nodes[m1].op_ext)} {nodes[m1].type} {nodes[m1].flags} {last_checked == m1}")
     m2 = member(named("fd"), "type")
     print("{reflect_member(m2)} {nodes[m2].kind == .ident} {name_of(int(nodes[m2].name))} {nodes[m2].type} {nodes[m2].flags}")
     # Jumps.
@@ -347,7 +347,7 @@ everything = ():
         n = mk(.if_, 1)
         if i == 1: nodes[n].b = i32(mk(.break_, 1))
         if i == 2: nodes[n].c = i32(mk(.break_, 1))
-        if i == 3: nodes[n].d = i32(mk(.break_, 1))
+        if i == 3: nodes[n].op_ext = node_with_d(nodes[n].op_ext, i32(i32(mk(.break_, 1))))
         if i == 4: set_list(n, [mk(.int_lit, 1), mk(.continue_, 1)])
         n
     loop i in [0..5): print(reflect_jumps(slot(i)))

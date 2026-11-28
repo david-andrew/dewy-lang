@@ -183,7 +183,7 @@ enum_type = (vnames: int[], union_types: int[] = []) -> int:
     types.len() - 1
 run = (m: int, expected: int = 0):
     t = xh_match(m, expected)
-    print("{m}:{t}:{nodes[m].aux2}:{nodes[m].sym}:{xh_scope.names}:{xh_path_count}")
+    print("{m}:{t}:{node_aux2(nodes[m].op_ext)}:{nodes[m].sym}:{xh_scope.names}:{xh_path_count}")
 prepare_match = ():
     prepare()
     files.push(SrcFile(is_dewy = true))

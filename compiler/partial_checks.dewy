@@ -27,6 +27,7 @@ from p"type_ops.dewy" import (dt mk_fn)
 from p"types.jo" import (fields prune structs targ tkind types)
 from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_mod node_with_aux2 node_with_d)
 
 PartialWord:type=int64<overflow='wrap'>
 # A rest parameter's argument: the positional arguments it gathers, as the array literal
@@ -84,7 +85,7 @@ finish_partial=(n:PartialWord ptypes:array<int64> mutmask:PartialWord ret:Partia
     fns.ptr[th].state=2
     let t=mk_fn(hp ret mm)
     nodes.ptr[n].type=int32(t)
-    nodes.ptr[n].d=int32(th)
+    nodes.ptr[n].op_ext=node_with_d(nodes.ptr[n].op_ext (int32(th)))
     # (checked: a comprehension's push takes it as it is, `[loop s in xs @load(s)]`)
     add_flag(n NF_CHECKED)
     if setting_value_needed(n) {return setting_value_partial(n t ptypes mutmask ret)}
@@ -118,7 +119,7 @@ dewy_partial=(n:PartialWord expected:PartialWord):>int64=>$unsafe {
     let callee=PartialWord(nodes.ptr[n].a)
     let args=kids(n)
     # @sum(1)(2): each argument group in the chain is a partial evaluation.
-    if nodes.ptr[callee].kind =? 'call' and not has_flag(callee NF_CHECKED) {nodes.ptr[callee].aux2=int32(AUX2_PARTIAL)}
+    if nodes.ptr[callee].kind =? 'call' and not has_flag(callee NF_CHECKED) {nodes.ptr[callee].op_ext=node_with_aux2(nodes.ptr[callee].op_ext (int32(AUX2_PARTIAL)))}
     let mod:PartialWord=-1
     let s:PartialWord=0
     let receiver=false
@@ -149,7 +150,7 @@ dewy_partial=(n:PartialWord expected:PartialWord):>int64=>$unsafe {
                 # (a method the record type declares, as the prelude's `@lines.receive()`: its
                 # module's, not a function of that name in scope, nor an array built-in's)
                 if types.ptr[st].kind =? 'struct_' and structs.ptr[PartialWord(types.ptr[st].st)].decl not=? 0 and dewy_type_method(PartialWord(structs.ptr[PartialWord(types.ptr[st].st)].decl) fname) >=? 0 {
-                    let owner=PartialWord(nodes.ptr[PartialWord(structs.ptr[PartialWord(types.ptr[st].st)].decl)].mod)
+                    let owner=PartialWord(node_mod(nodes.ptr[PartialWord(structs.ptr[PartialWord(types.ptr[st].st)].decl)].op_ext))
                     s=module_lookup(owner fname)
                     if s not=? 0 {
                         mod=owner
@@ -279,7 +280,7 @@ dewy_partial=(n:PartialWord expected:PartialWord):>int64=>$unsafe {
         loop i in [args.length..PartialWord(types.ptr[ft].nargs)) {holes.push(mk('hole' pos))}
     }
     set_list(n [args... holes...])
-    nodes.ptr[n].aux2=int32(AUX2_PARTIAL)
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32(AUX2_PARTIAL)))
     let t:PartialWord=0
     if s not=? 0 and syms.ptr[s].kind =? 'fns' and nodes.ptr[callee].kind =? 'ident' {
         # (among the versions that fit, as a call would choose)

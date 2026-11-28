@@ -4,7 +4,7 @@ from p"checker_scope_symbols.dewy" import (new_local)
 
 from p"scope_joins.dewy" import (scope_join_begin scope_join_end)
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_aux2 node_op)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local CheckerScope)
@@ -116,7 +116,7 @@ xf_ends=(s:XFWord):>bool=>$unsafe {
 }
 # A test compared with none (frozen Tok.eq 69, Tok.ne 70; the differential checks them).
 xf_none_test=(c:XFWord):>bool=>$unsafe {
-    let op=xf_nodes[0].ptr[c].op
+    let op=node_op(xf_nodes[0].ptr[c].op_ext)
     xf_nodes[0].ptr[c].kind =? 'binary' and (op =? 69 or op =? 70) and xf_nodes[0].ptr[XFWord(xf_nodes[0].ptr[c].b)].kind =? 'none_lit'
 }
 # Only type tests, tests against none and their logical combinations narrow.
@@ -166,7 +166,7 @@ xf_statement=(cond:XFWord b:XFWord c:XFWord):>XFWord=>$unsafe {
     # `if v is? none { v = x }`: v holds a value at the end of the branch.
     let jumps:int64=0
     let fill:XFWord=0
-    if (xf_nodes[0].ptr[cond].kind =? 'istype' and xf_nodes[0].ptr[cond].aux =? -1) or (xf_none_test(cond) and xf_nodes[0].ptr[cond].op =? 69) {fill=cond_fill_subject(cond b)}
+    if (xf_nodes[0].ptr[cond].kind =? 'istype' and xf_nodes[0].ptr[cond].aux =? -1) or (xf_none_test(cond) and node_op(xf_nodes[0].ptr[cond].op_ext) =? 69) {fill=cond_fill_subject(cond b)}
     cond_block(b 0 false @jumps);
     let filled=false
     if fill not=? 0 {filled=cond_fill_end(b)}
@@ -230,11 +230,11 @@ xf_if_body=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     xf_narrow(cond true)
     let changes=xf_change_count()
     let branch_expected=ex
-    if xf_nodes[0].ptr[n].aux2 =? -8 {branch_expected=0}
+    if node_aux2(xf_nodes[0].ptr[n].op_ext) =? -8 {branch_expected=0}
     # `if flag [42] else xs`: a then-branch literal of literals is checked again at
     # the other branch's type (kept unchecked here).
     let then_literal:XFWord=0
-    if branch_expected =? 0 and xf_nodes[0].ptr[n].aux2 not=? -8 and xf_container_tail(b) and not xf_container_tail(c) {then_literal=cond_then_literal(b)}
+    if branch_expected =? 0 and node_aux2(xf_nodes[0].ptr[n].op_ext) not=? -8 and xf_container_tail(b) and not xf_container_tail(c) {then_literal=cond_then_literal(b)}
     if n =? xf_sink[0] {cond_sink(n b)}
     let t1=xf_branch(b branch_expected true changes)
     xf_reset(mark)
@@ -244,7 +244,7 @@ xf_if_body=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     let else_expected=branch_expected
     # `if flag xs else []`: a container literal takes the other branch's type.
     # Anonymous records infer their own fields before the structural join.
-    if else_expected =? 0 and xf_nodes[0].ptr[n].aux2 not=? -8 and xf_container_tail(c) and t1 not=? xf_never_type[0] and XFWord(xf_types[0].ptr[t1].flags) & 1 =? 0 {
+    if else_expected =? 0 and node_aux2(xf_nodes[0].ptr[n].op_ext) not=? -8 and xf_container_tail(c) and t1 not=? xf_never_type[0] and XFWord(xf_types[0].ptr[t1].flags) & 1 =? 0 {
         let tk=xf_kind(t1)
         if tk =? 'array' or tk =? 'fixed' or (tk =? 'struct_' and not xf_structs[0].ptr[XFWord(xf_types[0].ptr[t1].st)].record_) or (tk =? 'enum_' and xf_union(t1)) {else_expected=t1}
     }
@@ -259,7 +259,7 @@ xf_if_body=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     if xf_nodes[0].ptr[b].aux =? 0 or xf_nodes[0].ptr[c].aux =? 0 {cond_error(n 0 3)}
     let va=xf_value(b)
     let vb=xf_value(c)
-    if xf_nodes[0].ptr[n].aux2 =? -8 {
+    if node_aux2(xf_nodes[0].ptr[n].op_ext) =? -8 {
         let ta=finalize_literal(va)
         let tb=finalize_literal(vb)
         if xf_nodes[0].ptr[va].kind =? 'none_lit' {ta=xf_none_type[0]}

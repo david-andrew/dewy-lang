@@ -31,6 +31,7 @@ from p"util.jo" import (name_of)
 
 from p"ast.jo" import (kid kids)
 from p"checks_thin_expr.dewy" import (is_gpu_buffer)
+from p"node_store.dewy" import (node_sval)
 
 ValueBuildWord:type=int64<overflow='wrap'>
 
@@ -159,8 +160,8 @@ fact_project=(@s:FactState base:ValueBuildWord selector:ValueBuildWord element:b
     }
     if not element and selector =? FACT_TEXT_ID {
         let origin:ValueBuildWord=fact_terms[base].origin
-        if origin >? 0 and nodes.ptr[origin].kind =? 'str_lit' and nodes.ptr[origin].aux =? 0 and nodes.ptr[origin].sval >=? 0 {
-            return fact_constant(@s ValueBuildWord(nodes.ptr[origin].sval))
+        if origin >? 0 and nodes.ptr[origin].kind =? 'str_lit' and nodes.ptr[origin].aux =? 0 and node_sval(nodes.ptr[origin].op_ext) >=? 0 {
+            return fact_constant(@s ValueBuildWord(node_sval(nodes.ptr[origin].op_ext)))
         }
     }
     let v:ValueBuildWord=fact_new(@s fact_domain(t) FactTerm(type=t))
@@ -170,8 +171,8 @@ fact_project=(@s:FactState base:ValueBuildWord selector:ValueBuildWord element:b
         # Most ASCII literals already carry their length. Jo byte length
         # shares this projection, so retain only a lower bound here.
         let origin=ValueBuildWord(fact_terms.ptr[base].origin)
-        if fact_terms.ptr[base].type =? T_STR and origin >? 0 and nodes.ptr[origin].kind =? 'str_lit' and nodes.ptr[origin].aux =? 0 and nodes.ptr[origin].sval >=? 0 {
-            length.lo=fact_literal_grapheme_floor(name_of(ValueBuildWord(nodes.ptr[origin].sval)))
+        if fact_terms.ptr[base].type =? T_STR and origin >? 0 and nodes.ptr[origin].kind =? 'str_lit' and nodes.ptr[origin].aux =? 0 and node_sval(nodes.ptr[origin].op_ext) >=? 0 {
+            length.lo=fact_literal_grapheme_floor(name_of(ValueBuildWord(node_sval(nodes.ptr[origin].op_ext))))
         }
         fact_set_bound(@s v length)
     }

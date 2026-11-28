@@ -11,7 +11,7 @@ main = () -> int:
         loop i in [1..f.len()): v.push(to_int(f[i]) ?? 0)
         if f[0] == "N":
             kinds = [NK.nil, .int_lit, .str_lit, .conv, .exprstmt, .block, .unary, .if_, .call]
-            n = Node(kind = kinds[v[0]], a = i32(v[1]), b = i32(v[2]), c = i32(v[3]), aux = i32(v[4]), ival = v[5], sval = i32(v[6]), flags = i32(v[7]), op = i32(v[8]), aux2 = -1)
+            n = Node(kind = kinds[v[0]], a = i32(v[1]), b = i32(v[2]), c = i32(v[3]), aux = i32(v[4]), ival = v[5], flags = i32(v[7]), op_ext = node_with_aux2(node_with_sval(node_with_op(u32(0), i32(v[8])), i32(v[6])), i32(-1)))
             n.list = i32(lists.len())
             n.nlist = i32(v.len() - 9)
             loop i in [9..v.len()): lists.push(i32(v[i]))

@@ -30,6 +30,7 @@ from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_
 from p"numeric_library_types.dewy" import (bundled_bigint_type dewy_bigint_literal_target is_nd math_rep_type)
 from p"array_element_conversion.dewy" import (array_elems_subsume elem_subsumes)
 from p"types.jo" import (T_MATH_INT T_NEVER T_RAWPTR has_var is_float is_int is_numeric is_union prune structs telem tkind type_eq types union_members)
+from p"node_store.dewy" import (node_sval)
 
 CoercionQueriesWord:type=int64<overflow='wrap'>
 
@@ -96,7 +97,7 @@ can_coerce=(n:int64 from0:int64 to0:int64):>bool=>$unsafe {
     if n not=? 0 and is_lit(n) {
         let nk=nodes.ptr[n].kind
         if tk =? 'struct_' {
-            if nk =? 'float_lit' and nodes.ptr[n].sval not=? 0 and bundled_rational_type(to) {return true}
+            if nk =? 'float_lit' and node_sval(nodes.ptr[n].op_ext) not=? 0 and bundled_rational_type(to) {return true}
             if dewy_bigint_literal_target(n to) {return true}
         }
         if nk =? 'int_lit' and (tk =? 'int_' or tk =? 'float_') {return true}

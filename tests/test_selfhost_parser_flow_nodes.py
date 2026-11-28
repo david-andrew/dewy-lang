@@ -28,8 +28,8 @@ main = ():
     nodes[value].flags = i32(NF_FLOW_RETURNS); print("flag:{lx_flow_effects(value)}"); nodes[value].flags = 0
     nodes[ret].a = i32(exit); print("return-exit:{lx_flow_effects(ret)}")
     left = mk(.ident, 7); right = mk(.ident, 7); third = mk(.ident, 7)
-    mid = mk(.binary, 7); nodes[mid].op = 3; nodes[mid].a = i32(left); nodes[mid].b = i32(right)
-    root = mk(.binary, 7); nodes[root].op = 3; nodes[root].a = i32(mid); nodes[root].b = i32(third)
+    mid = mk(.binary, 7); nodes[mid].op_ext = node_with_op(nodes[mid].op_ext, i32(3)); nodes[mid].a = i32(left); nodes[mid].b = i32(right)
+    root = mk(.binary, 7); nodes[root].op_ext = node_with_op(nodes[root].op_ext, i32(3)); nodes[root].a = i32(mid); nodes[root].b = i32(third)
     out: int[] = []; lx_or_terms(root, mut out)
     print("terms:{out.len()}:{out[0] == left}:{out[1] == right}:{out[2] == third}")
     has = intern("present"); opt = lx_opt_value(has, value, 19)

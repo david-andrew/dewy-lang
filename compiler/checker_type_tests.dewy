@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_with_aux2)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"type_inference.dewy" import (tu_prune tu_equal tu_struct_targ)
 from p"type_unions.dewy" import uu_index
@@ -153,7 +153,7 @@ xi_check=(n:XIWord):>XIWord=>$unsafe {
         if xi_types[0].ptr[tt].kind =? 'none_lit' {xi_nodes[0][n].aux=-1}
         else if tu_equal(tt elem) or (xi_refine[0] and xi_host[0].implies(elem tt)) {xi_nodes[0][n].aux=-2}
         else {xi_host[0].error(n at tt 2)}
-        xi_nodes[0][n].aux2=int32<overflow='wrap'>(xi_host[0].presence(XIWord(xi_nodes[0].ptr[n].a)))
+        xi_nodes[0][n].op_ext=node_with_aux2(xi_nodes[0][n].op_ext (int32<overflow='wrap'>(xi_host[0].presence(XIWord(xi_nodes[0].ptr[n].a)))))
     } else if tu_equal(at tt) or (xi_union(tt) and uu_index(tt at) >=? 0) {
         # Already narrowed to it: always true.
         xi_nodes[0][n].aux=-3

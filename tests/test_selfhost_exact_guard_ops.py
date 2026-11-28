@@ -64,7 +64,7 @@ lit = (v: int) -> int:
     n
 bin = (op: Tok, a: int, b: int) -> int:
     n = fresh(.binary)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 pair = (k: NK, a: int, b: int) -> int:
     n = fresh(k)

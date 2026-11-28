@@ -15,6 +15,7 @@ from p"parser_errors.dewy" import (keyword_name_error parse_empty_block)
 from p"parser_expr.dewy" import (parse_expr)
 from p"parser_forms.dewy" import (is_fn_literal parse_fn_literal)
 from p"util.jo" import (intern name_of)
+from p"node_store.dewy" import (node_op node_with_aux2 node_with_sval)
 
 DeclWord:type=int64<overflow='wrap'>
 
@@ -50,7 +51,7 @@ parse_type_primary=():>int64=>$unsafe {
         let n=mk('tname' pos)
         nodes.ptr[n].name=int32<overflow='wrap'>(expect_ident(""))
         if accept('dot') {
-            nodes.ptr[n].sval=nodes.ptr[n].name
+            nodes.ptr[n].op_ext=node_with_sval(nodes.ptr[n].op_ext (nodes.ptr[n].name))
             nodes.ptr[n].name=int32<overflow='wrap'>(expect_ident("type name"))
         }
         # Name[T, U]; T[], T[,] and T[4] are array types (T[N] is told apart by the checker).
@@ -258,7 +259,7 @@ parse_fn_decl=(extern_:bool):>int64=>$unsafe {
     expect('assign' "'='");
     if pk() not=? 'lparen' {fatal(cur_pos() "expected the parameter list")}
     let f=parse_fn_literal('fn_' name pos)
-    if op_name {nodes.ptr[f].aux2=1}
+    if op_name {nodes.ptr[f].op_ext=node_with_aux2(nodes.ptr[f].op_ext 1)}
     if tps.length >? 0 {
         set_list2(f tps)
         add_flag(f NF_GENERIC)
@@ -300,7 +301,7 @@ parse_struct=():>int64=>$unsafe {
             fatal(nodes.ptr[f].pos "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as `hurt = (e: mut {sn}, n: int): e.hp -= n`; `e.hurt(5)` calls it")
         }
         # name = default (frozen Tok.assign 47)
-        if nodes.ptr[f].kind =? 'assign' and nodes.ptr[f].op =? 47 and nodes.ptr[DeclWord(nodes.ptr[f].a)].kind =? 'ident' {
+        if nodes.ptr[f].kind =? 'assign' and node_op(nodes.ptr[f].op_ext) =? 47 and nodes.ptr[DeclWord(nodes.ptr[f].a)].kind =? 'ident' {
             let lhs=DeclWord(nodes.ptr[f].a)
             nodes.ptr[f].kind='vardecl'
             nodes.ptr[f].name=nodes.ptr[lhs].name
@@ -409,9 +410,9 @@ parse_module_spec=(d:DeclWord):>void=>$unsafe {
     if pk() =? 'str_lit' {
         let t=advance()
         let path=decode_str(tok_src(t) p_toks[t].pos false)
-        nodes.ptr[d].sval=int32<overflow='wrap'>(intern(path))
+        nodes.ptr[d].op_ext=node_with_sval(nodes.ptr[d].op_ext (int32<overflow='wrap'>(intern(path))))
         nodes.ptr[d].name=int32<overflow='wrap'>(intern(path_stem(path)))
-        nodes.ptr[d].aux2=1
+        nodes.ptr[d].op_ext=node_with_aux2(nodes.ptr[d].op_ext 1)
     }
     else {
         let nm=expect_ident("module name")
@@ -421,7 +422,7 @@ parse_module_spec=(d:DeclWord):>void=>$unsafe {
             last=expect_ident("module name")
             path="{path}/{name_of(last)}"
         }
-        nodes.ptr[d].sval=int32<overflow='wrap'>(intern(path))
+        nodes.ptr[d].op_ext=node_with_sval(nodes.ptr[d].op_ext (int32<overflow='wrap'>(intern(path))))
         nodes.ptr[d].name=int32<overflow='wrap'>(last)
     }
 }
@@ -494,7 +495,7 @@ parse_toplevel=():>int64=>$unsafe {
         advance();
         d=mk('test_' pos)
         let t=expect('str_lit' "test name")
-        nodes.ptr[d].sval=int32<overflow='wrap'>(intern(tok_src(t)))
+        nodes.ptr[d].op_ext=node_with_sval(nodes.ptr[d].op_ext (int32<overflow='wrap'>(intern(tok_src(t)))))
         expect('colon' "");
         nodes.ptr[d].b=int32<overflow='wrap'>(parse_block())
         add_flag(d NF_TERMINATED)

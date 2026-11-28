@@ -319,7 +319,7 @@ MAIN = r'''main = ():
     # Intrinsic filtering and the array-intrinsic path.
     intrinsics[0].id = .assert
     assert(call_name_intrinsic(n, 0) == -2)
-    nodes[n].aux2 = i32(RANGE_EXHAUSTION)
+    nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(i32(RANGE_EXHAUSTION)))
     assert(call_name_intrinsic(n, 0) == 0)
     arr = cv_type(.array, T_INT); nodes[recv].type = i32(arr); nodes[recv].flags = 128
     intrinsics[0].arr = true; intrinsics[0].id = .len

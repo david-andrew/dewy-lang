@@ -59,7 +59,7 @@ get_fn_inst = (d: int, args: int[], pos: int) -> int:
     print("instance {d} {pos}")
     1
 ct_run = (n: int) -> int:
-    print("run sval={nodes[kid(n, 0)].sval} sym={nodes[n].sym} type={nodes[n].type} flags={nodes[n].flags}")
+    print("run sval={node_sval(nodes[kid(n, 0)].op_ext)} sym={nodes[n].sym} type={nodes[n].type} flags={nodes[n].flags}")
     next_value
 checked_const_init = (k: int, sym: int, pos: int) -> int:
     print("const {k} {sym} {pos}")
@@ -96,7 +96,7 @@ with = (attrs: int[]) -> int:
     nodes[d].c = i32(holder)
     d
 str_lit = (text: int) -> int:
-    n = mk(.str_lit, 3); nodes[n].sval = i32(text); n
+    n = mk(.str_lit, 3); nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(i32(text))); n
 ident = (name: int) -> int:
     n = mk(.ident, 4); nodes[n].name = i32(name); n
 call_of = (callee: int, args: int[]) -> int:

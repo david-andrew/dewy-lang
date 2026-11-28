@@ -23,6 +23,7 @@ from p"unit_rare.dewy" import (time_core_type)
 from p"unit_ops.dewy" import (base_dimension quantity_dimension)
 from p"units.jo" import (is_quantity quantity_base)
 from p"util.jo" import (files intern name_of pos_file)
+from p"node_store.dewy" import (node_mod node_sval node_with_sval)
 GridWord:type=int64<overflow='wrap'>
 # Only a named tick reaches here. Evaluate the expression in its caller's scope.
 # Reduced parts are singleton type arguments, so equal grids share a specialization
@@ -31,7 +32,7 @@ stored_time_type=(tn:GridWord):>int64=>$unsafe {
     let pos=nodes.ptr[tn].pos
     let base=mk('tname' pos)
     nodes.ptr[base].name=nodes.ptr[tn].name
-    nodes.ptr[base].sval=nodes.ptr[tn].sval
+    nodes.ptr[base].op_ext=node_with_sval(nodes.ptr[base].op_ext (node_sval(nodes.ptr[tn].op_ext)))
     let plain=resolve_type(base)
     let point=time_core_type(plain "Instant")
     if not point and not time_core_type(plain "Duration") {fatal(pos "tick= requires an Instant or Duration")}
@@ -65,7 +66,7 @@ stored_time_type=(tn:GridWord):>int64=>$unsafe {
 
 grid_core_record=(plain:GridWord name:string):>int64=>$unsafe {
     let d=GridWord(structs.ptr[GridWord(types.ptr[plain].st)].decl)
-    let sym=module_lookup(GridWord(nodes.ptr[d].mod) intern(name))
+    let sym=module_lookup(GridWord(node_mod(nodes.ptr[d].op_ext)) intern(name))
     get_struct_inst(GridWord(syms.ptr[sym].ref) [])
 }
 
@@ -154,7 +155,7 @@ grid_constant_check=(n:GridWord validator:string index:GridWord):>int64=>$unsafe
     if validator =? "_operand_error" {
         # Materialize a representable constant offset once. The run-time point
         # then moves by integer addition, with no fraction or grid division.
-        let m=GridWord(nodes.ptr[GridWord(structs.ptr[si].decl)].mod)
+        let m=GridWord(node_mod(nodes.ptr[GridWord(structs.ptr[si].decl)].op_ext))
         let decl=GridWord(syms.ptr[module_lookup(m intern("_GridDuration"))].ref)
         let duration=get_struct_inst(decl [parts[0] parts[1] struct_targ(si 2)])
         let call=grid_call("_convert" [duration ntype(arg)] [arg] pos)

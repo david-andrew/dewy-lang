@@ -12,6 +12,7 @@ from p"lower_closures.dewy" import (closure_env_shareable)
 from p"lower_primitives.dewy" import (lf_of_inst)
 from p"lower_views.dewy" import (plain_read)
 from p"util.jo" import (files pos_file)
+from p"node_store.dewy" import (node_d node_nlist2)
 
 CallbackWord:type=int64<overflow='wrap'>
 callback_key=(lf:CallbackWord node:CallbackWord):>CallbackWord=>{
@@ -30,7 +31,7 @@ callback_size=(n:CallbackWord budget:CallbackWord):>CallbackWord=>$unsafe {
     left=callback_size(CallbackWord(nodes.ptr[n].b) left)
     if nodes.ptr[n].kind not=? 'for_' {
         left=callback_size(CallbackWord(nodes.ptr[n].c) left)
-        if nodes.ptr[n].kind not=? 'partial' {left=callback_size(CallbackWord(nodes.ptr[n].d) left)}
+        if nodes.ptr[n].kind not=? 'partial' {left=callback_size(CallbackWord(node_d(nodes.ptr[n].op_ext)) left)}
     }
     loop i in [0..nkids(n)) {left=callback_size(kid(n i) left)}
     loop i in [0..nkids2(n)) {left=callback_size(kid2(n i) left)}
@@ -78,7 +79,7 @@ callback_bindings=(root:CallbackWord @known:dict<int64 int64> @calls:array<int64
             _ => {}
         }
         let k1=CallbackWord(nodes.ptr[n].nlist)
-        let k2=CallbackWord(nodes.ptr[n].nlist2)
+        let k2=CallbackWord(node_nlist2(nodes.ptr[n].op_ext))
         if sp + k1 + k2 + 4 >? scap {
             scap=(sp + k1 + k2 + 4) * 2
             cb_stack.resize(scap)
@@ -102,7 +103,7 @@ callback_bindings=(root:CallbackWord @known:dict<int64 int64> @calls:array<int64
             }
         }
         if kind not=? 'for_' {
-            if kind not=? 'partial' and nodes.ptr[n].d not=? 0 {st[sp]=CallbackWord(nodes.ptr[n].d); sp += 1}
+            if kind not=? 'partial' and node_d(nodes.ptr[n].op_ext) not=? 0 {st[sp]=CallbackWord(node_d(nodes.ptr[n].op_ext)); sp += 1}
             if nodes.ptr[n].c not=? 0 {st[sp]=CallbackWord(nodes.ptr[n].c); sp += 1}
         }
         if nodes.ptr[n].b not=? 0 {st[sp]=CallbackWord(nodes.ptr[n].b); sp += 1}

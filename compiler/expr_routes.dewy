@@ -18,6 +18,7 @@ from p"types.jo" import (T_RANGE T_U16 T_U32 T_U64 T_U8 prune structs tkind type
 from p"util.jo" import (files intern name_of pos_file)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_with_sval)
 
 
 RouteWord:type=int64<overflow='wrap'>
@@ -49,7 +50,7 @@ dewy_console_call=(n:RouteWord member:string args:array<int64> expected:RouteWor
         if i >? 0 {parts.push(bc_str(" " pos))}
         let part=mk('pair' pos)
         nodes.ptr[part].a=int32(a)
-        nodes.ptr[part].sval=-1
+        nodes.ptr[part].op_ext=node_with_sval(nodes.ptr[part].op_ext (-1))
         parts.push(part)
     }
     set_list(text parts)
@@ -162,7 +163,7 @@ breakpoint_call=(n:RouteWord):>int64=>$unsafe {
         pieces.push(bc_str("{prefix}{text} = {quote}" pos))
         let part=mk('pair' pos)
         nodes.ptr[part].a=int32(mk_ident_local(l pos))
-        nodes.ptr[part].sval=-1
+        nodes.ptr[part].op_ext=node_with_sval(nodes.ptr[part].op_ext (-1))
         pieces.push(part)
         if (quote as array<uint8>).length >? 0 {pieces.push(bc_str(quote pos))}
     }
@@ -171,7 +172,7 @@ breakpoint_call=(n:RouteWord):>int64=>$unsafe {
         nodes.ptr[snapshot].aux=1
         set_list(snapshot pieces)
     }
-    else {nodes.ptr[snapshot].sval=int32(intern(""))}
+    else {nodes.ptr[snapshot].op_ext=node_with_sval(nodes.ptr[snapshot].op_ext (int32(intern(""))))}
     let replacement=bc_call("__dewy_breakpoint" [bc_str("{path}:{line}" pos) snapshot] pos)
     nodes.ptr[n]=nodes.ptr[replacement]
     n

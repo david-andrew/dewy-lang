@@ -22,7 +22,7 @@ from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"checker_expr.dewy" import (check_expr)
 from p"call_style.dewy" import (call_style_implicit)
 from p"checks_builders.dewy" import (bc_block bc_call bc_int bc_stmt)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_with_aux2)
 from p"ast.jo" import (NF_CHECKED NF_MUT NF_SPREAD add_flag id_dewy_len mk nodes)
 
 MissingMemberChecksWord:type=int64<overflow='wrap'>
@@ -100,7 +100,7 @@ member_missing=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
                     nodes[method].a = nodes.ptr[n].a
                     nodes[method].name = int32<overflow='wrap'>(fname)
                     # (a spread, `[d.keys...]`, stays one)
-                    nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos flags = nodes.ptr[n].flags & int32(NF_SPREAD) a = int32<overflow='wrap'>(method) aux2 = -9)
+                    nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos flags = nodes.ptr[n].flags & int32(NF_SPREAD) a = int32<overflow='wrap'>(method) op_ext = node_with_aux2(uint32(0) int32(-9)))
                     bypass=true
                     t=check_expr(n expected)
                     call_style_implicit(n fname * 8 + 5 t)

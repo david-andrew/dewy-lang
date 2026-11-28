@@ -18,6 +18,7 @@ from p"expr.jo" import (ci_ids cin_mark id_at named_first rational_reach)
 from p"rational_lookup.dewy" import (exact_families_changed rational_module reaches_rational)
 from p"types.jo" import (prune structs tkind type_eq types)
 from p"util.jo" import (files intern pos_file pos_off)
+from p"node_store.dewy" import (node_mod)
 
 LookupWord:type=int64<overflow='wrap'>
 
@@ -48,9 +49,9 @@ program_str_fn=(t0:LookupWord pos:LookupWord):>LookupWord=>{
     let t=prune(t0)
     if tkind(t) not=? 'struct_' and tkind(t) not=? 'enum_' {return 0}
     let d0=LookupWord(structs[LookupWord(types[t].st)].decl)
-    if d0 =? 0 or modules[LookupWord(nodes[d0].mod)].is_prelude {return 0}
+    if d0 =? 0 or modules[LookupWord(node_mod(nodes[d0].op_ext))].is_prelude {return 0}
     let fd:array<int64>=[]
-    collect_module(LookupWord(nodes[d0].mod) intern("str") @fd)
+    collect_module(LookupWord(node_mod(nodes[d0].op_ext)) intern("str") @fd)
     loop d in fd {
         if decl_in_prelude(d) or nkids(d) not=? 1 {continue}
         let sig=fn_sig(d)
@@ -136,7 +137,7 @@ path_literal_module=(n:LookupWord callee:LookupWord args:array<int64>):>LookupWo
     demand_prelude_name(name)
     let s=prelude.get(int64(name)) ?? dewy_prelude_lookup(name)
     if s =? 0 or syms.ptr[s].decl =? 0 {return -1}
-    LookupWord(nodes.ptr[LookupWord(syms.ptr[s].decl)].mod)
+    LookupWord(node_mod(nodes.ptr[LookupWord(syms.ptr[s].decl)].op_ext))
 }
 
 cin_grow=(d:int64):>void=>$unsafe {
@@ -144,7 +145,7 @@ cin_grow=(d:int64):>void=>$unsafe {
 }
 
 decl_in_prelude=(d:int64):>bool=>$unsafe {
-    d not=? 0 and modules.ptr[LookupWord(nodes.ptr[d].mod)].is_prelude
+    d not=? 0 and modules.ptr[LookupWord(node_mod(nodes.ptr[d].op_ext))].is_prelude
 }
 
 is_unchecked_at=(n:int64):>bool=>$unsafe {

@@ -45,8 +45,8 @@ no_borrow: {int: bool} = {}
 effectful: {int: bool} = {}
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
-kid2 = (n: int, i: int) -> int: int(lists2[int(nodes[n].list2) + i])
-nkids2 = (n: int) -> int: int(nodes[n].nlist2)
+kid2 = (n: int, i: int) -> int: int(lists2[int(node_list2(nodes[n].op_ext)) + i])
+nkids2 = (n: int) -> int: int(node_nlist2(nodes[n].op_ext))
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 pos_file = (pos: int) -> int: if pos >= 1000: 1 else: 0
 closure_env_shareable = (f: int) -> bool: not unshareable.has(f)
@@ -64,7 +64,7 @@ kids_of = (n: int, items: int[]):
     nodes[n].list = i32(lists.len()); nodes[n].nlist = i32(items.len())
     loop x in items: lists.push(i32(x))
 kids2_of = (n: int, items: int[]):
-    nodes[n].list2 = i32(lists2.len()); nodes[n].nlist2 = i32(items.len())
+    nodes[n].op_ext = node_with_list2(nodes[n].op_ext, i32(i32(lists2.len()))); nodes[n].op_ext = node_with_nlist2(nodes[n].op_ext, i32(i32(items.len())))
     loop x in items: lists2.push(i32(x))
 chain = (depth: int) -> int:
     n = fresh(.block)
@@ -121,11 +121,11 @@ main = ():
     print("{callback_size(0, 5)} {callback_size(fresh(.block), 0)} {callback_size(lam(0), 9)} {callback_size(fresh(.block), 1)}")
     loop d in [0, 1, 10, 31, 32, 33, 40]: print("{d}: {callback_size(chain(d), 32)}")
     full = fresh(.block)
-    nodes[full].a = i32(fresh(.block)); nodes[full].b = i32(fresh(.block)); nodes[full].c = i32(fresh(.block)); nodes[full].d = i32(fresh(.block))
+    nodes[full].a = i32(fresh(.block)); nodes[full].b = i32(fresh(.block)); nodes[full].c = i32(fresh(.block)); nodes[full].op_ext = node_with_d(nodes[full].op_ext, i32(i32(fresh(.block))))
     print(callback_size(full, 32))
     loop k in [NK.for_, NK.partial]:
         n = fresh(k)
-        nodes[n].a = i32(fresh(.block)); nodes[n].b = i32(chain(2)); nodes[n].c = i32(chain(3)); nodes[n].d = i32(chain(4))
+        nodes[n].a = i32(fresh(.block)); nodes[n].b = i32(chain(2)); nodes[n].c = i32(chain(3)); nodes[n].op_ext = node_with_d(nodes[n].op_ext, i32(i32(chain(4))))
         print(callback_size(n, 32))
         nodes[n].c = i32(lam(0))
         print(callback_size(n, 32))
@@ -171,8 +171,8 @@ main = ():
     aux_call = call_of(1, []); nodes[aux_call].aux = 3
     inner = lam(0); nodes[inner].a = i32(call_of(4, []))
     for_n = fresh(.for_); nodes[for_n].a = i32(c2); nodes[for_n].c = i32(call_of(5, []))
-    part = fresh(.partial); nodes[part].c = i32(c3); nodes[part].d = i32(call_of(6, []))
-    two = fresh(.block); nodes[two].d = i32(call_of(7, []))
+    part = fresh(.partial); nodes[part].c = i32(c3); nodes[part].op_ext = node_with_d(nodes[part].op_ext, i32(i32(call_of(6, []))))
+    two = fresh(.block); nodes[two].op_ext = node_with_d(nodes[two].op_ext, i32(i32(call_of(7, []))))
     list2 = fresh(.block); kids2_of(list2, [call_of(8, [])])
     body = seq([ok_decl, follow_decl, negative, global_decl, with_kids, not_callback, c1, aux_call, inner, for_n, part, two, list2] + decls)
     bound_table: {int: int} = {}

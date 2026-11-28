@@ -15,21 +15,21 @@ ints = (s: str) -> int[]:
 set_field = (n: int, field: str, v: int):
     x = i32(v)
     if field == "kind": ns[n].kind = NK(v)
-    else if field == "op": ns[n].op = x
+    else if field == "op": ns[n].op_ext = node_with_op(ns[n].op_ext, x)
     else if field == "flags": ns[n].flags = x
     else if field == "a": ns[n].a = x
     else if field == "b": ns[n].b = x
     else if field == "c": ns[n].c = x
-    else if field == "d": ns[n].d = x
+    else if field == "d": ns[n].op_ext = node_with_d(ns[n].op_ext, x)
     else if field == "name": ns[n].name = x
-    else if field == "sval": ns[n].sval = x
+    else if field == "sval": ns[n].op_ext = node_with_sval(ns[n].op_ext, x)
     else if field == "ival": ns[n].ival = v
-    else if field == "fval": ns[n].fval = f64(v) / 4.0
+    else if field == "fval": ns[n].op_ext = node_with_fval(ns[n].op_ext, f64(v) / 4.0)
     else if field == "type": ns[n].type = x
     else if field == "sym": ns[n].sym = x
     else if field == "aux": ns[n].aux = x
-    else if field == "aux2": ns[n].aux2 = x
-    else if field == "mod": ns[n].mod = x
+    else if field == "aux2": ns[n].op_ext = node_with_aux2(ns[n].op_ext, x)
+    else if field == "mod": ns[n].op_ext = node_with_mod(ns[n].op_ext, x)
 
 context: ParserContext
 texts: str[] = ["", "member", "shadow", "other", "_", "$inherited", "receiver"]
@@ -58,6 +58,7 @@ main = ():
             context.status.hint_pos = 333
             ns = [Node()]
             runs = []
+            node_ext_reset()
         else if op == "M": print("{node_mk(ns, NK(to_int(f[1]) ?? 0), to_int(f[2]) ?? 0)}")
         else if op == "L": node_set_list(ns, runs, to_int(f[1]) ?? 0, ints(f[2]))
         else if op == "L2": node_set_list2(ns, runs, to_int(f[1]) ?? 0, ints(f[2]))
@@ -84,5 +85,5 @@ main = ():
                 if let captured = context.reach.captures.get(n): print("captures {n} {captured}")
             loop i in [0..ns.len()):
                 d = ns[i]
-                print("{i} {d.kind} {d.op} {d.flags} {d.pos} {d.a} {d.b} {d.c} {d.d} {d.list} {d.nlist} {d.list2} {d.nlist2} {d.name} {d.sval} {d.ival} {d.fval} {d.type} {d.sym} {d.aux} {d.aux2} {d.mod}")
+                print("{i} {d.kind} {node_op(d.op_ext)} {d.flags} {d.pos} {d.a} {d.b} {d.c} {node_d(d.op_ext)} {d.list} {d.nlist} {node_list2(d.op_ext)} {node_nlist2(d.op_ext)} {d.name} {node_sval(d.op_ext)} {d.ival} {node_fval(d.op_ext)} {d.type} {d.sym} {d.aux} {node_aux2(d.op_ext)} {node_mod(d.op_ext)}")
             print("{runs}")

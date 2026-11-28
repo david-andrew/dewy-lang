@@ -95,6 +95,7 @@ from p"effect_contracts.dewy" import (callable_base)
 from p"effect_costs.dewy" import (effect_lower_intrinsic)
 from p"directives.jo" import dir_runtime_settings
 from p"setting_scopes.dewy" import SETTING_SCOPE_CLEANUP
+from p"node_store.dewy" import (node_aux2 node_d node_fval node_op node_sval node_with_fval node_with_op)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LGWord:type=int64<overflow='wrap'>
 LGUWord:type=uint64<overflow='wrap'>
@@ -167,7 +168,7 @@ gen_unscoped_settings=(mark:LGWord):>void=>$unsafe {
     let i=pending.length - 1
     loop i >=? mark {
         let d=pending.ptr[i]
-        if nodes.ptr[d].aux2 =? int32(SETTING_SCOPE_CLEANUP) {
+        if node_aux2(nodes.ptr[d].op_ext) =? int32(SETTING_SCOPE_CLEANUP) {
             scope_defers.ptr[scope]=pending[..i)
             if concurrency_runtime_needed {e_call0(rt("__task_shield_enter") -1);}
             gen_stmt(d);
@@ -259,7 +260,7 @@ ib_unwrap_add=(n0:LGWord):>[int64 int64 int64]=>$unsafe {
     if n <=? 0 {return [0 0 0]}
     let l=ib_plain_local(n)
     if l not=? 0 {return [l 0 n]}
-    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and cx_token_values.ptr[LGWord(nodes.ptr[n].op)] =? 'plus' {
+    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and cx_token_values.ptr[LGWord(node_op(nodes.ptr[n].op_ext))] =? 'plus' {
         let a=LGWord(nodes.ptr[n].a)
         let b=LGWord(nodes.ptr[n].b)
         let [kb kv]=integer_constant(b)
@@ -402,7 +403,7 @@ ib_collect=(n:LGWord yes:bool):>void=>$unsafe {
         return
     }
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return}
-    let op=nodes.ptr[n].op
+    let op=node_op(nodes.ptr[n].op_ext)
     if op <? int32(71) or op >? int32(74) {return}
     let want_lt=(yes and op =? int32(71)) or (not yes and op =? int32(74))
     let want_le=(yes and op =? int32(72)) or (not yes and op =? int32(73))
@@ -458,7 +459,7 @@ ib_collect=(n:LGWord yes:bool):>void=>$unsafe {
             let lo:LGWord=0
             let lo_node:LGWord=0
             let [zb zv]=integer_constant(b_n)
-            if zb and zv =? 0 and nodes.ptr[a_n].kind =? 'binary' and nodes.ptr[a_n].aux =? 0 and cx_token_values.ptr[LGWord(nodes.ptr[a_n].op)] =? 'minus' {
+            if zb and zv =? 0 and nodes.ptr[a_n].kind =? 'binary' and nodes.ptr[a_n].aux =? 0 and cx_token_values.ptr[LGWord(node_op(nodes.ptr[a_n].op_ext))] =? 'minus' {
                 hi=ib_plain_local(LGWord(nodes.ptr[a_n].a))
                 lo_node=LGWord(nodes.ptr[a_n].b)
                 lo=ib_plain_local(lo_node)
@@ -524,7 +525,7 @@ nz_collect=(n:LGWord yes:bool):>void=>$unsafe {
         return
     }
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return}
-    let op=cx_token_values.ptr[LGWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[LGWord(node_op(nodes.ptr[n].op_ext))]
     if not yes {
         if op =? 'eq' {op='ne'}
         else if op =? 'ne' {op='eq'}
@@ -640,7 +641,7 @@ gen_place=(e:LGWord write:bool):>Place=>$unsafe {
             let base=gen_place(a write)
             let si:LGWord=LGWord(types.ptr[bt].st)
             layout(bt);
-            let v:LGWord=LGWord(structs.ptr[si].variants) + LGWord(nodes.ptr[e].aux2)
+            let v:LGWord=LGWord(structs.ptr[si].variants) + LGWord(node_aux2(nodes.ptr[e].op_ext))
             return field_place(LGWord(variants.ptr[v].fields) + LGWord(nodes.ptr[e].ival) place_addr(base bt) write slot)
         }
         if nodes.ptr[e].aux =? -4 and swizzle_run(e) {
@@ -1402,7 +1403,7 @@ gen_fnref=(e:LGWord):>Val=>$unsafe {
     return Val[a true s]
 }
 gen_partial=(e:LGWord):>Val=>$unsafe {
-    let th:LGWord=LGWord(nodes.ptr[e].d)
+    let th:LGWord=LGWord(node_d(nodes.ptr[e].op_ext))
     let offs=partial_layout(e)
     let size=offs.ptr[offs.length - 1]
     fns.ptr[th].env_size = LGI32(size);
@@ -1442,14 +1443,14 @@ gen_interp=(e:LGWord):>Val=>$unsafe {
     loop i in [0..nkids(e)) {
         let p=kid(e i)
         if nodes.ptr[p].kind =? 'str_lit' {
-            let s=name_of(LGWord(nodes.ptr[p].sval))
+            let s=name_of(LGWord(node_sval(nodes.ptr[p].op_ext)))
             if (s).length =? 0 {continue}
             e_call2(rt("__buf_append_str") e_slot(bs) e_daddr(str_data(s)) -1);
             continue
         }
         let f:LGWord=LGWord(nodes.ptr[p].sym)
         let x:LGWord=LGWord(nodes.ptr[p].a)
-        if (f >? 0 and f =? format_word_inst) or nodes.ptr[p].sval <? 0 and prune(ntype(x)) =? T_MATH_INT and math_proven_word(x) and math_default_formatter(f) {
+        if (f >? 0 and f =? format_word_inst) or node_sval(nodes.ptr[p].op_ext) <? 0 and prune(ntype(x)) =? T_MATH_INT and math_proven_word(x) and math_default_formatter(f) {
             e_call2(rt("__fmt_word") e_slot(bs) math_word_expr(x) -1);
             continue
         }
@@ -1458,7 +1459,7 @@ gen_interp=(e:LGWord):>Val=>$unsafe {
         if not val.owned and is_managed(ntype(x)) and not in_lib(nodes.ptr[LGWord(fns.ptr[f].decl)].pos) and borrow_may_change(x [] 0 f) {val=own_at(x val ntype(x))}
         borrow(val ntype(x));
         let argv=[e_slot(bs) val.v]
-        if nodes.ptr[p].sval >=? 0 {argv.push(e_daddr(str_data(name_of(LGWord(nodes.ptr[p].sval)))));}
+        if node_sval(nodes.ptr[p].op_ext) >=? 0 {argv.push(e_daddr(str_data(name_of(LGWord(node_sval(nodes.ptr[p].op_ext))))));}
         e_call(lf_of_inst(f) argv -1);
     }
     building.pop();
@@ -1512,7 +1513,7 @@ gen_match_test=(p:LGWord st0:LGWord hidden_addr:LGWord):>LGWord=>$unsafe {
             }
             return result
         }
-        if nodes.ptr[p].aux2 =? 1 {
+        if node_aux2(nodes.ptr[p].op_ext) =? 1 {
             # (a member of an optional union: present, and holding it)
             let u=prune(telem(st))
             let pt=prune(ntype(p))
@@ -1534,8 +1535,8 @@ gen_match_test=(p:LGWord st0:LGWord hidden_addr:LGWord):>LGWord=>$unsafe {
         let si:LGWord=LGWord(types.ptr[st].st)
         layout(st);
         let tag=e_load(VI hidden_addr 0 4)
-        let want:LGWord=LGWord(nodes.ptr[p].aux2)
-        if structs.ptr[si].simple_enum {want=variants.ptr[LGWord(structs.ptr[si].variants) + LGWord(nodes.ptr[p].aux2)].value}
+        let want:LGWord=LGWord(node_aux2(nodes.ptr[p].op_ext))
+        if structs.ptr[si].simple_enum {want=variants.ptr[LGWord(structs.ptr[si].variants) + LGWord(node_aux2(nodes.ptr[p].op_ext))].value}
         return e_bin('eq' VI tag e_iconst(want))
     }
     if k =? 'plit' {
@@ -1543,7 +1544,7 @@ gen_match_test=(p:LGWord st0:LGWord hidden_addr:LGWord):>LGWord=>$unsafe {
             # Inspect the payload only after its tag matches: another member
             # can hold arbitrary bits where a string pointer would be stored.
             layout(st);
-            let vi:LGWord=LGWord(nodes.ptr[p].aux2)
+            let vi:LGWord=LGWord(node_aux2(nodes.ptr[p].op_ext))
             let variant:LGWord=LGWord(structs.ptr[LGWord(types.ptr[st].st)].variants) + vi
             let field:LGWord=LGWord(variants.ptr[variant].fields)
             let result=vreg(VI)
@@ -1635,8 +1636,8 @@ gen_match_switch=(m:LGWord st0:LGWord rs:LGWord rtp:LGWord val:bool):>bool=>$uns
             }
             else if pk =? 'pvariant' and is_enum {
                 let si:LGWord=LGWord(types.ptr[st].st)
-                let v:LGWord=LGWord(nodes.ptr[p].aux2)
-                if structs.ptr[si].simple_enum {v=variants.ptr[LGWord(structs.ptr[si].variants) + LGWord(nodes.ptr[p].aux2)].value}
+                let v:LGWord=LGWord(node_aux2(nodes.ptr[p].op_ext))
+                if structs.ptr[si].simple_enum {v=variants.ptr[LGWord(structs.ptr[si].variants) + LGWord(node_aux2(nodes.ptr[p].op_ext))].value}
                 vals.push(v);
                 arms.push(i);
             }
@@ -1827,7 +1828,7 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
     let a:LGWord=LGWord(nodes.ptr[e].a)
     let b:LGWord=LGWord(nodes.ptr[e].b)
     let lt=prune(ntype(a))
-    let op=cx_token_values.ptr[LGWord(nodes.ptr[e].op)]
+    let op=cx_token_values.ptr[LGWord(node_op(nodes.ptr[e].op_ext))]
     let aux:LGWord=LGWord(nodes.ptr[e].aux)
     let is_cmp=op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge'
     # Read the left value before evaluating the right. Explicit mutation of a
@@ -1864,8 +1865,8 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         return V(r false)
     }
     if aux =? 6 {
-        if nodes.ptr[e].aux2 not=? 0 {
-            let has=gen_map_presence(a LGWord(nodes.ptr[e].aux2))
+        if node_aux2(nodes.ptr[e].op_ext) not=? 0 {
+            let has=gen_map_presence(a LGWord(node_aux2(nodes.ptr[e].op_ext)))
             if op =? 'eq' {return V(e_bin('eq' VI has e_iconst(0)) false)}
             return V(has false)
         }
@@ -1880,7 +1881,7 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
             let lit_a=not lit_b and nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0
             if lit_b or lit_a {
                 let lnode=if lit_b {b} else {a}
-                let text=name_of(LGWord(nodes.ptr[lnode].sval))
+                let text=name_of(LGWord(node_sval(nodes.ptr[lnode].op_ext)))
                 let n=(text as array<uint8>).length
                 if n <=? 8 {
                     let v=if lit_b {gen_borrowed(a).v} else {gen_borrowed(b).v}
@@ -1961,7 +1962,7 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         return V(e_bin(float_op(op) ty va vb) false)
     # x % 2^k == 0 (or !=): a test of the low bits, for any sign of x
     }
-    if (op =? 'eq' or op =? 'ne') and nodes.ptr[b].kind =? 'int_lit' and nodes.ptr[b].ival =? 0 and nodes.ptr[a].kind =? 'binary' and (cx_token_values.ptr[LGWord(nodes.ptr[a].op)]) =? 'percent' and nodes.ptr[a].aux =? 0 {
+    if (op =? 'eq' or op =? 'ne') and nodes.ptr[b].kind =? 'int_lit' and nodes.ptr[b].ival =? 0 and nodes.ptr[a].kind =? 'binary' and (cx_token_values.ptr[LGWord(node_op(nodes.ptr[a].op_ext))]) =? 'percent' and nodes.ptr[a].aux =? 0 {
         let m:LGWord=LGWord(nodes.ptr[a].b)
         if nodes.ptr[m].kind =? 'int_lit' and nodes.ptr[m].ival >? 0 and nodes.ptr[m].ival & (nodes.ptr[m].ival - 1) =? 0 and vc(ntype(LGWord(nodes.ptr[a].a))) =? VC_INT {
             let low=e_bin('and_' VI gen_expr(LGWord(nodes.ptr[a].a)).v e_iconst(nodes.ptr[m].ival - 1))
@@ -1986,7 +1987,7 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
             endc();
         }
     }
-    if nodes.ptr[e].aux2 =? -1 and (op =? 'slash' or op =? 'percent') {
+    if node_aux2(nodes.ptr[e].op_ext) =? -1 and (op =? 'slash' or op =? 'percent') {
         if not sg {return V(e_bin(int_op(op false) VI va vb) false)}
         # Floor remainder by a positive power of two is its low bits, for
         # negative inputs too. Floor division is the matching arithmetic shift.
@@ -2053,7 +2054,7 @@ gen_left=(a:LGWord t:LGWord keep:bool):>LGWord=>$unsafe {
 gen_vec_binary=(e:LGWord keep_left:bool):>Val=>$unsafe {
     let a:LGWord=LGWord(nodes.ptr[e].a)
     let b:LGWord=LGWord(nodes.ptr[e].b)
-    let op=cx_token_values.ptr[LGWord(nodes.ptr[e].op)]
+    let op=cx_token_values.ptr[LGWord(node_op(nodes.ptr[e].op_ext))]
     let aux:LGWord=LGWord(nodes.ptr[e].aux)
     let t=ntype(e)
     let s=new_temp(t)
@@ -3028,7 +3029,7 @@ gen_fmt_struct=(e:LGWord):>Val=>$unsafe {
     let fi:LGWord=0
     let k=types.ptr[t].kind
     # (Dewy's literal syntax: [x=1 name="q"], no type name and no commas)
-    let dewy=LGWord(nodes.ptr[e].aux2) & FMT_DEWY not=? 0
+    let dewy=LGWord(node_aux2(nodes.ptr[e].op_ext)) & FMT_DEWY not=? 0
     if k =? 'struct_' {
         let si:LGWord=LGWord(types.ptr[t].st)
         layout(t);
@@ -3040,7 +3041,7 @@ gen_fmt_struct=(e:LGWord):>Val=>$unsafe {
         else {lit(ba "{name}(");}
         loop i in fmt_field_order(si) {
             let f:LGWord=LGWord(structs.ptr[si].fields) + i
-            if fmt_hidden(LGWord(fields.ptr[f].type) nodes.ptr[e].aux2) {continue}
+            if fmt_hidden(LGWord(fields.ptr[f].type) node_aux2(nodes.ptr[e].op_ext)) {continue}
             let sep=""
             if fi >? 0 and dewy {sep=" "}
             else if fi >? 0 {sep=", "}
@@ -3082,7 +3083,7 @@ gen_fmt_struct=(e:LGWord):>Val=>$unsafe {
                 continue
             # (a string set's member is its text, quoted inside a structure as a string is)
             }
-            if structs.ptr[si].lit_set not=? 0 and dewy and LGWord(nodes.ptr[e].aux2) & 1 not=? 0 {lit(ba __test_jq(name_of(LGWord(variants.ptr[vi].name))));}
+            if structs.ptr[si].lit_set not=? 0 and dewy and LGWord(node_aux2(nodes.ptr[e].op_ext)) & 1 not=? 0 {lit(ba __test_jq(name_of(LGWord(variants.ptr[vi].name))));}
             else {lit(ba name_of(LGWord(variants.ptr[vi].name)));}
             if nf >? 0 {
                 lit(ba "(");
@@ -3230,7 +3231,7 @@ gen_conv=(e:LGWord):>Val=>$unsafe {
     if cv =? CV.set_text {
         # (a string set's member text: the table's offset of it, source_type the table)
         let member=gen_expr(a).v
-        let table=e_daddr(set_text_table(LGWord(nodes.ptr[e].aux2)))
+        let table=e_daddr(set_text_table(LGWord(node_aux2(nodes.ptr[e].op_ext))))
         let rel=e_load(VI e_bin('add' VI table e_bin('mul' VI member e_iconst(8))) 0 8)
         return V(e_bin('add' VI table rel) false)
     }
@@ -3566,7 +3567,7 @@ gen_expr=(e:LGWord):>Val=>$unsafe {
 }
 gen_value_str_lit=(e:LGWord):>Val=>$unsafe {
     if nodes.ptr[e].aux not=? 0 {return gen_interp(e)}
-    let value=e_daddr(str_data(name_of(LGWord(nodes.ptr[e].sval))))
+    let value=e_daddr(str_data(name_of(LGWord(node_sval(nodes.ptr[e].op_ext)))))
     if member_lower_active >=? 0 {member_lower_text(e value);}
     return V(value false)
 }
@@ -3624,7 +3625,7 @@ gen_str_affix_lit=(e:LGWord suffix:bool):>LGWord=>$unsafe {
     let b=kid(e 1)
     if nodes.ptr[b].kind not=? 'str_lit' or nodes.ptr[b].aux not=? 0 {return -1}
     if tkind(prune(ntype(a))) not=? 'str_' {return -1}
-    let text=name_of(LGWord(nodes.ptr[b].sval))
+    let text=name_of(LGWord(node_sval(nodes.ptr[b].op_ext)))
     let n=(text as array<uint8>).length
     if n >? 8 {return -1}
     let va=gen_borrowed(a).v
@@ -3747,8 +3748,8 @@ gen_value_istype=(e:LGWord):>Val=>$unsafe {
     let at=prune(ntype(a))
     let vi:LGWord=LGWord(nodes.ptr[e].aux)
     if vi =? -3 {return V(e_iconst(1) false)}
-    if nodes.ptr[e].aux2 not=? 0 {
-        let has=gen_map_presence(a LGWord(nodes.ptr[e].aux2))
+    if node_aux2(nodes.ptr[e].op_ext) not=? 0 {
+        let has=gen_map_presence(a LGWord(node_aux2(nodes.ptr[e].op_ext)))
         if vi =? -1 {return V(e_bin('eq' VI has e_iconst(0)) false)}
         return V(has false)
     }
@@ -3907,7 +3908,7 @@ gen_value_call=(e:LGWord):>Val=>$unsafe {
     if aux =? 3 {
         let si:LGWord=LGWord(types.ptr[t].st)
         layout(t);
-        let v:LGWord=LGWord(nodes.ptr[e].aux2)
+        let v:LGWord=LGWord(node_aux2(nodes.ptr[e].op_ext))
         # (a value made a union member: which member, by its type now that inference is done,
         # since the union's members may have been put in another order)
         if structs.ptr[si].union_ and nkids(e) =? 1 {
@@ -3937,13 +3938,13 @@ gen_value_call=(e:LGWord):>Val=>$unsafe {
 gen_value_unary=(e:LGWord):>Val=>$unsafe {
     let t=prune(ntype(e))
     let a:LGWord=LGWord(nodes.ptr[e].a)
-    if nodes.ptr[e].op =? LGI32(58) {return gen_expr(a)}
+    if node_op(nodes.ptr[e].op_ext) =? LGI32(58) {return gen_expr(a)}
     if is_vec(t) {
         let neg=mk('binary' nodes.ptr[e].pos)
-        nodes.ptr[neg].op = LGI32(60);
+        nodes.ptr[neg].op_ext=node_with_op(nodes.ptr[neg].op_ext (LGI32(60)));
         nodes.ptr[neg].a = LGI32(a);
         let m1=mk('float_lit' nodes.ptr[e].pos)
-        nodes.ptr[m1].fval = -1.0;
+        nodes.ptr[m1].op_ext=node_with_fval(nodes.ptr[m1].op_ext (-1.0));
         nodes.ptr[m1].type = LGI32(T_F32);
         if types.ptr[prune(t)].sign {
             # (an integer vector: times the integer -1, which wraps as the CPU's integers do)
@@ -3957,11 +3958,11 @@ gen_value_unary=(e:LGWord):>Val=>$unsafe {
         return gen_vec_binary(neg false)
     }
     if t =? T_MATH_INT {
-        let base=if nodes.ptr[e].op =? LGI32(59) {0} else {-1}
+        let base=if node_op(nodes.ptr[e].op_ext) =? LGI32(59) {0} else {-1}
         return math_binary('minus' math_word(e_iconst(base)).v gen_borrowed(a).v)
     }
     let v=gen_expr(a).v
-    if nodes.ptr[e].op =? LGI32(59) {
+    if node_op(nodes.ptr[e].op_ext) =? LGI32(59) {
         if vc(t) =? VC_FLT {return V(e_un('fneg' vt_of(t) v) false)}
         if int_policy(t) =? 2 {return V(saturate_binary('minus' t e_iconst(0) v) false)}
         let value=e_un('neg' VI v)
@@ -4279,7 +4280,7 @@ gen_array=(e:LGWord t:LGWord):>Val=>$unsafe {
         let z=kid(e 0)
         if nodes.ptr[z].kind =? 'conv' and (nodes.ptr[z].aux not=? LGI32(14) or nodes.ptr[z].ival =? 1) {z=LGWord(nodes.ptr[z].a)}
         let zk=nodes.ptr[z].kind
-        if not math_optional(prune(et)) and ((zk =? 'int_lit' and nodes.ptr[z].ival =? 0) or (zk =? 'bool_lit' and nodes.ptr[z].ival =? 0) or zk =? 'null_lit' or (zk =? 'float_lit' and nodes.ptr[z].fval =? 0.0 and f64_bits(nodes.ptr[z].fval) =? 0)) {
+        if not math_optional(prune(et)) and ((zk =? 'int_lit' and nodes.ptr[z].ival =? 0) or (zk =? 'bool_lit' and nodes.ptr[z].ival =? 0) or zk =? 'null_lit' or (zk =? 'float_lit' and node_fval(nodes.ptr[z].op_ext) =? 0.0 and f64_bits(node_fval(nodes.ptr[z].op_ext)) =? 0)) {
             let n=gen_expr(LGWord(nodes.ptr[e].b)).v
             return V(e_call2(rt("__arr_repeat") n e_iconst(esz) VI) true)
         }
@@ -4558,7 +4559,7 @@ try_gen_map_insert_if_absent=(e:LGWord):>bool=>$unsafe {
     if ck =? 'istype' and nodes.ptr[cond].aux =? LGI32(-1) {
         let gc=LGWord(nodes.ptr[cond].a)
         if gc <=? 0 or nodes.ptr[gc].kind not=? 'call' or nodes.ptr[gc].c not=? 0 or nkids(gc) not=? 2 {return false}
-        if nodes.ptr[cond].aux2 =? 0 {
+        if node_aux2(nodes.ptr[cond].op_ext) =? 0 {
             if nodes.ptr[gc].aux not=? 0 or nodes.ptr[gc].sym <=? 0 {return false}
             let gd=LGWord(fns.ptr[LGWord(nodes.ptr[gc].sym)].decl)
             if gd =? 0 or name_of(LGWord(nodes.ptr[gd].name)) not=? "get" or files.ptr[pos_file(nodes.ptr[gd].pos)].path not=? map_path {return false}
@@ -4566,7 +4567,7 @@ try_gen_map_insert_if_absent=(e:LGWord):>bool=>$unsafe {
         d1=kid(gc 0)
         k1=kid(gc 1)
     }
-    else if ck =? 'binary' and nodes.ptr[cond].aux =? 6 and nodes.ptr[cond].aux2 not=? 0 and cx_token_values.ptr[LGWord(nodes.ptr[cond].op)] =? 'eq' {
+    else if ck =? 'binary' and nodes.ptr[cond].aux =? 6 and node_aux2(nodes.ptr[cond].op_ext) not=? 0 and cx_token_values.ptr[LGWord(node_op(nodes.ptr[cond].op_ext))] =? 'eq' {
         let gc=LGWord(nodes.ptr[cond].a)
         if gc <=? 0 or nodes.ptr[gc].kind not=? 'call' or nodes.ptr[gc].c not=? 0 or nkids(gc) not=? 2 {return false}
         d1=kid(gc 0)
@@ -4664,7 +4665,7 @@ gen_if=(e:LGWord t:LGWord):>Val=>$unsafe {
     if not val {
         let c0=LGWord(nodes.ptr[e].a)
         let ck0=nodes.ptr[c0].kind
-        if (ck0 =? 'istype' or (ck0 =? 'binary' and nodes.ptr[c0].aux2 not=? 0) or ck0 =? 'not_') and nodes.ptr[LGWord(nodes.ptr[c0].a)].kind =? 'call' and try_gen_map_insert_if_absent(e) {return V(-1 false)}
+        if (ck0 =? 'istype' or (ck0 =? 'binary' and node_aux2(nodes.ptr[c0].op_ext) not=? 0) or ck0 =? 'not_') and nodes.ptr[LGWord(nodes.ptr[c0].a)].kind =? 'call' and try_gen_map_insert_if_absent(e) {return V(-1 false)}
     }
     let has_else=nodes.ptr[e].c not=? 0
     let rs:LGWord=-1
@@ -4933,11 +4934,11 @@ gen_assign=(s:LGWord):>void=>$unsafe {
         let d=e_bin('mul' VI gen_expr(LGWord(nodes.ptr[s].b)).v e_iconst(tsize(LGWord(types.ptr[t].elem))))
         let pl=gen_place(a true)
         let cur=read_place(pl t)
-        if nodes.ptr[s].op =? LGI32(48) {write_place(pl t e_bin('add' VI cur d));}
+        if node_op(nodes.ptr[s].op_ext) =? LGI32(48) {write_place(pl t e_bin('add' VI cur d));}
         else {write_place(pl t e_bin('sub' VI cur d));}
         return
     }
-    if nodes.ptr[s].op =? LGI32(47) {
+    if node_op(nodes.ptr[s].op_ext) =? LGI32(47) {
         let rhs:LGWord=LGWord(nodes.ptr[s].b)
         if ownership_type(t) and nodes.ptr[rhs].kind =? 'intrinsic' and nodes.ptr[rhs].aux =? LGI32(76) {
             let pl=gen_place(a true)
@@ -4979,7 +4980,7 @@ gen_assign=(s:LGWord):>void=>$unsafe {
         return
     # compound arithmetic
     }
-    let op=cx_token_values.ptr[compound_op(LGWord(nodes.ptr[s].op))]
+    let op=cx_token_values.ptr[compound_op(LGWord(node_op(nodes.ptr[s].op_ext)))]
     let pl=gen_place(a true)
     let cur=read_place(pl t)
     if t =? T_MATH_INT {
@@ -5024,7 +5025,7 @@ gen_assign=(s:LGWord):>void=>$unsafe {
 }
 gen_vardecl=(s:LGWord):>void=>$unsafe {
     if gen_fuse_init_decl(s) {return}
-    if nodes.ptr[s].aux2 =? 1791 {
+    if node_aux2(nodes.ptr[s].op_ext) =? 1791 {
         let local=LGWord(nodes.ptr[s].sym)
         let type_id=store_type(local)
         zero_declare(local);
@@ -5079,14 +5080,14 @@ gen_vardecl=(s:LGWord):>void=>$unsafe {
     let l:LGWord=LGWord(nodes.ptr[s].sym)
     let t:LGWord=LGWord(locals.ptr[l].type)
     zero_declare(l);
-    if partition_mode and nodes.ptr[s].aux2 =? 1 and partition_descs.has(l) {return}
+    if partition_mode and node_aux2(nodes.ptr[s].op_ext) =? 1 and partition_descs.has(l) {return}
     if parallel_scalar_decl(s l) {return}
-    if copies_on and copy_bindings.has(l) and nodes.ptr[s].aux2 =? 1 {
+    if copies_on and copy_bindings.has(l) and node_aux2(nodes.ptr[s].op_ext) =? 1 {
         write_place(local_place(l true) t gen_expr(LGWord(nodes.ptr[s].b)).v);
         scope_add_local(l true);
         return
     }
-    if nodes.ptr[s].aux2 =? 1 and LGWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {return}
+    if node_aux2(nodes.ptr[s].op_ext) =? 1 and LGWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {return}
     if held_views.contains(l) {
         e_mov(LGWord(locals.ptr[l].vreg) held_value_addr(LGWord(nodes.ptr[s].b)));
         return
@@ -5352,7 +5353,7 @@ gen_fixed_comprehension=(b:LGWord push:LGWord to:LGWord proven:bool):>Val=>$unsa
 }
 gen_comprehension_reserve=(s:LGWord count:LGWord):>void=>$unsafe {
     if not has_flag(s NF_COMPREHENSION) {return}
-    let acc:LGWord=LGWord(nodes.ptr[s].aux2)
+    let acc:LGWord=LGWord(node_aux2(nodes.ptr[s].op_ext))
     let at=prune(LGWord(locals.ptr[acc].type))
     let pl=local_place(acc true)
     iff(e_bin('gts' VI count e_iconst(0)));
@@ -5475,7 +5476,7 @@ gen_for=(s:LGWord):>void=>$unsafe {
         return
     }
     let idx:LGWord=LGWord(nodes.ptr[s].c)
-    let snap:LGWord=LGWord(nodes.ptr[s].d)
+    let snap:LGWord=LGWord(node_d(nodes.ptr[s].op_ext))
     let el:LGWord=LGWord(nodes.ptr[s].sym)
     let ct=prune(ntype(LGWord(nodes.ptr[s].a)))
     let slice_lo:LGWord=-1
@@ -5625,7 +5626,7 @@ gen_for=(s:LGWord):>void=>$unsafe {
         let keys=base_snap
         if keys =? 0 {keys=e_addi(e_load(VI sa LGWord(fields.ptr[f0].offset) ptr_size) 24)}
         e_mov(LGWord(locals.ptr[el].vreg) e_bin('add' VI keys e_bin('mul' VI i e_iconst(owner_stride(kt)))));
-        let vl:LGWord=LGWord(nodes.ptr[s].aux2)
+        let vl:LGWord=LGWord(node_aux2(nodes.ptr[s].op_ext))
         if vl not=? 0 and LGWord(locals.ptr[vl].flags) & LF_BYREF not=? 0 {
             let vals=map_values
             if vals =? 0 {vals=e_addi(e_load(VI sa LGWord(fields.ptr[f0 + 1].offset) ptr_size) 24)}
@@ -5665,7 +5666,7 @@ each_done=(s:LGWord ct:LGWord i:LGWord n_snap:LGWord n_fixed:LGWord more:bool):>
         let si:LGWord=LGWord(types.ptr[ct].st)
         layout(ct);
         let f0:LGWord=LGWord(structs.ptr[si].fields)
-        let sa=place_addr(local_place(LGWord(nodes.ptr[s].d) false) ct)
+        let sa=place_addr(local_place(LGWord(node_d(nodes.ptr[s].op_ext)) false) ct)
         n=arr_len(e_load(VI sa LGWord(fields.ptr[f0].offset) ptr_size))
     }
     if more {return e_bin('lts' VI i n)}
@@ -5808,7 +5809,7 @@ uq_fresh_before_loop=(s:LGWord l:LGWord t:LGWord):>bool=>$unsafe {
     let k=cur_block_i - 1
     loop k >=? stop {
         let prev=kid(cur_block k)
-        if nodes.ptr[prev].kind =? 'vardecl' and nodes.ptr[prev].aux2 =? 0 and nodes.ptr[prev].nlist =? 0 and not has_flag(prev NF_GLOBAL) and LGWord(nodes.ptr[prev].sym) =? l {
+        if nodes.ptr[prev].kind =? 'vardecl' and node_aux2(nodes.ptr[prev].op_ext) =? 0 and nodes.ptr[prev].nlist =? 0 and not has_flag(prev NF_GLOBAL) and LGWord(nodes.ptr[prev].sym) =? l {
             let iv=LGWord(nodes.ptr[prev].b)
             if iv =? 0 {return true}
             return nodes.ptr[iv].kind =? 'array' and (nodes.ptr[iv].b not=? 0 or nkids(iv) =? 0 or not all_const(iv LGWord(types.ptr[t].elem)))
@@ -5927,7 +5928,7 @@ gen_assign_ib=(s:LGWord):>void=>$unsafe {
     let ib_saved_arr:LGWord=0
     let ib_saved_off:LGWord=0
     let ib_dst:LGWord=0
-    if nodes.ptr[s].op =? int32(47) and nodes.ptr[s].aux =? 0 {
+    if node_op(nodes.ptr[s].op_ext) =? int32(47) and nodes.ptr[s].aux =? 0 {
         ib_dst=ib_plain_local(LGWord(nodes.ptr[s].a))
         if ib_dst not=? 0 {
             let ib_src=ib_plain_local(LGWord(nodes.ptr[s].b))

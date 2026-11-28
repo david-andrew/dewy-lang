@@ -12,6 +12,7 @@ from p"partial_checks.dewy" import wait_partial
 from p"types.jo" import (T_BOOL is_union prune telem tkind union_members)
 from p"util.jo" import intern
 from p"diagnostic_exit.dewy" import fatal
+from p"node_store.dewy" import (node_aux2)
 
 ProgressWord:type=int64<overflow='wrap'>
 progress_source_types:dict<int64 array<int64>>=[]
@@ -161,7 +162,7 @@ progress_pattern=(p:ProgressWord t:ProgressWord whole:ProgressWord):>bool=>$unsa
     if k =? 'pvariant' {
         if is_union(whole) {
             let members=union_members(whole)
-            let index=ProgressWord(nodes.ptr[p].aux2)
+            let index=ProgressWord(node_aux2(nodes.ptr[p].op_ext))
             if index >=? 0 and index <? members.length {return can_coerce(0 t members[index])}
         }
         if standard_wait_outcome(t) =? intern("Closed") {return select_pattern_closes(p)}

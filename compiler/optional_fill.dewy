@@ -11,6 +11,7 @@ from p"path_narrowing.dewy" import (path_alias path_key)
 from p"sibling_types.jo" import (sibling_block)
 from p"types.jo" import (prune types)
 from p"util.jo" import (files pos_file)
+from p"node_store.dewy" import (node_op)
 
 FillWord:type=int64<overflow='wrap'>
 # Node.op stores the ordinal of Tok.eq. For an identifier, Node.aux stores the SK ordinal.
@@ -25,7 +26,7 @@ opt_fill_subject=(cond:FillWord):>FillWord=>$unsafe {
     let k=nodes.ptr[cond].kind
     let a:FillWord=0
     if k =? 'istype' and nodes.ptr[cond].aux =? -1 {a=FillWord(nodes.ptr[cond].a)}
-    else if k =? 'binary' and nodes.ptr[cond].op =? FILL_EQ and nodes.ptr[FillWord(nodes.ptr[cond].b)].kind =? 'none_lit' {a=FillWord(nodes.ptr[cond].a)}
+    else if k =? 'binary' and node_op(nodes.ptr[cond].op_ext) =? FILL_EQ and nodes.ptr[FillWord(nodes.ptr[cond].b)].kind =? 'none_lit' {a=FillWord(nodes.ptr[cond].a)}
     if a =? 0 or not files[pos_file(nodes.ptr[cond].pos)].is_dewy or types.ptr[prune(ntype(a))].kind not=? 'opt' {return 0}
     if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? FILL_LOCAL {
         if FillWord(locals.ptr[FillWord(nodes.ptr[a].sym)].flags) & LF_ALIAS not=? 0 {return 0}

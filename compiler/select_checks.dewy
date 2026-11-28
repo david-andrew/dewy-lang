@@ -22,7 +22,7 @@ from p"type_member_checks.dewy" import (handle_outcomes record_type_member)
 from p"facts.jo" import (fact_requests)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"lower_analysis.dewy" import checked_call_mutmask
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_fval node_sval node_with_aux2 node_with_op)
 from p"ownership.jo" import (ownership_consumers)
 from p"ownership_checks.dewy" import (NF_GLOBAL)
 from p"refine.jo" import (str_sets)
@@ -45,10 +45,10 @@ named_wait_qualifier=(q:SelectWord):>int64=>$unsafe {
 # `(@w).Closed`, `(@w).<string>`, `(@w).types` (decisions.md, batch 7): the type the named wait w
 # gives with that name, as a wait handle's member names its outcome; 0 when tn names no `@w`.
 named_wait_type=(tn:SelectWord):>int64=>$unsafe {
-    let s=named_wait_qualifier(SelectWord(nodes.ptr[tn].sval))
+    let s=named_wait_qualifier(SelectWord(node_sval(nodes.ptr[tn].op_ext)))
     if s =? 0 {return 0}
     let t=prune(SelectWord(locals.ptr[SelectWord(syms.ptr[s].ref)].type))
-    let q="({name_of(SelectWord(nodes.ptr[tn].sval))})"
+    let q="({name_of(SelectWord(node_sval(nodes.ptr[tn].op_ext)))})"
     if tkind(t) not=? 'fn_' {fatal(nodes.ptr[tn].pos "`{q}` names a named wait, `let w = @lines.receive`; {dt(t)} is not one")}
     let outcomes=prune(telem(t))
     let nm=SelectWord(nodes.ptr[tn].name)
@@ -101,7 +101,7 @@ select_check=(n:SelectWord):>void=>$unsafe {
         if d >? 0 and SelectWord(nodes.ptr[d].name) =? intern("__select_priority_order") {priority=select_wait_arg(kid(priority 0))}
     }
     if nodes.ptr[priority].kind =? 'str_lit' {
-        let word=SelectWord(nodes.ptr[priority].sval)
+        let word=SelectWord(node_sval(nodes.ptr[priority].op_ext))
         if word not=? intern("fair") and word not=? intern("index") {fatal(nodes.ptr[priority].pos "select priority is 'fair' or 'index'")}
     } else {
         let choices=str_set_of(ntype(priority))
@@ -345,7 +345,7 @@ select_conditions=(n:SelectWord expected:SelectWord):>int64=>$unsafe {
     let held=last_checked
     check_expr(bc_str("select needs a wait: every wait here can be turned off" pos) T_STR);
     let guard=mk('call' pos)
-    nodes.ptr[guard].aux2=int32(UNPACK_OBLIGATION)
+    nodes.ptr[guard].op_ext=node_with_aux2(nodes.ptr[guard].op_ext (int32(UNPACK_OBLIGATION)))
     check_intrinsic(guard int64(IN.assert) [held last_checked] 0);
     fact_requests.push(FactRequest(guard if cx >=? 0 {SelectWord(ctxs[cx].inst)} else {0}))
     let statement=mk('exprstmt' pos)
@@ -367,7 +367,7 @@ race_needs=(n:SelectWord):>int64=>$unsafe {
         add_flag(length NF_CHECKED)
         if total =? 0 {total=length} else {
             let sum=mk('binary' pos)
-            nodes.ptr[sum].op=int32(58)
+            nodes.ptr[sum].op_ext=node_with_op(nodes.ptr[sum].op_ext (int32(58)))
             nodes.ptr[sum].a=int32(total)
             nodes.ptr[sum].b=int32(length)
             check_expr(sum T_INT);
@@ -377,7 +377,7 @@ race_needs=(n:SelectWord):>int64=>$unsafe {
     let one=mk('int_lit' pos)
     nodes.ptr[one].ival=1
     let cmp=mk('binary' pos)
-    nodes.ptr[cmp].op=int32(74)
+    nodes.ptr[cmp].op_ext=node_with_op(nodes.ptr[cmp].op_ext (int32(74)))
     nodes.ptr[cmp].a=int32(total)
     nodes.ptr[cmp].b=int32(one)
     check_expr(cmp T_BOOL);
@@ -386,7 +386,7 @@ race_needs=(n:SelectWord):>int64=>$unsafe {
     check_expr(bc_str("{word} needs a call to run: the spread array may be empty" pos) T_STR);
     let message=last_checked
     check_intrinsic(n int64(IN.assert) [cmp message] 0);
-    nodes.ptr[n].aux2=int32(UNPACK_OBLIGATION)
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32(UNPACK_OBLIGATION)))
     fact_requests.push(FactRequest(n if cx >=? 0 {SelectWord(ctxs[cx].inst)} else {0}))
     last_checked=n
     T_VOID
@@ -422,11 +422,11 @@ source_qualifier=(p:SelectWord):>int64=>$unsafe {
     if nodes.ptr[p].kind not=? 'ptype' or nodes.ptr[p].a =? 0 {return 0}
     let tn=SelectWord(nodes.ptr[p].a)
     if nodes.ptr[tn].kind =? 'tunion' and nodes.ptr[tn].aux =? 11 {tn=kid(tn 0)}
-    if nodes.ptr[tn].kind not=? 'tname' or nodes.ptr[tn].sval =? 0 {return 0}
+    if nodes.ptr[tn].kind not=? 'tname' or node_sval(nodes.ptr[tn].op_ext) =? 0 {return 0}
     let selector=name_of(SelectWord(nodes.ptr[tn].name)) =? "<>"
     if nkids(tn) not=? 0 and not selector {return 0}
-    if named_wait_qualifier(SelectWord(nodes.ptr[tn].sval)) not=? 0 {return SelectWord(nodes.ptr[tn].sval)}
-    let s=lookup(SelectWord(nodes.ptr[tn].sval))
+    if named_wait_qualifier(SelectWord(node_sval(nodes.ptr[tn].op_ext))) not=? 0 {return SelectWord(node_sval(nodes.ptr[tn].op_ext))}
+    let s=lookup(SelectWord(node_sval(nodes.ptr[tn].op_ext)))
     if s =? 0 or (syms.ptr[s].kind not=? 'local' and syms.ptr[s].kind not=? 'global') {return 0}
     let t:SelectWord=0
     if syms.ptr[s].kind =? 'local' {t=SelectWord(locals.ptr[SelectWord(syms.ptr[s].ref)].type)} else {
@@ -434,7 +434,7 @@ source_qualifier=(p:SelectWord):>int64=>$unsafe {
         t=SelectWord(globals.ptr[SelectWord(syms.ptr[s].ref)].type)
     }
     if t =? 0 or handle_outcomes(t) =? 0 or not selector and record_type_member(t SelectWord(nodes.ptr[tn].name)) not=? 0 {return 0}
-    SelectWord(nodes.ptr[tn].sval)
+    SelectWord(node_sval(nodes.ptr[tn].op_ext))
 }
 # (the variable a wait's receiver path starts from, its name; 0 for another form)
 source_receiver=(n0:SelectWord):>int64=>$unsafe {
@@ -790,7 +790,7 @@ select_poll=(c0:SelectWord):>bool=>$unsafe {
     let last=kid(c nkids(c) - 2)
     if tkind(ntype(last)) =? 'fn_' {return false}
     loop nodes.ptr[last].kind =? 'conv' {last=SelectWord(nodes.ptr[last].a)}
-    nodes.ptr[last].kind =? 'int_lit' and nodes.ptr[last].ival =? 0 or nodes.ptr[last].kind =? 'float_lit' and nodes.ptr[last].fval =? 0.0
+    nodes.ptr[last].kind =? 'int_lit' and nodes.ptr[last].ival =? 0 or nodes.ptr[last].kind =? 'float_lit' and node_fval(nodes.ptr[last].op_ext) =? 0.0
 }
 # (does pattern p take the type named name, `<Timeout>`?)
 select_pattern_named=(p:SelectWord name:string):>bool=>$unsafe {

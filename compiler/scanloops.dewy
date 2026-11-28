@@ -16,6 +16,7 @@ from p"lower_group.dewy" import (gen_borrowed gen_expr gen_while_scalar local_pl
 from p"lower_storage.dewy" import (arr_len els endc iff stmt_begin stmt_end write_place)
 from p"types.jo" import (T_INT T_U8 prune tkind types)
 from p"type_ops.dewy" import (fixed_len)
+from p"node_store.dewy" import (node_op)
 
 ScanWord:type=int64<overflow='wrap'>
 scan_local=(n:ScanWord):>ScanWord=>$unsafe {
@@ -30,12 +31,12 @@ scan_word=(n:ScanWord):>bool=>{
 scan_inc=(s:ScanWord l:ScanWord):>bool=>$unsafe {
     if nodes.ptr[s].kind not=? 'assign' or scan_local(ScanWord(nodes.ptr[s].a)) not=? l {return false}
     let rhs=ScanWord(nodes.ptr[s].b)
-    if nodes.ptr[s].op =? int32(48) {
+    if node_op(nodes.ptr[s].op_ext) =? int32(48) {
         return nodes.ptr[rhs].kind =? 'int_lit' and nodes.ptr[rhs].ival =? 1
     }
-    if nodes.ptr[s].op not=? int32(47) {return false}
+    if node_op(nodes.ptr[s].op_ext) not=? int32(47) {return false}
     if nodes.ptr[rhs].kind =? 'conv' and nodes.ptr[rhs].aux =? int32(int64(CV.fixed_store)) {rhs=ScanWord(nodes.ptr[rhs].a)}
-    if nodes.ptr[rhs].kind not=? 'binary' or nodes.ptr[rhs].aux not=? 0 or nodes.ptr[rhs].op not=? int32(58) {return false}
+    if nodes.ptr[rhs].kind not=? 'binary' or nodes.ptr[rhs].aux not=? 0 or node_op(nodes.ptr[rhs].op_ext) not=? int32(58) {return false}
     let one=ScanWord(nodes.ptr[rhs].b)
     scan_local(ScanWord(nodes.ptr[rhs].a)) =? l and nodes.ptr[one].kind =? 'int_lit' and nodes.ptr[one].ival =? 1
 }
@@ -86,7 +87,7 @@ gen_scan_loop=(s:ScanWord):>bool=>$unsafe {
         increment=kid(body 1)
     }
     else {return false}
-    if nodes.ptr[bound].kind not=? 'binary' or nodes.ptr[bound].aux not=? 0 or nodes.ptr[bound].op not=? int32(71) {return false}
+    if nodes.ptr[bound].kind not=? 'binary' or nodes.ptr[bound].aux not=? 0 or node_op(nodes.ptr[bound].op_ext) not=? int32(71) {return false}
     let index=ScanWord(nodes.ptr[bound].a)
     let stop=ScanWord(nodes.ptr[bound].b)
     let l=scan_local(index)
@@ -99,7 +100,7 @@ gen_scan_loop=(s:ScanWord):>bool=>$unsafe {
     let negate=nodes.ptr[test_node].kind =? 'not_'
     if negate {test_node=ScanWord(nodes.ptr[test_node].a)}
     if nodes.ptr[test_node].kind =? 'binary' and nodes.ptr[test_node].aux =? 0 {
-        let op=cx_token(nodes.ptr[test_node].op)
+        let op=cx_token(node_op(nodes.ptr[test_node].op_ext))
         if op =? 'eq' or op =? 'ne' {
             let a=ScanWord(nodes.ptr[test_node].a)
             let b=ScanWord(nodes.ptr[test_node].b)
@@ -248,7 +249,7 @@ scan_domain=(n:ScanWord l:ScanWord @state:array<int64>):>array<int64>=>$unsafe {
     }
     if k not=? 'binary' and k not=? 'and_' and k not=? 'or_' {return []}
     if k =? 'binary' and nodes.ptr[n].aux not=? 0 {return []}
-    let op=cx_token(nodes.ptr[n].op)
+    let op=cx_token(node_op(nodes.ptr[n].op_ext))
     if k =? 'binary' and op not=? 'amp' and op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return []}
     let left=scan_domain(ScanWord(nodes.ptr[n].a) l @state)
     if left.length not=? 256 {return []}

@@ -20,6 +20,7 @@ from p"refine_transfers.dewy" import (ref_assume ref_check)
 from p"sequence_selectors.dewy" import fact_sequence_classify
 from p"types.jo" import (T_F32 T_FLOAT T_MATH_INT is_int prune structs telem tkind types)
 from p"util.jo" import (files intern pos_file pos_in_lib)
+from p"node_store.dewy" import (node_aux2 node_with_aux2)
 
 NdQueryWord:type=int64<overflow='wrap'>
 
@@ -54,7 +55,7 @@ fact_nd_identity=(f:NdQueryWord):>bool=>$unsafe {
         if count =? 2 {
             # Dewy gives a value parameter a private local at entry.
             let binding=kid(body 0)
-            if nodes.ptr[binding].kind not=? 'vardecl' or nodes.ptr[binding].aux2 not=? 1 or nkids(binding) not=? 0 {return false}
+            if nodes.ptr[binding].kind not=? 'vardecl' or node_aux2(nodes.ptr[binding].op_ext) not=? 1 or nkids(binding) not=? 0 {return false}
             let incoming=NdQueryWord(nodes.ptr[binding].b)
             if nodes.ptr[incoming].kind not=? 'ident' or nodes.ptr[incoming].aux not=? int32(1) or NdQueryWord(nodes.ptr[incoming].sym) not=? param {return false}
             value=NdQueryWord(nodes.ptr[binding].sym)
@@ -252,7 +253,7 @@ nd_query_mutable_check=(n:NdQueryWord @s:FactState values:array<int64>):>void=>$
             let c=mk('conv' nodes.ptr[arg].pos)
             nodes[c].a=int32<overflow='wrap'>(arg)
             nodes[c].aux=int32(int64(CV.refinement))
-            nodes[c].aux2=int32<overflow='wrap'>(contract)
+            nodes[c].op_ext=node_with_aux2(nodes[c].op_ext (int32<overflow='wrap'>(contract)))
             nodes[c].type=int32<overflow='wrap'>(representation_type(contract))
             checks.push(c)
         }

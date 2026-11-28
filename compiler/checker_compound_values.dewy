@@ -11,7 +11,7 @@ from p"decimals.jo" import (decimal_target)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"expr.jo" import (CV last_checked)
 from p"lexer_helpers.dewy" import (tok_text)
-from p"node_store.dewy" import (NK)
+from p"node_store.dewy" import (NK node_aux2 node_op node_sval node_with_op)
 from p"refine_metadata.dewy" import (representation_type)
 from p"types.jo" import (is_float is_int prune)
 from p"unit_ops.dewy" import (quantity_float_update quantity_is_delta quantity_literal_syntax quantity_point)
@@ -32,21 +32,21 @@ compound_op=(raw:int64):>int64=>{
 # Dewy's arithmetic helpers implement floor division, exact division and power.
 # Keep the update as an assignment until its place and indices are resolved.
 compound_value=(s:CompoundWord left:CompoundWord right:CompoundWord):>CompoundWord=>{
-    if nodes[s].sval not=? 0 {
-        let n=bc_call(name_of(CompoundWord(nodes[s].sval)) [left right] nodes[s].pos)
+    if node_sval(nodes[s].op_ext) not=? 0 {
+        let n=bc_call(name_of(CompoundWord(node_sval(nodes[s].op_ext))) [left right] nodes[s].pos)
         if has_flag(s NF_BROADCAST) {add_flag(n NF_BROADCAST)}
         return n
     }
     let kind:NK='binary'
-    if nodes[s].aux2 =? 1 and not has_flag(s NF_BROADCAST) {
-        kind=if nodes[s].op =? 53 {'and_'} else {'or_'}
+    if node_aux2(nodes[s].op_ext) =? 1 and not has_flag(s NF_BROADCAST) {
+        kind=if node_op(nodes[s].op_ext) =? 53 {'and_'} else {'or_'}
     }
     let n=mk(kind nodes[s].pos)
-    nodes[n].op=CompoundI32(compound_op(CompoundWord(nodes[s].op)))
+    nodes[n].op_ext=node_with_op(nodes[n].op_ext (CompoundI32(compound_op(CompoundWord(node_op(nodes[s].op_ext))))))
     if has_flag(s NF_BROADCAST) {
-        let text=tok_text(cx_token(CompoundWord(nodes[n].op)))
+        let text=tok_text(cx_token(CompoundWord(node_op(nodes[n].op_ext))))
         nodes[n].aux=CompoundI32((text as array<uint8>)[0])
-        nodes[n].op=85 # Tok.dotop
+        nodes[n].op_ext=node_with_op(nodes[n].op_ext 85) # Tok.dotop
     }
     nodes[n].a=CompoundI32(left)
     nodes[n].b=CompoundI32(right)
@@ -60,7 +60,7 @@ compound_checked=(s:CompoundWord left:CompoundWord right:CompoundWord target:Com
     if literal {updating_right=right}
     let updating_lhs = @int_update_lhs
     # A numeric update may need the original binding to explain a storage mismatch.
-    if nodes[left].kind =? 'ident' and (nodes[left].aux =? 1 or nodes[left].aux =? 2) and is_int(representation_type(prune(target))) and nodes[s].op not=? 51 {
+    if nodes[left].kind =? 'ident' and (nodes[left].aux =? 1 or nodes[left].aux =? 2) and is_int(representation_type(prune(target))) and node_op(nodes[s].op_ext) not=? 51 {
         updating_lhs=mk('ident' nodes[left].pos)
         nodes[updating_lhs].aux=nodes[left].aux
         nodes[updating_lhs].sym=nodes[left].sym
@@ -80,7 +80,7 @@ compound_checked=(s:CompoundWord left:CompoundWord right:CompoundWord target:Com
     let t=prune(target)
     if decimal_target not=? 0 and decimal_float_write(result t) {return last_checked}
     quantity_float_update(s target result)
-    if nodes[s].sval not=? 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))) {
+    if node_sval(nodes[s].op_ext) not=? 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))) {
         if result not=? t {wrap_conv(last_checked if is_int(t) {CV.int_} else {CV.float_} t)}
     }
     let r=coerce(last_checked target)

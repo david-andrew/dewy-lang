@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import (NK Node)
+from p"node_store.dewy" import (NK Node node_aux2)
 from p"source_types.dewy" import SrcFile
 from p"checker_types.dewy" import (TypeInfo StructInfo Field)
 from p"checker_state.dewy" import (Local Global FnInst)
@@ -102,7 +102,7 @@ ownership_parameters=():>void=>$unsafe {
         if body =? 0 {continue}
         loop i in [0..oc_nkids(body)) {
             let s=oc_kid(body i)
-            if oc_nodes[0].ptr[s].kind not=? 'vardecl' or oc_nodes[0].ptr[s].aux2 not=? 1 {break}
+            if oc_nodes[0].ptr[s].kind not=? 'vardecl' or node_aux2(oc_nodes[0].ptr[s].op_ext) not=? 1 {break}
             if oc_nkids(s) >? 0 {continue}
             let l=CWord(oc_nodes[0].ptr[s].sym)
             if not ownership_type(CWord(oc_locals[0].ptr[l].type)) {continue}
@@ -199,7 +199,7 @@ ownership_validate_node=(n:CWord f:CWord):>void=>$unsafe {
     }
     if k =? 'vardecl' and CWord(oc_nodes[0].ptr[n].flags) & NF_GLOBAL =? 0 and oc_nkids(n) =? 0 and oc_nodes[0].ptr[n].sym >? 0 {
         let lt=CWord(oc_locals[0].ptr[CWord(oc_nodes[0].ptr[n].sym)].type)
-        if ownership_type(lt) and oc_nodes[0].ptr[n].b =? 0 and oc_nodes[0].ptr[n].aux2 not=? 1791 and ow_kind(lt) not=? 'array' and ow_kind(lt) not=? 'opt' and not ow_is_map(lt) {
+        if ownership_type(lt) and oc_nodes[0].ptr[n].b =? 0 and node_aux2(oc_nodes[0].ptr[n].op_ext) not=? 1791 and ow_kind(lt) not=? 'array' and ow_kind(lt) not=? 'opt' and not ow_is_map(lt) {
             oc_fail(n "an owner requires completed construction before registration")
         }
     }
@@ -213,7 +213,7 @@ ownership_validate_node=(n:CWord f:CWord):>void=>$unsafe {
         }
     }
     # 1788: compiler settings cleanup; like task cleanup (17), it borrows no owner.
-    if k =? 'defer_' and oc_nodes[0].ptr[n].aux2 not=? 17 and oc_nodes[0].ptr[n].aux2 not=? 1788 and CWord(oc_fns[0].ptr[f].kind) not=? FK_GENERATOR and f in? oc[0].functions[0] and ownership_defer_conflict(f) {
+    if k =? 'defer_' and node_aux2(oc_nodes[0].ptr[n].op_ext) not=? 17 and node_aux2(oc_nodes[0].ptr[n].op_ext) not=? 1788 and CWord(oc_fns[0].ptr[f].kind) not=? FK_GENERATOR and f in? oc[0].functions[0] and ownership_defer_conflict(f) {
         oc_fail(n "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
     }
     if k =? 'conv' and CWord(oc_nodes[0].ptr[n].aux) =? oc[0].cv_copy and ownership_type(t) and not ownership_copyable(t) {

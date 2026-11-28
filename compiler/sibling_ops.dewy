@@ -17,7 +17,7 @@ from p"expr.jo" import (cur_assign)
 from p"path_narrowing.dewy" import (narrow_local)
 from p"literal_context.dewy" import (is_lit)
 from p"checks_builders.dewy" import (bc_int)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_op node_sval)
 from p"sibling_types.jo" import (SIBLING_CAP sibling_block sibling_extending sibling_flow sibling_flow_member sibling_flow_next sibling_index sibling_known sibling_literals sibling_pending)
 from p"types.jo" import (is_union prune targ tkind type_eq types union_members)
 from p"type_ops.dewy" import (mk_array mk_tuple mk_union union_index)
@@ -235,7 +235,7 @@ sibling_syntax_type=(v:SiblingWord):>SiblingWord=>$unsafe {
     let k=nodes.ptr[v].kind
     let callee:SiblingWord=0
     if k =? 'call' or k =? 'index' {callee=SiblingWord(nodes.ptr[v].a)}
-    if callee =? 0 or nodes.ptr[callee].kind not=? 'ident' or nodes.ptr[callee].sval not=? 0 {return 0}
+    if callee =? 0 or nodes.ptr[callee].kind not=? 'ident' or node_sval(nodes.ptr[callee].op_ext) not=? 0 {return 0}
     let s=lookup(SiblingWord(nodes.ptr[callee].name))
     if s =? 0 {return 0}
     let sk=syms.ptr[s].kind
@@ -258,7 +258,7 @@ sibling_scalar_scan=(n:SiblingWord name:SiblingWord in_fn:bool @out:array<int64>
     if k =? 'ident' and SiblingWord(nodes.ptr[n].name) =? name and has_flag(n NF_MUT) {escapes=true}
     if k =? 'assign' and nodes.ptr[SiblingWord(nodes.ptr[n].a)].kind =? 'ident' and SiblingWord(nodes.ptr[SiblingWord(nodes.ptr[n].a)].name) =? name {
         if in_fn {escapes=true}
-        if nodes.ptr[n].op =? int32(47) {
+        if node_op(nodes.ptr[n].op_ext) =? int32(47) {
             let t=sibling_syntax_type(SiblingWord(nodes.ptr[n].b))
             if t not=? 0 {out.push(t)}
         }
@@ -350,7 +350,7 @@ sibling_root=(l0:SiblingWord):>SiblingWord=>{
 # `s = v` checked, s followed: from here it holds v's member (`literal`: the record type its
 # syntax names, `Square[...]`, taken before the check gave the literal the union's type).
 sibling_flow_assign=(s:SiblingWord literal:SiblingWord):>void=>$unsafe {
-    if nodes.ptr[s].op not=? int32(47) {return}
+    if node_op(nodes.ptr[s].op_ext) not=? int32(47) {return}
     let lhs=SiblingWord(nodes.ptr[s].a)
     if nodes.ptr[lhs].kind not=? 'ident' or nodes.ptr[lhs].aux not=? int32(1) {return}
     let l=SiblingWord(nodes.ptr[lhs].sym)

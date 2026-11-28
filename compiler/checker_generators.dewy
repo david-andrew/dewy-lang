@@ -28,6 +28,7 @@ from p"sibling_types.jo" import (sibling_block sibling_index)
 from p"types.jo" import (T_BOOL T_INT T_NEVER T_NONE T_VOID fields has_var is_union prune structs targ telem tkind type_eq types union_members variants)
 from p"type_ops.dewy" import (dt is_managed is_values mk_generator mk_union mk_var unify zonk)
 from p"util.jo" import (intern name_of)
+from p"node_store.dewy" import (node_aux2 node_sval node_with_aux2 node_with_sval)
 
 GenWord:type=int64<overflow='wrap'>
 GenI32:type=int32<overflow='wrap'>
@@ -284,7 +285,7 @@ gen_prep_block=(b:GenWord label:GenWord has_loop_label:bool want_values:bool sha
             continue
         }
         if k =? 'while_' or k =? 'for_' {
-            let sh=shadowed or (label not=? 0 and GenWord(nodes.ptr[s].sval) =? label)
+            let sh=shadowed or (label not=? 0 and GenWord(node_sval(nodes.ptr[s].op_ext)) =? label)
             gen_prep_block(GenWord(nodes.ptr[s].b) label has_loop_label want_values sh)
             out.push(s)
             continue
@@ -363,18 +364,18 @@ check_lazy=(n:GenWord expected:GenWord):>GenWord=>$unsafe {
     # Handle `$label lazy ...`:
     # If the lazy body is a single top-level loop with no label of its own,
     # attach the label to that loop so both `continue $label` and `break $label` work.
-    let label=GenWord(nodes.ptr[n].sval)
+    let label=GenWord(node_sval(nodes.ptr[n].op_ext))
     let has_loop_label=false
     if label not=? 0 and nkids(body) =? 1 {
         let k0=kid(body 0)
         let k0k=nodes.ptr[k0].kind
-        if (k0k =? 'for_' or k0k =? 'while_') and nodes.ptr[k0].sval =? 0 {
-            nodes[k0].sval=GenI32(label)
+        if (k0k =? 'for_' or k0k =? 'while_') and node_sval(nodes.ptr[k0].op_ext) =? 0 {
+            nodes[k0].op_ext=node_with_sval(nodes[k0].op_ext (GenI32(label)))
             has_loop_label=true
         } else if k0k =? 'block' and has_flag(k0 NF_LOOP_SETUP) and nkids(k0) >? 0 {
             let wl=kid(k0 nkids(k0) - 1)
-            if (nodes.ptr[wl].kind =? 'for_' or nodes.ptr[wl].kind =? 'while_') and nodes.ptr[wl].sval =? 0 {
-                nodes[wl].sval=GenI32(label)
+            if (nodes.ptr[wl].kind =? 'for_' or nodes.ptr[wl].kind =? 'while_') and node_sval(nodes.ptr[wl].op_ext) =? 0 {
+                nodes[wl].op_ext=node_with_sval(nodes[wl].op_ext (GenI32(label)))
                 has_loop_label=true
             }
         }
@@ -549,10 +550,10 @@ check_lazy=(n:GenWord expected:GenWord):>GenWord=>$unsafe {
 
     if frame.straight {
         nodes[n].aux=1
-        nodes[n].aux2=GenI32(frame.exact_count)
+        nodes[n].op_ext=node_with_aux2(nodes[n].op_ext (GenI32(frame.exact_count)))
     } else {
         nodes[n].aux=0
-        nodes[n].aux2=0
+        nodes[n].op_ext=node_with_aux2(nodes[n].op_ext 0)
     }
     let gen_t=mk_generator(elem_t)
     nodes[n].type=GenI32(gen_t)
@@ -1076,7 +1077,7 @@ gen_spread_fresh=(c:GenWord call:GenWord):>GenWord=>$unsafe {
     let pos=nodes.ptr[c].pos
     let k=nodes.ptr[c].kind
     if k =? 'lazy_' {
-        if nodes.ptr[c].aux =? 1 {return GenWord(nodes.ptr[c].aux2)}
+        if nodes.ptr[c].aux =? 1 {return GenWord(node_aux2(nodes.ptr[c].op_ext))}
         fatal(pos "cannot spread this generator into fixed parameters because its item count is not statically fixed; use a multivalue `(a b)` or collect it with `[g...]`")
     }
     if k =? 'ident' and nodes.ptr[c].aux =? int32(1) {
@@ -1098,7 +1099,7 @@ gen_spread_fresh=(c:GenWord call:GenWord):>GenWord=>$unsafe {
                 }
                 if not used {
                     gen_local_fresh.remove(l);
-                    return GenWord(nodes.ptr[lz].aux2)
+                    return GenWord(node_aux2(nodes.ptr[lz].op_ext))
                 }
             }
         }
@@ -1227,7 +1228,7 @@ gen_fuse_factory_param_idx=(cf:GenWord outer_l:GenWord):>int64=>$unsafe {
     let body=GenWord(fns.ptr[cf].body)
     loop i in [0..nkids(body)) {
         let s=kid(body i)
-        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
         if GenWord(nodes.ptr[s].sym) =? target {
             let rhs=GenWord(nodes.ptr[s].b)
             if rhs >? 0 and nodes.ptr[rhs].kind =? 'ident' and nodes.ptr[rhs].aux =? int32(1) {
@@ -1255,7 +1256,7 @@ gen_fuse_factory_lazy=(c:GenWord):>int64=>$unsafe {
     let si:int64=0
     loop si <? nkids(body) {
         let st=kid(body si)
-        if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].aux2 =? 1 {si += 1}
+        if nodes.ptr[st].kind =? 'vardecl' and node_aux2(nodes.ptr[st].op_ext) =? 1 {si += 1}
         else {break}
     }
     if si not=? nkids(body) - 1 {return 0}

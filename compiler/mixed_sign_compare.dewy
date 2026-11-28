@@ -6,7 +6,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_int bc_let bc_stmt)
 from p"coerce_expression.dewy" import (coerce)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_op node_with_op)
 from p"refine_metadata.dewy" import (representation_type)
 from p"types.jo" import (prune types)
 
@@ -31,7 +31,7 @@ mixed_read=(n:MixedWord depth:MixedWord):>bool=>$unsafe {
 # sign (b is cast to ta), 0 when it is the guarded compare (its signed side converted),
 # else the type of n checked as the guarded form.
 mixed_sign_compare=(n:MixedWord a:MixedWord b:MixedWord ta:MixedWord tb:MixedWord):>int64=>$unsafe {
-    let op=cx_token_values[MixedWord(nodes.ptr[n].op)]
+    let op=cx_token_values[MixedWord(node_op(nodes.ptr[n].op_ext))]
     let ua=mixed_unsigned(ta)
     if ua =? mixed_unsigned(tb) {return -1}
     let s=if ua {b} else {a}
@@ -59,7 +59,7 @@ mixed_sign_compare=(n:MixedWord a:MixedWord b:MixedWord ta:MixedWord tb:MixedWor
     let nonnegative=if ua {op =? 'lt' or op =? 'le' or op =? 'eq'} else {op =? 'gt' or op =? 'ge' or op =? 'eq'}
     let guard=bc_bin((if nonnegative {'ge'} else {'lt'}) again bc_int(0 pos) pos)
     let inner=bc_bin(op x y pos)
-    nodes.ptr[inner].op=nodes.ptr[n].op
+    nodes.ptr[inner].op_ext=node_with_op(nodes.ptr[inner].op_ext (node_op(nodes.ptr[n].op_ext)))
     mixed_inner[inner]=true
     let both=Node[kind=(if nonnegative {'and_'} else {'or_'}) pos=pos a=int32(guard) b=int32(inner)]
     if stmts.length =? 0 {nodes.ptr[n]=both}

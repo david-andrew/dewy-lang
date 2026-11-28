@@ -9,7 +9,7 @@ from p"directive_ops.dewy" import (dir_assume_local_asserts)
 from p"expr.jo" import (IN)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED LF_VALUEPARAM fns lib_dir locals modules)
 from p"ast.jo" import (NF_EXTERN NF_U64 RANGE_EXHAUSTION has_flag kid lists nkids nodes)
-from p"node_store.dewy" import (NK)
+from p"node_store.dewy" import (NK node_aux2 node_sval)
 from p"types.jo" import (T_INT T_MATH_INT T_STR is_int tkind)
 from p"draw_context.jo" import (draw_context_guard draw_required)
 from p"effect_control.dewy" import (effect_name)
@@ -137,9 +137,9 @@ effect_panic_note=(f:PanicWord n:PanicWord what:string provisional:bool=false):>
 # The exhaustive-match fallback cannot run. A marked range check is decided
 # by facts as an obligation; message text never exempts an exhaustion panic.
 panic_synthesized=(n:PanicWord):>bool=>$unsafe {
-    if nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) {return true}
+    if node_aux2(nodes.ptr[n].op_ext) =? int32(RANGE_EXHAUSTION) {return true}
     if nkids(n) =? 0 or nodes.ptr[kid(n 0)].kind not=? 'str_lit' {return false}
-    return name_of(PanicWord(nodes.ptr[kid(n 0)].sval)) =? "no match arm matched"
+    return name_of(PanicWord(node_sval(nodes.ptr[kid(n 0)].op_ext))) =? "no match arm matched"
 }
 # A string argument's possible texts where the compiler knows them: a literal, a
 # binding written once by its declaration (its initial value), or a value whose
@@ -155,7 +155,7 @@ panic_literal_texts=(e0:PanicWord):>array<string>?=>$unsafe {
         }
         loop nodes.ptr[e].kind =? 'conv' {e=PanicWord(nodes.ptr[e].a)}
     }
-    if nodes.ptr[e].kind =? 'str_lit' and nkids(e) =? 0 and nodes.ptr[e].sval >? 0 {return [name_of(PanicWord(nodes.ptr[e].sval))]}
+    if nodes.ptr[e].kind =? 'str_lit' and nkids(e) =? 0 and node_sval(nodes.ptr[e].op_ext) >? 0 {return [name_of(PanicWord(node_sval(nodes.ptr[e].op_ext)))]}
     let id=str_set_of(ntype(e))
     if id <=? 0 {return none}
     let texts:array<string>=[]
@@ -553,7 +553,7 @@ effect_panic_reason=(f:PanicWord):>string=>$unsafe {
     if what =? "" and nodes.ptr[n].kind =? 'intrinsic' {
         let id=nodes.ptr[n].aux as IN
         what=if id =? IN.runtime_assert {"`$runtime_assert`"} else if id =? IN.unreachable {"unreachable"} else if id =? IN.assert {"assert"} else {"panic"}
-        if nkids(n) >? 0 and nodes.ptr[kid(n 0)].kind =? 'str_lit' and nodes.ptr[kid(n 0)].sval >? 0 and nkids(kid(n 0)) =? 0 {what="{what} \"{name_of(PanicWord(nodes.ptr[kid(n 0)].sval))}\""}
+        if nkids(n) >? 0 and nodes.ptr[kid(n 0)].kind =? 'str_lit' and node_sval(nodes.ptr[kid(n 0)].op_ext) >? 0 and nkids(kid(n 0)) =? 0 {what="{what} \"{name_of(PanicWord(node_sval(nodes.ptr[kid(n 0)].op_ext)))}\""}
     }
     if what =? "" {return chain}
     let at=pos_str(nodes.ptr[n].pos)

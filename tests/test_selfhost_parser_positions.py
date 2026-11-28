@@ -33,7 +33,7 @@ main = ():
     result = index_end(47)
     call = int(nodes[result].a); one = int(nodes[result].b)
     callee = int(nodes[call].a); cloned = kid(call, 0)
-    print("end:{nodes[result].kind == .binary}:{nodes[result].op == i32(int(Tok.minus))}:{nodes[result].pos}:{nodes[call].kind == .call}:{name_of(int(nodes[callee].name))}:{cloned != original}:{nodes[cloned].name == nodes[original].name}:{nodes[one].kind == .int_lit}:{nodes[one].ival}:{(int(nodes[one].flags) & NF_LITERAL) != 0}")
+    print("end:{nodes[result].kind == .binary}:{node_op(nodes[result].op_ext) == i32(int(Tok.minus))}:{nodes[result].pos}:{nodes[call].kind == .call}:{name_of(int(nodes[callee].name))}:{cloned != original}:{nodes[cloned].name == nodes[original].name}:{nodes[one].kind == .int_lit}:{nodes[one].ival}:{(int(nodes[one].flags) & NF_LITERAL) != 0}")
     print("original:{nodes[original].pos}:{name_of(int(nodes[original].name))}")
 '''
 

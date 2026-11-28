@@ -7,6 +7,7 @@ from p"ast.jo" import (nodes nkids nkids2 kid kid2 has_flag NF_GENERIC)
 from p"check.jo" import (fns locals modules LF_ASSIGNED LF_ADDR LF_EXPOSED LF_SHARED LF_MUTPARAM)
 from p"copy_ops.dewy" import (copy_consumes)
 from p"util.jo" import (files pos_file name_of)
+from p"node_store.dewy" import (node_aux2 node_d)
 # Node.aux retains its existing symbol-kind encoding (local 1, global 2).
 CBWord:type=int64<overflow='wrap'>
 let stack_closure_params:dict<int64 bool>=dict<int64 bool>()
@@ -32,7 +33,7 @@ closure_invoked_only=(n:CBWord l:CBWord called:bool=false):>bool=>$unsafe {
     if not closure_invoked_only(CBWord(nodes.ptr[n].b) l) {return false}
     if k not=? 'for_' {
         if not closure_invoked_only(CBWord(nodes.ptr[n].c) l) {return false}
-        if k not=? 'partial' and not closure_invoked_only(CBWord(nodes.ptr[n].d) l) {return false}
+        if k not=? 'partial' and not closure_invoked_only(CBWord(node_d(nodes.ptr[n].op_ext)) l) {return false}
     }
     loop i in [0..nkids(n)) {
         let arg=kid(n i)
@@ -63,7 +64,7 @@ closure_borrow_param=(f:CBWord i:CBWord):>bool=>$unsafe {
     }
     loop j in [0..nkids(body)) {
         let s=kid(body j)
-        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
         let iv:CBWord=CBWord(nodes.ptr[s].b)
         if iv =? 0 or nodes.ptr[iv].kind not=? 'ident' or nodes.ptr[iv].aux not=? 1 or nodes.ptr[iv].sym not=? int32(p) {continue}
         let l:CBWord=CBWord(nodes.ptr[s].sym)

@@ -14,6 +14,7 @@ from p"type_ops.dewy" import (dt)
 from p"types.jo" import (structs tkind types)
 from p"type_inference.dewy" import (tu_prune tu_struct_targ)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_aux2 node_mod node_sval)
 
 OverloadDiagWord:type=int64<overflow='wrap'>
 
@@ -47,7 +48,7 @@ call_tie_error=(n:OverloadDiagWord name:OverloadDiagWord args:array<int64> cands
             if ai >? 0 {ats="{ats}, "}
             if nodes.ptr[unnamed(a0)].type not=? 0 {ats="{ats}{dt(ntype(unnamed(a0)))}"}
         }
-        if nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) and dewy_at(nodes.ptr[n].pos) {
+        if node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL) and dewy_at(nodes.ptr[n].pos) {
             fatal(nodes.ptr[n].pos "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes.ptr[cands[best].decl].pos)} and {pos_str(nodes.ptr[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:(b:string:>string) = @{name_of(name)}(...)`")
         }
         fatal(nodes.ptr[n].pos "ambiguous call to '{name_of(name)}({ats})': candidates at {pos_str(nodes.ptr[cands[best].decl].pos)} and {pos_str(nodes.ptr[cd.decl].pos)}")
@@ -60,9 +61,9 @@ written_int_param=(d:OverloadDiagWord i:OverloadDiagWord):>bool=>$unsafe {
     if i >=? nkids(d) {return false}
     let tn=OverloadDiagWord(nodes.ptr[kid(d i)].a)
     if tn not=? 0 and nodes.ptr[tn].kind =? 'trefined' {tn=OverloadDiagWord(nodes.ptr[tn].a)}
-    if tn =? 0 or nodes.ptr[tn].kind not=? 'tname' or nkids(tn) not=? 0 or nodes.ptr[tn].sval not=? 0 {return false}
+    if tn =? 0 or nodes.ptr[tn].kind not=? 'tname' or nkids(tn) not=? 0 or node_sval(nodes.ptr[tn].op_ext) not=? 0 {return false}
     let name=OverloadDiagWord(nodes.ptr[tn].name)
     let s=universe.get(name) ?? 0
-    if s =? 0 or syms.ptr[s].kind not=? 'type_' or module_lookup(OverloadDiagWord(nodes.ptr[d].mod) name) not=? s {return false}
+    if s =? 0 or syms.ptr[s].kind not=? 'type_' or module_lookup(OverloadDiagWord(node_mod(nodes.ptr[d].op_ext)) name) not=? s {return false}
     tkind(OverloadDiagWord(syms.ptr[s].ref)) =? 'int_'
 }

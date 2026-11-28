@@ -72,7 +72,7 @@ MAIN = r'''main = ():
     mutd = cr_decl([T_INT], mask=1); assert(fns_param_hint([mutd], 0, 1) == 0)
     assert(fns_argument_hints([d], [a, b]) == [T_INT, T_INT])
     assert(fns_argument_hints([d, e], [a, b]) == [T_INT, 0])
-    generic = cr_decl([T_INT], ntp=1); nodes[generic].nlist2 = 1
+    generic = cr_decl([T_INT], ntp=1); nodes[generic].op_ext = node_with_nlist2(nodes[generic].op_ext, i32(1))
     assert(fns_argument_hints([generic], [a], 0, [T_BOOL, T_INT]) == [0])
     set_list(call, [a, b]); assert(values_argument_hints(call, 0) == [T_INT, T_INT])
     # Fast no-expansion path and grouping, with sink restoration through recursion.

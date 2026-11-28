@@ -22,6 +22,7 @@ from p"poly_closure.jo" import (poly_families)
 from p"refine_metadata.dewy" import (representation_type refine_read_type)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
 from p"effect_contracts.dewy" import (callable_base)
+from p"node_store.dewy" import (node_aux2 node_with_aux2)
 # O(arguments), preserving call order and retaining indices across arena growth.
 HVWord:type=int64<overflow='wrap'>
 value_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>$unsafe {
@@ -65,8 +66,8 @@ value_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>$un
     nodes.ptr[n].sym = 0
     nodes.ptr[n].aux = 1
     if types.ptr[ft].kind =? 'cfn' {nodes.ptr[n].aux = 4}
-    if has_hole(args) or nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) {
-        nodes.ptr[n].aux2 = 0
+    if has_hole(args) or node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL) {
+        nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
         if types.ptr[ft].kind =? 'cfn' {value_call_error(n ft args 3)}
         let pts:array<int64>=[]
         loop i in [0..na) {pts.push(targ(ft i))}
@@ -106,8 +107,8 @@ value_call_defaults=(n:int64 callee:int64 ft:int64 f:int64 args:array<int64>):>i
     nodes.ptr[n].a = int32(callee)
     nodes.ptr[n].sym = 0
     nodes.ptr[n].aux = 1
-    if has_hole(args) or nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) {
-        nodes.ptr[n].aux2 = 0
+    if has_hole(args) or node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL) {
+        nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
         let pts:array<int64>=[]
         loop i in [0..np) {pts.push(targ(ft i))}
         return finish_partial(n pts HVWord(types.ptr[ft].mutmask) HVWord(types.ptr[ft].elem))

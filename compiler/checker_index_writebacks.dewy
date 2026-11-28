@@ -12,7 +12,7 @@ from p"checks_place_updates.dewy" import (dewy_end_place index_update_capture po
 from p"checks_thin.dewy" import (check_stmt)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"expr.jo" import (bc_count last_checked)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_op node_sval node_with_op node_with_sval)
 from p"parser_shared.dewy" import (comp_ident)
 from p"slice_checks.dewy" import (dewy_index_end_bindings)
 from p"type_ops.dewy" import (is_soa)
@@ -37,7 +37,7 @@ dewy_end_assign=(s:IndexWriteWord):>IndexWriteWord=>{
     let ix:IndexWriteWord=0
     let part=IndexWriteWord(nodes[s].a)
     loop nodes[part].kind =? 'field' or nodes[part].kind =? 'index' {
-        if nodes[part].kind =? 'index' and nodes[part].sval not=? 0 {ix=part}
+        if nodes[part].kind =? 'index' and node_sval(nodes[part].op_ext) not=? 0 {ix=part}
         part=IndexWriteWord(nodes[part].a)
     }
     if ix =? 0 {return 0}
@@ -57,7 +57,7 @@ dewy_end_assign=(s:IndexWriteWord):>IndexWriteWord=>{
         nodes[ix].a=IndexWriteI32(bc_ident(name pos))
     }
     loop binding in dewy_index_end_bindings(ix end_source source_type) {stmts.push(binding)}
-    nodes[ix].sval=0
+    nodes[ix].op_ext=node_with_sval(nodes[ix].op_ext 0)
     let update=IndexWriteWord(nodes.length)
     nodes.push(nodes[s])
     stmts.push(update)
@@ -78,7 +78,7 @@ elem_field_assign=(s:IndexWriteWord):>IndexWriteWord=>{
         let candidate=path[i]
         i -= 1
         if nodes[candidate].kind not=? 'index' or nodes[candidate].b =? 0 {continue}
-        if candidate =? lhs and nodes[s].op =? 47 {continue}
+        if candidate =? lhs and node_op(nodes[s].op_ext) =? 47 {continue}
         # Checking an overloaded index rewrites it. Keep the original receiver for writeback.
         let bt=prune(check_expr(clone(IndexWriteWord(nodes[candidate].a)) 0))
         if types[bt].kind =? 'struct_' and not is_map_type(bt) and not is_soa(bt) and not is_part_index(candidate bt) {
@@ -137,7 +137,7 @@ elem_field_assign=(s:IndexWriteWord):>IndexWriteWord=>{
     nodes[write].a=IndexWriteI32(write_receiver)
     nodes[write].b=IndexWriteI32(comp_ident(iname pos))
     let back=mk('assign' pos)
-    nodes[back].op=47
+    nodes[back].op_ext=node_with_op(nodes[back].op_ext 47)
     nodes[back].a=IndexWriteI32(write)
     nodes[back].b=IndexWriteI32(comp_ident(ename pos))
     stmts.push(back)

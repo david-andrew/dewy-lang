@@ -36,6 +36,7 @@ from p"units.jo" import (quantity_base)
 from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
 from p"util.jo" import (err_notes files name_of pos_file pos_in_lib)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_fval node_op)
 
 FloatWord:type=int64<overflow='wrap'>
 # Checks that float v (of IR type ft) truncates to a value of integer type
@@ -179,10 +180,10 @@ key_not_nan=(n:FloatWord):>bool=>$unsafe {
 # A float expression that is never NaN, by its form alone.
 float_not_nan=(n:FloatWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
-    if k =? 'float_lit' {return nodes.ptr[n].fval =? nodes.ptr[n].fval}
+    if k =? 'float_lit' {return node_fval(nodes.ptr[n].op_ext) =? node_fval(nodes.ptr[n].op_ext)}
     if k =? 'int_lit' {return true}
     if k =? 'conv' {return is_int(prune(ntype(FloatWord(nodes.ptr[n].a)))) or float_not_nan(FloatWord(nodes.ptr[n].a))}
-    if k =? 'unary' and nodes.ptr[n].op =? int32(59) {return float_not_nan(FloatWord(nodes.ptr[n].a))}
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? int32(59) {return float_not_nan(FloatWord(nodes.ptr[n].a))}
     false
 }
 # Lowering: the runtime check of a key or element (or each element of an array), on its value v.
@@ -583,7 +584,7 @@ ff_eval_node=(n:FloatWord):>FR=>$unsafe {
     if n <=? 0 {return ff_top()}
     let k=nodes.ptr[n].kind
     let t=ntype(n)
-    if k =? 'float_lit' {return ff_literal(nodes.ptr[n].fval)}
+    if k =? 'float_lit' {return ff_literal(node_fval(nodes.ptr[n].op_ext))}
     if k =? 'int_lit' {
         if t >? 0 and is_float(t) {return FR(float64(nodes.ptr[n].ival) float64(nodes.ptr[n].ival))}
         return ff_top()
@@ -591,11 +592,11 @@ ff_eval_node=(n:FloatWord):>FR=>$unsafe {
     if k =? 'ident' {return ff_get(n)}
     if k =? 'unary' {
         let a=ff_eval(FloatWord(nodes.ptr[n].a))
-        if nodes.ptr[n].op =? int32(59) and t >? 0 and is_float(t) {return FR((-a.hi) (-a.lo) a.nan)}
+        if node_op(nodes.ptr[n].op_ext) =? int32(59) and t >? 0 and is_float(t) {return FR((-a.hi) (-a.lo) a.nan)}
         return ff_top()
     }
     if k =? 'binary' {
-        let op=cx_token_values.ptr[FloatWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[FloatWord(node_op(nodes.ptr[n].op_ext))]
         let a=ff_eval(FloatWord(nodes.ptr[n].a))
         let b=ff_eval(FloatWord(nodes.ptr[n].b))
         let arith=nodes.ptr[n].aux =? 0 and t >? 0 and is_float(t)
@@ -783,7 +784,7 @@ ff_children=(n:FloatWord):>void=>$unsafe {
 }
 ff_assign=(n:FloatWord):>FR=>$unsafe {
     let target=FloatWord(nodes.ptr[n].a)
-    let op=cx_token_values.ptr[FloatWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[FloatWord(node_op(nodes.ptr[n].op_ext))]
     let t=ntype(target)
     let float=t >? 0 and is_float(t)
     let r=ff_top()
@@ -873,7 +874,7 @@ ff_refine=(c:FloatWord holds:bool):>void=>$unsafe {
         return
     }
     if k not=? 'binary' {return}
-    let op=cx_token_values.ptr[FloatWord(nodes.ptr[c].op)]
+    let op=cx_token_values.ptr[FloatWord(node_op(nodes.ptr[c].op_ext))]
     if not holds {
         # (not (x < c) is x >= c, or NaN: the bounds hold for the numbers)
         op=if op =? 'lt' {Tok.ge} else if op =? 'le' {Tok.gt} else if op =? 'gt' {Tok.le} else if op =? 'ge' {Tok.lt} else if op =? 'eq' {Tok.ne} else if op =? 'ne' {Tok.eq} else {Tok.eof}
@@ -909,9 +910,9 @@ ff_refine_test=(c:FloatWord holds:bool):>void=>$unsafe {
 # (bounds of an operand already evaluated: constants and tracked locals only)
 ff_eval_pure=(n:FloatWord):>FR=>$unsafe {
     let k=nodes.ptr[n].kind
-    if k =? 'float_lit' {return ff_literal(nodes.ptr[n].fval)}
+    if k =? 'float_lit' {return ff_literal(node_fval(nodes.ptr[n].op_ext))}
     if k =? 'int_lit' {return FR(float64(nodes.ptr[n].ival) float64(nodes.ptr[n].ival))}
-    if k =? 'unary' and nodes.ptr[n].op =? int32(59) {
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? int32(59) {
         let a=ff_eval_pure(FloatWord(nodes.ptr[n].a))
         return FR((-a.hi) (-a.lo))
     }

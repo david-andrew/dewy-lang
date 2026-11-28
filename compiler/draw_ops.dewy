@@ -54,7 +54,7 @@ draw_scan=(f:MoveWord n:MoveWord):>void=>$unsafe {
     }
     else if k =? 'pair' and nodes.ptr[n].sym >? 0 {draw_edge(f MoveWord(nodes.ptr[n].sym) n false);}
     if k =? 'map_lit' and nkids(n) >? 0 {draw_edge(f MoveWord(nodes.ptr[n].sym) n false);}
-    if (k =? 'binary' and nodes.ptr[n].aux =? 6 or k =? 'istype') and nodes.ptr[n].aux2 >? 0 {draw_edge(f MoveWord(nodes.ptr[n].aux2) n false);}
+    if (k =? 'binary' and nodes.ptr[n].aux =? 6 or k =? 'istype') and node_aux2(nodes.ptr[n].op_ext) >? 0 {draw_edge(f MoveWord(node_aux2(nodes.ptr[n].op_ext)) n false);}
     if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
         let l:MoveWord=MoveWord(nodes.ptr[n].sym)
         if l >? 0 and MoveWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {draw_scan(f MoveWord(locals.ptr[l].alias));}
@@ -253,3 +253,4 @@ draw_context_check=(f:MoveWord g:MoveWord n:MoveWord):>void=>$unsafe {
 }
 
 from p"facts_lifecycle.dewy" import (fn_in_lib)
+from p"node_store.dewy" import (node_aux2)

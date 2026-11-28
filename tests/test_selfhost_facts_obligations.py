@@ -65,7 +65,7 @@ main = ():
     fact_panic_pending = []
     fact_has_deferred = false
     if fact_obliged(8) or fact_has_deferred or fact_panic_pending != [8]: exit(19)
-    nodes[9] = Node(kind=.parallel_region, pos=10, list2=0, nlist2=2)
+    nodes[9] = Node(kind=.parallel_region, pos=10, op_ext=node_with_nlist2(node_with_list2(u32(0), i32(0)), i32(2)))
     fact_panic_collect = true
     fact_panic_pending = []
     fact_has_deferred = false
@@ -95,7 +95,7 @@ main = ():
         if not fact_obligation_node(12): exit(22)
     nodes[12] = Node(kind=.intrinsic, pos=10, aux=i32(int(IN.len)))
     if fact_obligation_node(12): exit(23)
-    nodes[12].aux2 = i32(RANGE_EXHAUSTION)
+    nodes[12].op_ext = node_with_aux2(nodes[12].op_ext, i32(i32(RANGE_EXHAUSTION)))
     if not fact_obligation_node(12): exit(24)
     print("obligation discovery ok")
 '''

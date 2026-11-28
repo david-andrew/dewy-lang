@@ -34,7 +34,7 @@ main = ():
     assert(panic_format_spec("#x", T_INT) and panic_format_spec(">8", T_STR))
     assert(panic_format_spec("\xff>9", T_INT))
     assert(not panic_format_spec(".2", T_STR) and not panic_format_spec("x", T_FLOAT))
-    text = mk(.str_lit, 0); nodes[text].sval = i32(intern("hello")); nodes[text].type = i32(T_STR)
+    text = mk(.str_lit, 0); nodes[text].op_ext = node_with_sval(nodes[text].op_ext, i32(i32(intern("hello")))); nodes[text].type = i32(T_STR)
     assert((panic_literal_texts(text) ?? []) == ["hello"])
     a = mk(.int_lit, 0); nodes[a].ival = 3
     b = mk(.bool_lit, 0); nodes[b].ival = 1
@@ -45,7 +45,7 @@ main = ():
     assert(not panic_device_literal(0) and not panic_atomic_progress(0) and not panic_literal_safe(0))
     unreachable = mk(.intrinsic, 0); nodes[unreachable].aux = i32(int(IN.unreachable))
     assert(not panic_synthesized(unreachable))
-    nodes[unreachable].aux2 = i32(RANGE_EXHAUSTION); assert(panic_synthesized(unreachable)); nodes[unreachable].aux2 = 0
+    nodes[unreachable].op_ext = node_with_aux2(nodes[unreachable].op_ext, i32(i32(RANGE_EXHAUSTION))); assert(panic_synthesized(unreachable)); nodes[unreachable].op_ext = node_with_aux2(nodes[unreachable].op_ext, i32(0))
     fns.resize(4)
     modules.resize(1)
     files.push(SrcFile())

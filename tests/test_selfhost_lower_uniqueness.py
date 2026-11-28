@@ -52,7 +52,7 @@ MAIN = r'''main = ():
     assert(uq_calls and uq_written == [a]); nodes[idx].ival = 0
     uq_reset(); nodes[av].ival = 99; uq_scan(av, 1); assert(uq_calls); nodes[av].ival = 0
     # Generic traversals follow a/b/c and both child lists, but never d.
-    uq_reset(); n = lp_node(.block, av, bv, [av]); nodes[n].c = i32(bv); nodes[n].d = i32(av)
+    uq_reset(); n = lp_node(.block, av, bv, [av]); nodes[n].c = i32(bv); nodes[n].op_ext = node_with_d(nodes[n].op_ext, i32(i32(av)))
     node_set_list2(mut nodes, mut lists, n, [bv]); uq_scan(n, 1)
     assert(uq_escaped == [a, b, b, a, b] and not uq_calls and not uq_lambda)
     print("ok")

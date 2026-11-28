@@ -104,7 +104,7 @@ DEWY = 1 << 40
 assign = (target: int, value: int, op: int = 47, dewy: bool = true) -> int:
     s = node(.assign, target)
     nodes[s].b = i32(value)
-    nodes[s].op = i32(op)
+    nodes[s].op_ext = node_with_op(nodes[s].op_ext, i32(i32(op)))
     if dewy: nodes[s].pos = DEWY + s
     s
 var = (t: int, aux: int = 1, sym: int = 5) -> int:
@@ -273,7 +273,7 @@ main = ():
     run(assign(var(fixed), typed(.ident, fixed), 50))
     pointer = mk_type(.ptr)
     run(assign(var(pointer), typed(.ident, T_I32), 48))
-    s = assign(var(pointer), typed(.ident, T_I32), 48); nodes[s].sval = 3
+    s = assign(var(pointer), typed(.ident, T_I32), 48); nodes[s].op_ext = node_with_sval(nodes[s].op_ext, i32(3))
     run(s)
     run(assign(var(T_MATH_INT), typed(.int_lit, T_MATH_INT), 48))
     run(assign(var(T_INT), typed(.int_lit, T_INT), 49))
@@ -287,7 +287,7 @@ main = ():
     run(assign(part(.field, var(rec), T_INT), typed(.int_lit, T_INT), 48, false))
     run(assign(var(T_FLOAT), typed(.int_lit, T_INT), 51, false))
     run(assign(var(T_BOOL), typed(.ident, T_BOOL), 54, false))
-    s = assign(var(T_BOOL), typed(.ident, T_BOOL), 54, false); nodes[s].aux2 = 1
+    s = assign(var(T_BOOL), typed(.ident, T_BOOL), 54, false); nodes[s].op_ext = node_with_aux2(nodes[s].op_ext, i32(1))
     run(s)
     run(assign(var(rec), typed(.ident, rec), 48, false))
     run(assign(var(T_INT), typed(.str_lit, T_STR), 48, false))

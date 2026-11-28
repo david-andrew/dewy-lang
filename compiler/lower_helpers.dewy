@@ -28,6 +28,7 @@ from p"arena_ops.dewy" import (helper_promote)
 from p"math_ops.dewy" import (math_compare math_main math_tag)
 from p"parallel_ops.dewy" import (parallel_job_helper)
 from p"lower_generators.dewy" import (helper_gen_step helper_gen_drop)
+from p"node_store.dewy" import (node_op)
 # Generated aggregate helpers; shared state has one owner in lower.jo.
 LHWord:type=int64<overflow='wrap'>
 helper_params=(n:LHWord):>array<int64>=>$unsafe {
@@ -343,7 +344,7 @@ value_helper_calls=(n:LHWord):>array<int64>=>$unsafe {
         hashing=true
     }
     else if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 1 {
-        let op=cx_token_values.ptr[LHWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[LHWord(node_op(nodes.ptr[n].op_ext))]
         if op =? 'eq' or op =? 'ne' {t=ntype(LHWord(nodes.ptr[n].a))}
     }
     if t =? 0 {return []}

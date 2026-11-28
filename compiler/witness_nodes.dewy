@@ -21,6 +21,7 @@ from p"witness.jo" import WitSide
 from p"witness_ops.dewy" import (wit_call_text wit_clamp_help wit_context wit_fail wit_help wit_operand wit_quoted wit_relation wit_relation_text wit_same_value wit_side)
 from p"witness_text.dewy" import wit_hidden_name
 from p"@lib/core/str.jo" import starts_with
+from p"node_store.dewy" import (node_op)
 
 WitnessNodeWord:type=int64<overflow='wrap'>
 # Frozen checked-node symbol/token tags, shared with the Jo reader and twin.
@@ -93,20 +94,20 @@ wit_text=(e0:WitnessNodeWord depth:WitnessNodeWord=0):>string=>$unsafe {
         let index=wit_text(WitnessNodeWord(nodes.ptr[e].b) depth + 1)
         if base not=? "" and index not=? "" {return "{base}[{index}]"}
     }
-    if k =? 'binary' and (nodes.ptr[e].op =? int32(WN_PERCENT) or nodes.ptr[e].op =? int32(WN_SLASH) and is_int(prune(ntype(e)))) {
+    if k =? 'binary' and (node_op(nodes.ptr[e].op_ext) =? int32(WN_PERCENT) or node_op(nodes.ptr[e].op_ext) =? int32(WN_SLASH) and is_int(prune(ntype(e)))) {
         let left=wit_operand(WitnessNodeWord(nodes.ptr[e].a) depth + 1)
         let right=wit_operand(WitnessNodeWord(nodes.ptr[e].b) depth + 1)
         if left =? "" or right =? "" {return ""}
-        let operator=if nodes.ptr[e].op =? int32(WN_PERCENT) {"%"} else {"//"}
+        let operator=if node_op(nodes.ptr[e].op_ext) =? int32(WN_PERCENT) {"%"} else {"//"}
         return "{left} {operator} {right}"
     }
-    if k =? 'binary' and (nodes.ptr[e].op =? int32(WN_PLUS) or nodes.ptr[e].op =? int32(WN_MINUS) or nodes.ptr[e].op =? int32(WN_STAR)) {
-        let star=nodes.ptr[e].op =? int32(WN_STAR)
+    if k =? 'binary' and (node_op(nodes.ptr[e].op_ext) =? int32(WN_PLUS) or node_op(nodes.ptr[e].op_ext) =? int32(WN_MINUS) or node_op(nodes.ptr[e].op_ext) =? int32(WN_STAR)) {
+        let star=node_op(nodes.ptr[e].op_ext) =? int32(WN_STAR)
         let left=if star {wit_operand(WitnessNodeWord(nodes.ptr[e].a) depth + 1)} else {wit_text(WitnessNodeWord(nodes.ptr[e].a) depth + 1)}
-        let right=if nodes.ptr[e].op =? int32(WN_PLUS) {wit_text(WitnessNodeWord(nodes.ptr[e].b) depth + 1)} else {wit_operand(WitnessNodeWord(nodes.ptr[e].b) depth + 1)}
+        let right=if node_op(nodes.ptr[e].op_ext) =? int32(WN_PLUS) {wit_text(WitnessNodeWord(nodes.ptr[e].b) depth + 1)} else {wit_operand(WitnessNodeWord(nodes.ptr[e].b) depth + 1)}
         if left =? "" or right =? "" {return ""}
         if star {return "{left}*{right}"}
-        let sign=if nodes.ptr[e].op =? int32(WN_PLUS) {"+"} else {"-"}
+        let sign=if node_op(nodes.ptr[e].op_ext) =? int32(WN_PLUS) {"+"} else {"-"}
         return "{left} {sign} {right}"
     }
     if k =? 'block' and nkids(e) >=? 3 and nkids(e) <=? 10 and nodes.ptr[kid(e 0)].kind =? 'vardecl' and starts_with(name_of(WitnessNodeWord(nodes.ptr[kid(e 0)].name)) "$spread") {

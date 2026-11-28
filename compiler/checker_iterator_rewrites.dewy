@@ -21,6 +21,7 @@ from p"type_member_checks.dewy" import (handle_outcomes)
 from p"type_ops.dewy" import (is_soa)
 from p"types.jo" import (T_NONE prune structs types)
 from p"util.jo" import (intern name_of)
+from p"node_store.dewy" import (node_sval node_with_sval)
 
 IteratorRewriteWord:type=int64<overflow='wrap'>
 IteratorRewriteI32:type=int32<overflow='wrap'>
@@ -69,14 +70,14 @@ dewy_cursor_loop=(s:IteratorRewriteWord):>bool=>{
         nodes[r].b=IteratorRewriteI32(bc_bin('minus' bc_ident("{tag}remaining" pos) bc_int(1 pos) pos))
         add_flag(r NF_INCLUSIVE)
         let counted_loop=mk('for_' pos)
-        nodes[counted_loop].sval=nodes[s].sval
+        nodes[counted_loop].op_ext=node_with_sval(nodes[counted_loop].op_ext (node_sval(nodes[s].op_ext)))
         nodes[counted_loop].a=IteratorRewriteI32(r)
         nodes[counted_loop].b=IteratorRewriteI32(lx_block(head pos))
         set_list(counted_loop [bc_ident("{tag}counter" pos)])
         setup.push(lx_if(bc_bin('eq' done lx_bool(false pos) pos) counted_loop pos))
     } else {
         let w=mk('while_' pos)
-        nodes[w].sval=nodes[s].sval
+        nodes[w].op_ext=node_with_sval(nodes[w].op_ext (node_sval(nodes[s].op_ext)))
         let tr=mk('bool_lit' pos)
         nodes[tr].ival=1
         nodes[w].a=IteratorRewriteI32(tr)
@@ -163,7 +164,7 @@ dewy_iterator_loop=(s:IteratorRewriteWord place:IteratorRewriteWord=0):>bool=>{
     let steps=mk('while_' pos)
     nodes[steps].a=IteratorRewriteI32(bc_bool(true pos))
     nodes[steps].b=IteratorRewriteI32(body)
-    nodes[steps].sval=nodes[s].sval
+    nodes[steps].op_ext=node_with_sval(nodes[steps].op_ext (node_sval(nodes[s].op_ext)))
     setup.push(steps)
     let replacement=lx_block(setup pos)
     nodes[s]=nodes[replacement]
@@ -204,7 +205,7 @@ dewy_sequence_loop=(s:IteratorRewriteWord):>bool=>{
     let counted_loop=mk('for_' pos)
     nodes[counted_loop].a=IteratorRewriteI32(r)
     nodes[counted_loop].b=IteratorRewriteI32(body)
-    nodes[counted_loop].sval=nodes[s].sval
+    nodes[counted_loop].op_ext=node_with_sval(nodes[counted_loop].op_ext (node_sval(nodes[s].op_ext)))
     set_list(counted_loop [bc_ident(index pos)])
     let replacement=lx_block([seq counted_loop] pos)
     nodes[s]=nodes[replacement]

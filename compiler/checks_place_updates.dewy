@@ -23,7 +23,7 @@ from p"slice_checks.dewy" import (dewy_slice_args)
 from p"range_checks.dewy" import (part_spec)
 from p"juxtapose.dewy" import (juxt_space_hint)
 from p"lexer_helpers.dewy" import (tok_text)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_op node_with_aux2 node_with_op)
 from p"parser_shared.dewy" import (comp_ident)
 from p"refine.jo" import (ref_nd_receivers refine_active)
 from p"refine_metadata.dewy" import (refine_storage)
@@ -49,7 +49,7 @@ unused_value=(raw:Node t:PlaceUpdateWord):>void=>$unsafe {
     let name=""
     if (k =? 'binary' or k =? 'and_' or k =? 'or_') and nodes.ptr[int64(raw.a)].kind =? 'ident' {name=name_of(PlaceUpdateWord(nodes.ptr[int64(raw.a)].name))}
     if k =? 'binary' {
-        let op=cx_token(PlaceUpdateWord(raw.op))
+        let op=cx_token(PlaceUpdateWord(node_op(raw.op_ext)))
         if op =? 'eq' {
             let eq=jd(raw.pos "`==`" "`=?`")
             if (name as array<uint8>).length >? 0 {warn(raw.pos "{eq} compares, and the answer is not used: to change '{name}', write `{name} = ...`")} else {warn(raw.pos "{eq} compares, and the answer is not used (`=` changes a value)")}
@@ -240,7 +240,7 @@ tuple_slot=(place:PlaceUpdateWord at:PlaceUpdateWord pos:PlaceUpdateWord):>int64
 # The write of statement s at one position. An update of a union position is made for the
 # member it holds, so it needs to be valid for each of them.
 tuple_slot_stmt=(s:PlaceUpdateWord place:PlaceUpdateWord at:PlaceUpdateWord bt:PlaceUpdateWord pos:PlaceUpdateWord):>int64=>$unsafe {
-    let member_types=if is_union(targ(bt at)) and PlaceUpdateWord(nodes.ptr[s].op) not=? 47 and not has_flag(s NF_BROADCAST) {union_members(targ(bt at))} else {[]}
+    let member_types=if is_union(targ(bt at)) and PlaceUpdateWord(node_op(nodes.ptr[s].op_ext)) not=? 47 and not has_flag(s NF_BROADCAST) {union_members(targ(bt at))} else {[]}
     if member_types.length =? 0 {
         let w=clone(s)
         nodes.ptr[w].a=int32(tuple_slot(place at pos))
@@ -251,8 +251,8 @@ tuple_slot_stmt=(s:PlaceUpdateWord place:PlaceUpdateWord at:PlaceUpdateWord bt:P
     loop member in member_types {
         let w=clone(s)
         nodes.ptr[w].a=int32(tuple_slot(place at pos))
-        nodes.ptr[w].op=int32(47)
-        nodes.ptr[w].b=int32(bc_bin(cx_token(compound_op(PlaceUpdateWord(nodes.ptr[s].op))) bc_ident(name pos) clone(PlaceUpdateWord(nodes.ptr[s].b)) pos))
+        nodes.ptr[w].op_ext=node_with_op(nodes.ptr[w].op_ext (int32(47)))
+        nodes.ptr[w].b=int32(bc_bin(cx_token(compound_op(PlaceUpdateWord(node_op(nodes.ptr[s].op_ext)))) bc_ident(name pos) clone(PlaceUpdateWord(nodes.ptr[s].b)) pos))
         let condition=mk('istype' pos)
         nodes.ptr[condition].a=int32(bc_ident(name pos))
         nodes.ptr[condition].b=int32(type_node_of(member pos))
@@ -413,7 +413,7 @@ local_place_decl=(s:PlaceUpdateWord):>bool=>$unsafe {
     true
 }
 shape_dim_decl=(s:PlaceUpdateWord):>void=>$unsafe {
-    nodes.ptr[s].aux2=0
+    nodes.ptr[s].op_ext=node_with_aux2(nodes.ptr[s].op_ext 0)
     let prev_game=game_lookup_ok
     game_lookup_ok=false
     let sym=lookup(PlaceUpdateWord(nodes.ptr[s].name))

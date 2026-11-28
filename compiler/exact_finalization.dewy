@@ -20,6 +20,7 @@ from p"math_ops.dewy" import (math_length_counter_limit math_prepare_writes)
 from p"refinement_types.dewy" import (FactTerm)
 from p"types.jo" import (T_INT is_int prune types)
 from p"util.jo" import (err_notes)
+from p"node_store.dewy" import (node_op)
 
 FinalWidth:type=int64<overflow='wrap'>
 exact_bits=(n:FinalWidth):>FinalWidth=>$unsafe {
@@ -34,7 +35,7 @@ exact_bits=(n:FinalWidth):>FinalWidth=>$unsafe {
             let b=exact_bits(FinalWidth(nodes.ptr[n].b))
 
             # Raw Tok ordinals keep the width walk on the node representation.
-            let op=nodes.ptr[n].op
+            let op=node_op(nodes.ptr[n].op_ext)
             width=max(a b)
             if op =? 58 or op =? 59 {width += 1}
             else if op =? 60 {width=a + b}

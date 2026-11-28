@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_nlist2)
 from p"checker_state.dewy" import (FnSig DeclInfo RefineBindings)
 from p"checker_resolve.dewy" import (ct_resolve_type ct_resolve_result)
 from p"type_constructors.dewy" import tb_mk_param
@@ -54,9 +54,9 @@ fn_sig=(decl:CSWord):>FnSig=>$unsafe {
     if cs_input[0].declarations[0].ptr[di].sig.done {return cs_input[0].declarations[0].ptr[di].sig}
     signature_resume(decl)
     let sig=FnSig[done=true]
-    sig.nexplicit = cs_input[0].nodes[0].ptr[decl].nlist2
+    sig.nexplicit = node_nlist2(cs_input[0].nodes[0].ptr[decl].op_ext)
     let scope=signature_enter(decl)
-    let ntp=CSWord(cs_input[0].nodes[0].ptr[decl].nlist2)
+    let ntp=CSWord(node_nlist2(cs_input[0].nodes[0].ptr[decl].op_ext))
     let old_formals=cs_input[0].binders[0].formals
     let old_self=cs_input[0].binders[0].self
     cs_input[0].binders[0].formals = []

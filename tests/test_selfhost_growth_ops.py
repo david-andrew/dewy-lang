@@ -68,16 +68,16 @@ ilit = (v: int) -> int:
     n
 flit = (v: float64, text: bool) -> int:
     n = fresh(.float_lit, 7)
-    nodes[n].fval = v
-    if text: nodes[n].sval = 1
+    nodes[n].op_ext = node_with_fval(nodes[n].op_ext, v)
+    if text: nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(1))
     n
 bin = (op: Tok, a: int, b: int) -> int:
     n = fresh(.binary, 7)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 un = (op: Tok, a: int) -> int:
     n = fresh(.unary, 7)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a)
     n
 call = (name: int, x: int, y: int) -> int:
     n = fresh(.call, 7)
@@ -93,7 +93,7 @@ bind_local = (name: int, t: int, owner: int, dloops: int) -> int:
     locals.len() - 1
 assign = (op: Tok, target: int, right: int, sval: int, pos: int) -> int:
     n = fresh(.assign, pos)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(target); nodes[n].b = i32(right); nodes[n].sval = i32(sval)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(target); nodes[n].b = i32(right); nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(i32(sval)))
     if target != 0: nodes[target].pos = pos
     n
 main = ():

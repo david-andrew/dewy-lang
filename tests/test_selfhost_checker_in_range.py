@@ -29,7 +29,7 @@ DEWY = 1 << 40
 dump = (from: int):
     loop i in [from..nodes.len()):
         x = nodes[i]
-        print("{i}:{int(x.kind)}:{x.op}:{x.a}:{x.b}:{x.ival}:{x.name}:{x.type}:{x.aux}:{x.flags}:{x.list}:{x.nlist}")
+        print("{i}:{int(x.kind)}:{node_op(x.op_ext)}:{x.a}:{x.b}:{x.ival}:{x.name}:{x.type}:{x.aux}:{x.flags}:{x.list}:{x.nlist}")
 membership = (needle: int, lo: int, hi: int, inclusive: bool, dewy: bool) -> int:
     r = node(.range, lo); nodes[r].b = i32(hi)
     if inclusive: nodes[r].flags = i32(2)

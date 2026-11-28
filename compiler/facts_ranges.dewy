@@ -40,6 +40,7 @@ from p"type_ops.dewy" import (dt zonk)
 from p"util.jo" import (err_notes intern name_of pos_in_lib)
 from p"witness.jo" import (WitSide)
 from p"witness_ops.dewy" import (wit_context wit_fail wit_help wit_relation wit_relation_text wit_side wit_unknown)
+from p"node_store.dewy" import (node_aux2)
 
 RangeWord:type=int64<overflow='wrap'>
 # A stepped range, `[a, b..c]` (a loop's, or the library's IntRange): its step
@@ -100,7 +101,7 @@ fact_open_range=(n:RangeWord):>bool=>$unsafe {
 # needs no value-flow proof; opt-out scopes and every other range retain
 # their ordinary exhaustion obligation. Querying this certificate is O(1).
 fact_range_assumed=(n:RangeWord):>bool=>$unsafe {
-    nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) and nodes.ptr[n].ival not=? 0 and dir_value(dir_name_assumed_bounds nodes.ptr[n].pos) not=? 1
+    node_aux2(nodes.ptr[n].op_ext) =? int32(RANGE_EXHAUSTION) and nodes.ptr[n].ival not=? 0 and dir_value(dir_name_assumed_bounds nodes.ptr[n].pos) not=? 1
 }
 fact_range_exhaustion=(n:RangeWord entry:FactState first:RangeWord second:RangeWord edges:FactLoop):>void=>$unsafe {
     if not fact_open_range(n) or fact_speculating not=? 0 or fact_summary_owner not=? 0 {return}
@@ -182,7 +183,7 @@ fact_nonnegative=(n:RangeWord @s:FactState value:RangeWord operand:RangeWord wha
 fact_refinement_covers=(r:RangeWord):>RangeWord=>$unsafe {
     let inner=RangeWord(nodes.ptr[r].a)
     if nodes.ptr[inner].kind not=? 'conv' or nodes.ptr[inner].aux not=? int32(int64(CV.int_)) or prune(ntype(RangeWord(nodes.ptr[inner].a))) not=? T_MATH_INT {return 0}
-    let [known allowed]=int_intervals(zonk(RangeWord(nodes.ptr[r].aux2)))
+    let [known allowed]=int_intervals(zonk(RangeWord(node_aux2(nodes.ptr[r].op_ext))))
     if not known or allowed.length =? 0 or allowed[0] =? FACT_MIN or allowed[allowed.length - 1] =? FACT_MAX {return 0}
     inner
 }

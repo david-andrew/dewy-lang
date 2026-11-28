@@ -98,8 +98,8 @@ main = ():
     b = local(res)
     c = local(res)
     plain = local(1)
-    bind_b = mk(.vardecl, 0); nodes[bind_b].aux2 = 1; nodes[bind_b].sym = i32(b); nodes[bind_b].b = i32(ident(p))
-    bind_c = mk(.vardecl, 0); nodes[bind_c].aux2 = 1; nodes[bind_c].sym = i32(c); nodes[bind_c].b = i32(ident(q))
+    bind_b = mk(.vardecl, 0); nodes[bind_b].op_ext = node_with_aux2(nodes[bind_b].op_ext, i32(1)); nodes[bind_b].sym = i32(b); nodes[bind_b].b = i32(ident(p))
+    bind_c = mk(.vardecl, 0); nodes[bind_c].op_ext = node_with_aux2(nodes[bind_c].op_ext, i32(1)); nodes[bind_c].sym = i32(c); nodes[bind_c].b = i32(ident(q))
     first = mk(.exprstmt)
     # A body over the walked kinds: construction, growable arrays, conversions.
     ctor = mk(.call, holder, [ident(b), 0]); nodes[ctor].aux = 2
@@ -257,7 +257,7 @@ ERRORS = [
     ('closed', '''
     p = local(res)
     l = local(res)
-    s = mk(.vardecl, 0); nodes[s].aux2 = 1; nodes[s].sym = i32(l); nodes[s].b = i32(ident(p))
+    s = mk(.vardecl, 0); nodes[s].op_ext = node_with_aux2(nodes[s].op_ext, i32(1)); nodes[s].sym = i32(l); nodes[s].b = i32(ident(p))
     f = function(mk(.block, 0, [s]), [p, l])
     fns[f].has_env = true
     ownership_parameters()

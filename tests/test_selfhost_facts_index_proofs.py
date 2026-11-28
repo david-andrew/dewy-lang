@@ -34,7 +34,7 @@ main = ():
     nodes[4] = Node(kind=.conv, type=i32(T_MATH_INT), aux=i32(int(CV.int_)), a=2)
     nodes[5] = Node(kind=.conv, type=i32(T_INT), aux=i32(int(CV.int_)), a=4)
     if word_integer_value(5) != 2 or not is_nonneg(5) or is_nonneg(3): exit(11)
-    nodes[6] = Node(kind=.binary, type=i32(T_INT), op=i32(int(Tok.plus)), a=2, b=2)
+    nodes[6] = Node(kind=.binary, type=i32(T_INT), a=2, b=2, op_ext=node_with_op(u32(0), i32(i32(int(Tok.plus)))))
     if is_nonneg(6): exit(12)
     if not stable_loop_index(2) or stable_loop_index(-1): exit(13)
     locals[2].flags = i32(LF_ASSIGNED)
@@ -85,7 +85,7 @@ main = ():
     nodes[15] = Node(kind=.return_)
     lists.push(15)
     nodes[16] = Node(kind=.block, list=1, nlist=1)
-    nodes[17] = Node(kind=.binary, type=i32(T_BOOL), op=i32(int(Tok.lt)), a=8, b=2)
+    nodes[17] = Node(kind=.binary, type=i32(T_BOOL), a=8, b=2, op_ext=node_with_op(u32(0), i32(i32(int(Tok.lt)))))
     nodes[18] = Node(kind=.if_, a=17, b=16)
     lower_length_guards = []
     lower_length_guard(18)

@@ -33,7 +33,7 @@ main = ():
     nodes[a].name = i32(intern("$tmp"))
     print("hidden:{concat_piece(a, true)}:{concat_piece(a, false)}:{concat_piece(a, true, true)}:{concat_piece(a, false, true)}")
     nodes[a].name = i32(intern("line"))
-    lit = mk(.str_lit, 0); nodes[lit].sval = i32(intern("literal"))
+    lit = mk(.str_lit, 0); nodes[lit].op_ext = node_with_sval(nodes[lit].op_ext, i32(i32(intern("literal"))))
     print("literal:{concat_piece(lit, true)}")
     start = mk(.int_lit, 0); nodes[start].ival = 2
     end = mk(.int_lit, 0); nodes[end].ival = 5

@@ -214,7 +214,7 @@ fact_remainder_decided=(@s:FactState r:CollectWord):>void=>$unsafe {
     let t=fact_terms[r]
     if t.op not=? 'eof' or t.a =? 0 or t.b =? 0 or t.origin <=? 0 or t.origin >=? nodes.length {return}
     let o=t.origin
-    if not (nodes.ptr[o].kind =? 'binary' and nodes.ptr[o].op =? int32(62) or nodes.ptr[o].kind =? 'call' and fact_floor_call(o) =? 2) {return}
+    if not (nodes.ptr[o].kind =? 'binary' and node_op(nodes.ptr[o].op_ext) =? int32(62) or nodes.ptr[o].kind =? 'call' and fact_floor_call(o) =? 2) {return}
     let left=fact_bound(s r)
     let c=fact_bound(s t.b)
     let d=fact_bound(s t.a)
@@ -280,3 +280,4 @@ fact_guarded_word=(@s:FactState value:CollectWord):>void=>{
 }
 
 from p"facts_compare.dewy" import (fact_add_fits)
+from p"node_store.dewy" import (node_op)

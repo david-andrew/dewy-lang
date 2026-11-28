@@ -3,6 +3,7 @@ from p"ast.jo" import (nodes)
 from p"expr.jo" import (rational_constants)
 from p"integer_conversions.dewy" import (int_widens integer_constant)
 from p"types.jo" import (T_INT T_MATH_INT is_int prune types)
+from p"node_store.dewy" import (node_sval)
 
 NumberFormWord:type=int64<overflow='wrap'>
 
@@ -19,7 +20,7 @@ number_literal_tree=(n:NumberFormWord):>bool=>$unsafe {
 # exact until a float context makes them floats
 decimal_literal_tree=(n:NumberFormWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
-    if k =? 'float_lit' {return nodes.ptr[n].sval not=? 0}
+    if k =? 'float_lit' {return node_sval(nodes.ptr[n].op_ext) not=? 0}
     if k =? 'unary' {return decimal_literal_tree(NumberFormWord(nodes.ptr[n].a))}
     if k =? 'binary' {return number_literal_tree(n) and (decimal_literal_tree(NumberFormWord(nodes.ptr[n].a)) or decimal_literal_tree(NumberFormWord(nodes.ptr[n].b)))}
     false

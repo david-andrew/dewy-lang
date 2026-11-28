@@ -127,7 +127,7 @@ lit = (v: int, t: int) -> int:
     n
 bin = (op: Tok, a: int, b: int, t: int) -> int:
     n = fresh(.binary, t)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 both = (k: NK, a: int, b: int) -> int:
     n = fresh(k, 0)
@@ -147,7 +147,7 @@ seq = (items: int[]) -> int:
     n
 assign = (op: Tok, target: int, value: int) -> int:
     n = fresh(.assign, 0)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(target); nodes[n].b = i32(value)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(target); nodes[n].b = i32(value)
     n
 index = (base: int, ix: int, t: int) -> int:
     n = fresh(.index, t)

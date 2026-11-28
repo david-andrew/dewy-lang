@@ -9,6 +9,7 @@ from p"parser_decls.dewy" import (parse_type)
 from p"parser_forms.dewy" import (parse_postfix parse_primary)
 from p"parser_cursor.dewy" import (accept advance cur_pos dotop_prec pk pkn space_before word_assign_ahead)
 from p"util.jo" import (intern)
+from p"node_store.dewy" import (node_aux2 node_fval node_with_aux2 node_with_fval node_with_op)
 
 ExprWord:type=int64<overflow='wrap'>
 
@@ -60,18 +61,18 @@ parse_prefix=():>int64=>$unsafe {
         advance();
         let operand=parse_prefix()
         let ok=nodes.ptr[operand].kind
-        if k =? 'minus' and (ok =? 'int_lit' or ok =? 'float_lit') and has_flag(operand NF_LITERAL) and nodes.ptr[operand].aux2 =? 0 {
+        if k =? 'minus' and (ok =? 'int_lit' or ok =? 'float_lit') and has_flag(operand NF_LITERAL) and node_aux2(nodes.ptr[operand].op_ext) =? 0 {
             nodes.ptr[operand].ival = -ExprWord(nodes.ptr[operand].ival)
-            nodes.ptr[operand].fval = -nodes.ptr[operand].fval
+            nodes.ptr[operand].op_ext=node_with_fval(nodes.ptr[operand].op_ext (-node_fval(nodes.ptr[operand].op_ext)))
             nodes.ptr[operand].pos = pos
-            nodes.ptr[operand].aux2 = 1
+            nodes.ptr[operand].op_ext=node_with_aux2(nodes.ptr[operand].op_ext 1)
             clear_flag(operand NF_U64)
             return operand
         }
         let n=mk(if k =? 'amp' {'addr'} else {'unary'} pos)
         # Tok is the first 32-bit field of the bounded token slot. Read its
         # frozen Jo ordinal directly; a literal union has no numeric cast.
-        nodes.ptr[n].op=((p_toks + token_at) as ptr<int32>)[0]
+        nodes.ptr[n].op_ext=node_with_op(nodes.ptr[n].op_ext (((p_toks + token_at) as ptr<int32>)[0]))
         nodes.ptr[n].a=int32<overflow='wrap'>(operand)
         return n
     }
@@ -242,7 +243,7 @@ parse_binary_slow=(minprec:ExprWord):>int64=>$unsafe {
                 ti=cur_t + 1
                 if k =? 'kw_xor' {
                     let n=mk('binary' pos)
-                    nodes.ptr[n].op=82
+                    nodes.ptr[n].op_ext=node_with_op(nodes.ptr[n].op_ext 82)
                     nodes.ptr[n].a=int32<overflow='wrap'>(lhs)
                     nodes.ptr[n].b=int32<overflow='wrap'>(parse_binary(1))
                     lhs=n
@@ -305,10 +306,10 @@ parse_binary_slow=(minprec:ExprWord):>int64=>$unsafe {
         if k =? 'qq' {b=mk('coalesce' pos)}
         else {
             b=mk('binary' pos)
-            nodes.ptr[b].op=((tp + optok) as ptr<int32>)[0]
+            nodes.ptr[b].op_ext=node_with_op(nodes.ptr[b].op_ext (((tp + optok) as ptr<int32>)[0]))
             if k =? 'dotop' {
                 nodes.ptr[b].aux=tp[optok].ival
-                if tp[optok].len =? 3 {nodes.ptr[b].aux2=1}
+                if tp[optok].len =? 3 {nodes.ptr[b].op_ext=node_with_aux2(nodes.ptr[b].op_ext 1)}
             }
         }
         nodes.ptr[b].a=int32<overflow='wrap'>(lhs)

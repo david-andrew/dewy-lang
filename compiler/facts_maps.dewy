@@ -74,7 +74,7 @@ fact_map_key=(@s:FactState e0:MapWord value:MapWord):>MapWord=>$unsafe {
     let e=e0
     loop nodes.ptr[e].kind =? 'narrow' or nodes.ptr[e].kind =? 'conv' {e=MapWord(nodes.ptr[e].a)}
     if has_flag(e NF_MAP_KEY) and nodes.ptr[e].kind =? 'ident' {return value}
-    if nodes.ptr[e].kind =? 'str_lit' and nkids(e) =? 0 and nodes.ptr[e].sval >=? 0 and not fact_member_literal(e) {return fact_constant(@s (1 << 42) + MapWord(nodes.ptr[e].sval))}
+    if nodes.ptr[e].kind =? 'str_lit' and nkids(e) =? 0 and node_sval(nodes.ptr[e].op_ext) >=? 0 and not fact_member_literal(e) {return fact_constant(@s (1 << 42) + MapWord(node_sval(nodes.ptr[e].op_ext)))}
     let stable=fact_stable_key(e)
     if stable >? 0 {return fact_constant(@s stable)}
     value
@@ -295,7 +295,7 @@ fact_map_literal=(n:MapWord @s:FactState map:MapWord keys:array<int64> raw:array
     loop j in [0..nkids(n)) {
         let pair=kid(n j)
         let key=domain_leaf(MapWord(nodes.ptr[pair].a))
-        if nodes.ptr[key].kind not=? 'int_lit' and nodes.ptr[key].kind not=? 'bool_lit' and not (nodes.ptr[key].kind =? 'str_lit' and nkids(key) =? 0 and nodes.ptr[key].sval >=? 0) {fact_map_nonempty(@s map keys.length); return}
+        if nodes.ptr[key].kind not=? 'int_lit' and nodes.ptr[key].kind not=? 'bool_lit' and not (nodes.ptr[key].kind =? 'str_lit' and nkids(key) =? 0 and node_sval(nodes.ptr[key].op_ext) >=? 0) {fact_map_nonempty(@s map keys.length); return}
     }
     loop key in keys {
         let b=fact_bound(s key)
@@ -545,7 +545,7 @@ fact_map_snapshot=(n:MapWord @s:FactState map:MapWord):>MapWord=>$unsafe {
 fact_map_loop=(n:MapWord base:MapWord @s:FactState):>void=>$unsafe {
     let t=fact_type(ntype(MapWord(nodes.ptr[n].a)))
     loop i in [0..2) {
-        let l=if i =? 0 {MapWord(nodes.ptr[n].sym)} else {MapWord(nodes.ptr[n].aux2)}
+        let l=if i =? 0 {MapWord(nodes.ptr[n].sym)} else {MapWord(node_aux2(nodes.ptr[n].op_ext))}
         if l <=? 0 {continue}
         let f=fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields) + i]
         let array=fact_project(@s base int64(f.name) false int64(f.type))
@@ -593,6 +593,7 @@ fact_map_check=(n:MapWord @s:FactState values:array<int64>):>void=>$unsafe {
 }
 
 from p"refine_siblings.dewy" import (ref_sib_map_read ref_sib_default_read)
+from p"node_store.dewy" import (node_aux2 node_op node_sval)
 
 # Jo owns the memo and interned-name slots. Bind their places once; queries
 # retain direct reads and recursion publishes the same early negative guard.
@@ -650,7 +651,7 @@ fact_reflexive_eq=(e0:MapWord a0:MapWord b0:MapWord depth:MapWord):>bool=>$unsaf
     let x:MapWord=0
     let y:MapWord=0
     # Tok.eq has frozen node-ABI ordinal 69.
-    if nodes.ptr[e].kind =? 'binary' and nodes.ptr[e].op =? int32(69) {
+    if nodes.ptr[e].kind =? 'binary' and node_op(nodes.ptr[e].op_ext) =? int32(69) {
         x=MapWord(nodes.ptr[e].a); y=MapWord(nodes.ptr[e].b)
     }
     else if nodes.ptr[e].kind =? 'call' and nodes.ptr[e].aux =? 0 and nkids(e) =? 2 {x=kid(e 0); y=kid(e 1)}

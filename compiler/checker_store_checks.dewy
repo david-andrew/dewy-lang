@@ -16,6 +16,7 @@ from p"refine_rare.dewy" import (ref_field_store ref_self_store)
 from p"string_domain_ops.dewy" import (int_domain_write string_domain_write)
 from p"type_ops.dewy" import (is_values)
 from p"types.jo" import (prune types values_any)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 StoreCheckWord:type=int64<overflow='wrap'>
 
@@ -23,7 +24,7 @@ assign_place=(lhs:StoreCheckWord):>void=>{check_place(lhs false)}
 
 assign_refine=(s:StoreCheckWord lt:StoreCheckWord code:StoreCheckWord):>StoreCheckWord=>{
     let lhs=StoreCheckWord(nodes[s].a)
-    let op=StoreCheckWord(nodes[s].op)
+    let op=StoreCheckWord(node_op(nodes[s].op_ext))
     if code =? 1 {return refine_storage(lhs lt)}
     if code =? 2 {
         if ref_self_active and ref_self_stored(lt) {return ref_self_store(s lt)}
@@ -56,7 +57,7 @@ stmt_assign=(s:StoreCheckWord):>bool=>{
         return true
     }
     let rhs=StoreCheckWord(nodes[s].b)
-    if nodes[rhs].kind =? 'call' and nodes[rhs].aux2 =? 17 {spawn_value_error(nodes[rhs].pos)}
+    if nodes[rhs].kind =? 'call' and node_aux2(nodes[rhs].op_ext) =? 17 {spawn_value_error(nodes[rhs].pos)}
     check_late_global(s)
     false
 }

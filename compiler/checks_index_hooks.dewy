@@ -23,6 +23,7 @@ from p"types.jo" import (T_NONE is_union prune structs telem tkind types union_m
 from p"type_ops.dewy" import (dt mk_typeval)
 from p"util.jo" import (intern name_of)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_sval node_with_sval)
 
 IndexHookWord:type=int64<overflow='wrap'>
 # The receiver prelude of `x[i]` runs in checker_receivers.dewy; these are its services.
@@ -34,15 +35,15 @@ index_end=(n:int64 expected:int64):>int64=>$unsafe {
     let source=IndexHookWord(nodes.ptr[n].a)
     let source_type=prune(check_expr(clone(source) 0))
     let source_kind=types.ptr[source_type].kind
-    let stable=(source_kind =? 'array' or source_kind =? 'str_' or source_kind =? 'fixed') and pool_update_read(last_checked) and dewy_end_arithmetic(IndexHookWord(nodes.ptr[n].b) IndexHookWord(nodes.ptr[n].sval))
+    let stable=(source_kind =? 'array' or source_kind =? 'str_' or source_kind =? 'fixed') and pool_update_read(last_checked) and dewy_end_arithmetic(IndexHookWord(nodes.ptr[n].b) IndexHookWord(node_sval(nodes.ptr[n].op_ext)))
     if stable and not ide_on {
         # A stable receiver's length can be read where `end` is written:
         # `xs[end]` is then exactly `xs[xs.length - 1]`, with no binding.
         # (The editor keeps the binding so that `end` hovers as a name.)
-        let end_names:array<int64>=[int64(nodes.ptr[n].sval)]
-        let end_base=name_of(IndexHookWord(nodes.ptr[n].sval))
+        let end_names:array<int64>=[int64(node_sval(nodes.ptr[n].op_ext))]
+        let end_base=name_of(IndexHookWord(node_sval(nodes.ptr[n].op_ext)))
         loop axis in [1..max(nkids(n) 1)) {end_names.push(intern("{end_base}_{axis}"))}
-        nodes.ptr[n].sval=0
+        nodes.ptr[n].op_ext=node_with_sval(nodes.ptr[n].op_ext 0)
         dewy_end_substitute(IndexHookWord(nodes.ptr[n].b) end_names source pos)
         loop x in kids(n) {
             if x not=? IndexHookWord(nodes.ptr[n].b) {dewy_end_substitute(x end_names source pos)}
@@ -57,7 +58,7 @@ index_end=(n:int64 expected:int64):>int64=>$unsafe {
         nodes.ptr[n].a=int32(bc_ident(name pos))
     }
     loop binding in dewy_index_end_bindings(n end_source source_type) {stmts.push(binding)}
-    nodes.ptr[n].sval=0
+    nodes.ptr[n].op_ext=node_with_sval(nodes.ptr[n].op_ext 0)
     let ix=nodes.length
     nodes.push(nodes.ptr[n])
     stmts.push(bc_stmt(ix pos))

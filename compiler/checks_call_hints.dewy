@@ -8,6 +8,7 @@ from p"ast.jo" import (NF_LITERAL has_flag nodes)
 from p"call_argument_checks.dewy" import (unnamed)
 from p"util.jo" import (files pos_file pos_off)
 from p"source_warnings.dewy" import (warn)
+from p"node_store.dewy" import (node_fval)
 
 CallHintWord:type=int64<overflow='wrap'>
 # rgb(255, 128, 0): colors go from 0 to 1 (more is brighter than white, for glow)
@@ -36,7 +37,7 @@ lit_num=(a0:CallHintWord):>float64=>$unsafe {
     let a=unnamed(a0)
     if not has_flag(a NF_LITERAL) and nodes.ptr[a].kind not=? 'float_lit' {return -1.0}
     if nodes.ptr[a].kind =? 'int_lit' {return float64(nodes.ptr[a].ival)}
-    if nodes.ptr[a].kind =? 'float_lit' {return nodes.ptr[a].fval}
+    if nodes.ptr[a].kind =? 'float_lit' {return node_fval(nodes.ptr[a].op_ext)}
     if nodes.ptr[a].kind =? 'conv' {return lit_num(CallHintWord(nodes.ptr[a].a))}
     -1.0
 }

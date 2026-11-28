@@ -46,12 +46,12 @@ main = ():
     nodes[1].type = i32(arr)
     # Both operand sides and wrapped local identities retain step recognition.
     nodes[8] = Node(kind=.int_lit, ival=1, type=i32(T_INT))
-    nodes[9] = Node(kind=.binary, a=8, b=3, op=i32(int(Tok.plus)))
+    nodes[9] = Node(kind=.binary, a=8, b=3, op_ext=node_with_op(u32(0), i32(i32(int(Tok.plus)))))
     nodes[10] = Node(kind=.conv, a=9)
     if not fact_loop_step(10, 1) or fact_loop_step(10, 2) or fact_loop_step(0, 1): exit(15)
-    nodes[9].op = i32(int(Tok.minus)); nodes[9].a = 3; nodes[9].b = 8
+    nodes[9].op_ext = node_with_op(nodes[9].op_ext, i32(i32(int(Tok.minus)))); nodes[9].a = 3; nodes[9].b = 8
     if not fact_loop_step(10, 1): exit(16)
-    nodes[9].op = i32(int(Tok.star))
+    nodes[9].op_ext = node_with_op(nodes[9].op_ext, i32(i32(int(Tok.star))))
     if fact_loop_step(10, 1): exit(17)
     # Record fields with a storage contract cannot seed an unbounded step.
     si = structs.len(); st = types.len(); fi = fields.len()

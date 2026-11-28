@@ -3,11 +3,12 @@ $runtime_checks
 # Call arguments and captures share the AST arenas owned by ast.jo. Returned
 # lists keep the original snapshots; no node pointer survives a growing call.
 from p"ast.jo" import (NF_GENERIC has_flag kids kids2 nodes rest_bundles)
+from p"node_store.dewy" import (node_d)
 
 AstRestWord:type=int64<overflow='wrap'>
 # Generic lambdas keep explicit captures in the child block stored in d.
 lambda_captures=(n:AstRestWord):>array<int64>=>{
-    if has_flag(n NF_GENERIC) {return kids(AstRestWord(nodes[n].d))}
+    if has_flag(n NF_GENERIC) {return kids(AstRestWord(node_d(nodes[n].op_ext)))}
     kids2(n)
 }
 # A call's written arguments expand the arrays gathered by rest parameters.

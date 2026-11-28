@@ -79,7 +79,7 @@ for_of = (it: int, names: int[], dewy: bool = true, flags: int = 0, ival: int = 
     s = node(.for_, it, ival, 0, vars)
     nodes[s].b = i32(node(.block))
     nodes[s].flags = i32(flags)
-    nodes[s].sval = i32(label)
+    nodes[s].op_ext = node_with_sval(nodes[s].op_ext, i32(i32(label)))
     if dewy: nodes[s].pos = DEWY + s
     s
 lit = (t: int) -> int:
@@ -96,7 +96,7 @@ named_struct = (name: str, field_types: int[]) -> int:
     types.len() - 1
 run = (s: int):
     fl_for(s)
-    print("{s}:{nodes[s].a}:{nodes[s].sym}:{nodes[s].aux}:{nodes[s].c}:{nodes[s].d}:{nodes[s].aux2}:{ctxs[cx].loop_depth}:{serials}:{value_loops.len()}:{scopes.names.len()}")
+    print("{s}:{nodes[s].a}:{nodes[s].sym}:{nodes[s].aux}:{nodes[s].c}:{node_d(nodes[s].op_ext)}:{node_aux2(nodes[s].op_ext)}:{ctxs[cx].loop_depth}:{serials}:{value_loops.len()}:{scopes.names.len()}")
     if nodes[s].sym > 0: print("  {locals[int(nodes[s].sym)].flags}")
 prepare_for = ():
     prepare_loops()

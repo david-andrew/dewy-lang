@@ -2,7 +2,7 @@ $runtime_checks
 from p"coerce_expression.dewy" import (coerce)
 from p"format_word_observations.dewy" import (fmt_part)
 
-from p"node_store.dewy" import (Node NK)
+from p"node_store.dewy" import (NK Node node_fval node_op node_sval)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -134,13 +134,13 @@ xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
         let k=node[0].kind
         let maybe_exact=false
         if k =? 'binary' {
-            let op=node[0].op
+            let op=node_op(node[0].op_ext)
             if op =? 63 or op =? 64 or op =? 65 {maybe_exact=true}
             else if (op <=? 61 or op =? 67 or op =? 79) and node[0].aux =? 0 {
                 if t0 not=? xl_bool_type[0] and t0 not=? xl_float_type[0] and t0 not=? xl_string_type[0] and t0 not=? xl_math_int[0] {maybe_exact=true}
             }
         } else if k =? 'unary' {
-            if node[0].op =? 59 {maybe_exact=true}
+            if node_op(node[0].op_ext) =? 59 {maybe_exact=true}
         } else if k =? 'conv' {
             if node[0].aux =? 2 {maybe_exact=true}
         } else {
@@ -233,7 +233,7 @@ xl_check_scalar=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     let t:XLWord=0
     if k =? 'float_lit' {
         if ex not=? 0 and exk =? 'float_' {
-            if nd[0].sval not=? 0 and nd[0].fval - nd[0].fval not=? 0.0 {literal_float_error(n)}
+            if node_sval(nd[0].op_ext) not=? 0 and node_fval(nd[0].op_ext) - node_fval(nd[0].op_ext) not=? 0.0 {literal_float_error(n)}
             xl_nodes[0].ptr[n].flags=xl_nodes[0].ptr[n].flags & ~256
             t=ex
         } else if ex not=? 0 and exk =? 'opt' and xl_types[0].ptr[tu_prune(XLWord(xl_types[0].ptr[ex].elem))].kind =? 'float_' {

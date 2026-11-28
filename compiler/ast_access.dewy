@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"ast.jo" import (dewy_len_members dewy_param_kinds id_dewy_len lists nodes)
-from p"node_store.dewy" import (NK Node node_clone node_kids node_kids2 node_mk node_mk_slow node_set_list node_set_list2)
+from p"node_store.dewy" import (NK Node node_clone node_d node_kids node_kids2 node_list2 node_mk node_mk_slow node_nlist2 node_set_list node_set_list2)
 
 AstWord:type=int64<overflow='wrap'>
 
@@ -33,9 +33,9 @@ ast_set_list=(n:int64 xs:array<int64>):>void=>node_set_list(@nodes @lists n xs)
 ast_set_list2=(n:int64 xs:array<int64>):>void=>node_set_list2(@nodes @lists n xs)
 
 ast_kid=(n:AstWord i:AstWord):>int64=>$unsafe lists.ptr[AstWord(nodes.ptr[n].list) + i]
-ast_kid2=(n:AstWord i:AstWord):>int64=>$unsafe lists.ptr[AstWord(nodes.ptr[n].list2) + i]
+ast_kid2=(n:AstWord i:AstWord):>int64=>$unsafe lists.ptr[AstWord(node_list2(nodes.ptr[n].op_ext)) + i]
 ast_nkids=(n:AstWord):>int64=>$unsafe nodes.ptr[n].nlist
-ast_nkids2=(n:AstWord):>int64=>$unsafe nodes.ptr[n].nlist2
+ast_nkids2=(n:AstWord):>int64=>$unsafe node_nlist2(nodes.ptr[n].op_ext)
 ast_set_kid=(n:AstWord i:AstWord v:int64):>void=>$unsafe {
     lists[AstWord(nodes.ptr[n].list) + i]=int32<overflow='wrap'>(v)
 }
@@ -46,7 +46,7 @@ ast_kid_c=(n:AstWord):>int64=>$unsafe {
 }
 ast_kid_d=(n:AstWord):>int64=>$unsafe {
     let k=nodes.ptr[n].kind
-    if k =? 'for_' or k =? 'partial' {0} else {int64(nodes.ptr[n].d)}
+    if k =? 'for_' or k =? 'partial' {0} else {int64(node_d(nodes.ptr[n].op_ext))}
 }
 ast_kids=(n:int64):>array<int64>=>node_kids(@nodes @lists n)
 ast_kids2=(n:int64):>array<int64>=>node_kids2(@nodes @lists n)

@@ -5,7 +5,7 @@ from p"expression_types.dewy" import (ntype)
 
 from p"@lib/core/os.jo" import (env eprint)
 from p"ast.jo" import (NF_AT NF_RDONLY clone has_flag kid kid_c kid_d kids lists nkids nkids2 nodes set_list)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_d node_op node_sval node_with_sval)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST check_scopes const_views copy_writes ctxs cx fns globals locals syms)
 from p"exact.jo" import (exact_candidate_nodes exact_measure_on exact_stores)
 from p"exact_check_hooks.dewy" import (exact_note)
@@ -131,13 +131,13 @@ member_syntax_inner=(n:MemberWord name:MemberWord @t:MemberTemplate value:bool):
         if member_dependent(MemberWord(nodes.ptr[n].a) t) {return false}
     }
     else if k =? 'assign' {
-        if nodes.ptr[n].op not=? int32(47) or nodes.ptr[MemberWord(nodes.ptr[n].a)].kind not=? 'index' {return false}
+        if node_op(nodes.ptr[n].op_ext) not=? int32(47) or nodes.ptr[MemberWord(nodes.ptr[n].a)].kind not=? 'index' {return false}
     }
     else if k not=? 'block' and k not=? 'exprstmt' and k not=? 'field' and k not=? 'index' and k not=? 'array' and k not=? 'binary' and k not=? 'and_' and k not=? 'or_' and k not=? 'not_' and k not=? 'int_lit' and k not=? 'str_lit' and k not=? 'bool_lit' {return false}
     # Comparison chains contain value blocks. Their final expression belongs
     # to that block, whereas a loop-body expression could feed an outer sink.
     let branch_value=if k =? 'if_' {value} else {true}
-    if not member_syntax(MemberWord(nodes.ptr[n].a) name @t true) or not member_syntax(MemberWord(nodes.ptr[n].b) name @t branch_value) or not member_syntax(MemberWord(nodes.ptr[n].c) name @t branch_value) or not member_syntax(MemberWord(nodes.ptr[n].d) name @t true) {return false}
+    if not member_syntax(MemberWord(nodes.ptr[n].a) name @t true) or not member_syntax(MemberWord(nodes.ptr[n].b) name @t branch_value) or not member_syntax(MemberWord(nodes.ptr[n].c) name @t branch_value) or not member_syntax(MemberWord(node_d(nodes.ptr[n].op_ext)) name @t true) {return false}
     loop i in [0..nkids(n)) {
         let child_value=k not=? 'block' or value and i =? nkids(n) - 1
         if not member_syntax(kid(n i) name @t child_value) {return false}
@@ -151,7 +151,7 @@ member_prepare=(scopes:array<int64> body:MemberWord):>void=>$unsafe {
     loop scope in scopes {
         let value=MemberWord(nodes.ptr[scope].a)
         if nodes.ptr[scope].aux not=? 0 or nodes.ptr[value].kind not=? 'str_lit' {return}
-        let text=name_of(MemberWord(nodes.ptr[value].sval))
+        let text=name_of(MemberWord(node_sval(nodes.ptr[value].op_ext)))
         t.texts.push(text)
         t.domain[text]=true
     }
@@ -258,7 +258,7 @@ member_copy_fast=(n:MemberWord @t:MemberTemplate text:string text_id:int32 @lm:d
     nodes.push(nd)
     nm[n]=c
     if (k =? 'str_lit' or k =? 'dotname') and t.positions.has(nd.pos) {
-        if k =? 'str_lit' {nodes.ptr[c].sval=text_id}
+        if k =? 'str_lit' {nodes.ptr[c].op_ext=node_with_sval(nodes.ptr[c].op_ext text_id)}
         else {
             nodes.ptr[c].aux=int32(member_words[str_set_of(ntype(n))][text])
             nodes.ptr[c].name=text_id
@@ -339,7 +339,7 @@ member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
         return c
     }
     if mcf_has_pos and (k =? 'str_lit' or k =? 'dotname') and mcf_t[0].positions.has(nodes[c].pos) {
-        if k =? 'str_lit' {nodes[c].sval=mcf_text_id}
+        if k =? 'str_lit' {nodes[c].op_ext=node_with_sval(nodes[c].op_ext mcf_text_id)}
         else {
             nodes[c].aux=MemberI32(member_words[str_set_of(ntype(n))][mcf_text])
             nodes[c].name=mcf_text_id
@@ -472,7 +472,7 @@ member_scope=(scope:MemberWord):>bool=>$unsafe {
         nodes.ptr[scope].b=int32(member_templates[index].empty)
         return true
     }
-    let text=name_of(MemberWord(nodes.ptr[MemberWord(nodes.ptr[scope].a)].sval))
+    let text=name_of(MemberWord(node_sval(nodes.ptr[MemberWord(nodes.ptr[scope].a)].op_ext)))
     let copies=dict<int64 int64>()
     let body=member_replay_scope(index scope text @copies)
     nodes.ptr[scope].b=int32(body)

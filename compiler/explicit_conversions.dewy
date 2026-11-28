@@ -28,7 +28,7 @@ from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_
 from p"numeric_library_types.dewy" import (bundled_bigint_type math_rep_type)
 from p"checks_call_hints.dewy" import (a_type)
 from p"types.jo" import (T_BOOL T_F32 T_FLOAT T_INT T_MATH_INT T_STR T_U8 is_float is_int is_numeric is_union prune tkind type_eq types union_members)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_fval node_sval node_with_sval)
 from p"ast.jo" import (NF_CHECKED NF_EXPLICIT_INTEGER NF_LITERAL NF_RECORD add_flag clear_flag mk nodes set_list)
 from p"expr.jo" import (CV)
 from p"coerce_expression.dewy" import (coerce)
@@ -79,7 +79,7 @@ conversion=(n:int64 to0:int64 args:array<int64>):>int64=>$unsafe {
         let a0=args[0]
         if nodes.ptr[a0].kind =? 'str_lit' and not type_eq(to T_U8) and src_char(nodes.ptr[a0].pos) =? b'"' {
             # (int('0') in single quotes, as character arithmetic writes it, is the code)
-            let w=name_of(ExplicitConversionsWord(nodes.ptr[a0].sval))
+            let w=name_of(ExplicitConversionsWord(node_sval(nodes.ptr[a0].op_ext)))
             if (w as array<uint8>).length =? 1 and (w as array<uint8>).ptr[0] >=? b'0' and (w as array<uint8>).ptr[0] <=? b'9' {
                 fatal(nodes.ptr[n].pos "{dt(to0)}(\"{w}\") would be the code of the character {w} ({ExplicitConversionsWord((w as array<uint8>).ptr[0])}): `to_int(\"{w}\")` reads the number, and `{jd(nodes.ptr[n].pos "u8" "uint8")}('{w}')` is the code")
             }
@@ -96,7 +96,7 @@ conversion=(n:int64 to0:int64 args:array<int64>):>int64=>$unsafe {
         }
         let part=mk('pair' nodes.ptr[n].pos)
         nodes[part].a = int32<overflow='wrap'>(args[0])
-        nodes[part].sval = -1
+        nodes[part].op_ext=node_with_sval(nodes[part].op_ext (-1))
         nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos aux = 1)
         set_list(n [part])
         return check_expr(n 0)
@@ -129,7 +129,7 @@ conversion=(n:int64 to0:int64 args:array<int64>):>int64=>$unsafe {
         wrap_conv(n (if int_policy(to) =? 1 {CV.wrap_int} else {CV.saturate_int}) to)
         return to
     }
-    if tk =? 'int_' and nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0 {ft=exact_decimal(a)}
+    if tk =? 'int_' and nodes.ptr[a].kind =? 'float_lit' and node_sval(nodes.ptr[a].op_ext) not=? 0 {ft=exact_decimal(a)}
     if tk =? 'int_' and (bundled_rational_type(ft) or bundled_word_rational_type(ft)) {
         let source=nodes.length
         nodes.push(nodes.ptr[a])
@@ -157,7 +157,7 @@ conversion=(n:int64 to0:int64 args:array<int64>):>int64=>$unsafe {
     }
     if is_lit(a) and nodes.ptr[a].kind =? 'float_lit' and tk =? 'int_' {
         nodes[a].kind = 'int_lit'
-        nodes[a].ival = int64(nodes.ptr[a].fval)
+        nodes[a].ival = int64(node_fval(nodes.ptr[a].op_ext))
     }
     if is_lit(a) and is_numeric(to) {
         coerce(a to);

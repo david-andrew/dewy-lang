@@ -30,6 +30,7 @@ from p"unit_ops.dewy" import (base_dimension mk_quantity quantity_constant_scale
 from p"util.jo" import (files name_of pos_file)
 from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (line_col)
+from p"node_store.dewy" import (node_list2 node_nlist2 node_op node_sval)
 DecimalWord:type=int64<overflow='wrap'>
 decimal_quantity_at:DecimalWord=0 # (the last binding decimal_quantity_start found: only those may start over)
 decimal_let=(n:DecimalWord):>void=>$unsafe {
@@ -38,9 +39,9 @@ decimal_let=(n:DecimalWord):>void=>$unsafe {
 # (what may start a decimal binding: a decimal, or a decimal with a unit, `0.0kWh` or `0.0BTU/hour`)
 decimal_start=(n:DecimalWord):>bool=>decimal_literal_tree(n) or decimal_unit_tree(n)
 decimal_unit_tree=(n:DecimalWord):>bool=>$unsafe {
-    if nodes.ptr[n].kind not=? 'binary' or (nodes.ptr[n].op not=? int32(60) and nodes.ptr[n].op not=? int32(61)) {return false}
+    if nodes.ptr[n].kind not=? 'binary' or (node_op(nodes.ptr[n].op_ext) not=? int32(60) and node_op(nodes.ptr[n].op_ext) not=? int32(61)) {return false}
     let a=DecimalWord(nodes.ptr[n].a)
-    (nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0) or decimal_unit_tree(a)
+    (nodes.ptr[a].kind =? 'float_lit' and node_sval(nodes.ptr[a].op_ext) not=? 0) or decimal_unit_tree(a)
 }
 # an unannotated, assignable binding that a decimal literal initializes, among the
 # statements of n or of a lambda inside them (its float write starts the enclosing body over)
@@ -107,8 +108,8 @@ decimal_save=(n:DecimalWord):>void=>$unsafe {
         dsn_vals.push(lists.ptr[s + i])
         decimal_save(DecimalWord(lists.ptr[s + i]))
     }
-    let s2=DecimalWord(nodes.ptr[n].list2)
-    loop i in [0..DecimalWord(nodes.ptr[n].nlist2)) {
+    let s2=DecimalWord(node_list2(nodes.ptr[n].op_ext))
+    loop i in [0..DecimalWord(node_nlist2(nodes.ptr[n].op_ext))) {
         dsn_slots.push(s2 + i)
         dsn_vals.push(lists.ptr[s2 + i])
         decimal_save(DecimalWord(lists.ptr[s2 + i]))

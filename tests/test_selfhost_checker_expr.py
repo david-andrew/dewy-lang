@@ -263,7 +263,7 @@ arguments = ():
     finish_arg(done(T_INT), T_INT, true)
     finish_arg(done(T_INT), 0, false)
 binop = (op: Tok, a: int, b: int, dewy: bool = true) -> int:
-    n = node(.binary, a); nodes[n].b = i32(b); nodes[n].op = i32(int(op))
+    n = node(.binary, a); nodes[n].b = i32(b); nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op))))
     if dewy: nodes[n].pos = (1 << 40) + n
     n
 # An unchecked operand outside Dewy (an integer literal there is typed int).
@@ -440,7 +440,7 @@ call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: i
 call_int_literal = (n: int, ex: int) -> int:
     events.push("int-literal:{n}:{ex}")
     if zc_literal == -2: print("literal-error:{n}"); exit(19)
-    if zc_literal >= 0: nodes[n].aux2 = 0
+    if zc_literal >= 0: nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(0))
     zc_literal
 call_map_rows = (n: int, ex: int): events.push("map-rows:{n}:{ex}")
 is_nd = (t: int) -> bool: zc_nd

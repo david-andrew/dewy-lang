@@ -17,6 +17,7 @@ from p"prelude_ops.dewy" import (demand_prelude_name)
 from p"types.jo" import (T_VOID prune structs types)
 from p"util.jo" import (intern name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_aux2 node_mod)
 
 MethodWord:type=int64<overflow='wrap'>
 dewy_inherited_key=():>MethodWord=>{
@@ -91,7 +92,7 @@ dewy_parent_decl=(decl:MethodWord):>MethodWord=>$unsafe {
     let p=MethodWord(nodes.ptr[decl].a)
     if p =? 0 or mint_of_any(decl) {return 0}
     let saved=cx
-    ctxs.push(FnCtx(int32(new_inst(FK_INIT MethodWord(nodes.ptr[decl].mod) "nominal")) (-1) int32(T_VOID) false 0 nodes.ptr[decl].mod int32(check_scopes.names.length)))
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT MethodWord(node_mod(nodes.ptr[decl].op_ext)) "nominal")) (-1) int32(T_VOID) false 0 node_mod(nodes.ptr[decl].op_ext) int32(check_scopes.names.length)))
     cx=ctxs.length - 1
     let t=prune(resolve_type(p))
     ctxs.pop();
@@ -328,7 +329,7 @@ dewy_member_closure_handles=(n:MethodWord names:array<int64>):>void=>$unsafe {
     if n =? 0 {return}
     let k=nodes.ptr[n].kind
     let escapes=k =? 'ident' and has_flag(n NF_MUT) and names.contains(MethodWord(nodes.ptr[n].name))
-    if k =? 'call' and nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) and nodes.ptr[MethodWord(nodes.ptr[n].a)].kind =? 'ident' and names.contains(MethodWord(nodes.ptr[MethodWord(nodes.ptr[n].a)].name)) {escapes=true}
+    if k =? 'call' and node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL) and nodes.ptr[MethodWord(nodes.ptr[n].a)].kind =? 'ident' and names.contains(MethodWord(nodes.ptr[MethodWord(nodes.ptr[n].a)].name)) {escapes=true}
     if escapes {
         let named=n
         if k =? 'call' {named=MethodWord(nodes.ptr[n].a)}

@@ -14,6 +14,7 @@ from p"literal_context.dewy" import (is_lit)
 from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
 from p"types.jo" import (prune)
 from p"util.jo" import (files)
+from p"node_store.dewy" import (node_mod)
 
 RationalLookupWord:type=int64<overflow='wrap'>
 
@@ -60,8 +61,8 @@ exact_members_for=(decls:array<int64> name:RationalLookupWord args:array<int64>)
     let rm=rational_module()
     let m=cur_mod()
     if rm <? 0 or m <? 0 or m =? rm or decls.length =? 0 or modules.ptr[m].is_prelude {return decls}
-    if not modules.ptr[RationalLookupWord(nodes.ptr[decls[0]].mod)].is_prelude or not files.ptr[RationalLookupWord(modules.ptr[m].file)].is_dewy {return decls}
-    loop d in decls {if RationalLookupWord(nodes.ptr[d].mod) =? rm {return decls}}
+    if not modules.ptr[RationalLookupWord(node_mod(nodes.ptr[decls[0]].op_ext))].is_prelude or not files.ptr[RationalLookupWord(modules.ptr[m].file)].is_dewy {return decls}
+    loop d in decls {if RationalLookupWord(node_mod(nodes.ptr[d].op_ext)) =? rm {return decls}}
     if reaches_rational(m rm) {return decls}
     loop a0 in args {
         let a=unnamed(a0)

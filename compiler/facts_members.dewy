@@ -5,7 +5,7 @@ from p"member_plan.dewy" import (member_fact_ready member_fact_view)
 
 from p"@lib/core/os.jo" import (eprint)
 from p"ast.jo" import (kid lists nkids nodes)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_d node_nlist2 node_op node_sval)
 from p"checker_state.dewy" import (Local)
 from p"check.jo" import (fns locals)
 from p"directives.jo" import (dir_proven)
@@ -106,7 +106,7 @@ fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
         if has_exact and ((x <? nexact and exactp[x] not=? uint8(0)) or (y <? nexact and exactp[y] not=? uint8(0))) {return false}
         if has_rat and (rational_constants.has(x) or rational_constants.has(y)) {return false}
         if k =? 'ident' {
-            if left.name not=? right.name or left.aux not=? right.aux or left.aux2 not=? right.aux2 or left.op not=? right.op or left.ival not=? right.ival or left.sval not=? right.sval or left.d not=? right.d or left.nlist not=? right.nlist or left.nlist2 not=? 0 or right.nlist2 not=? 0 {return false}
+            if left.name not=? right.name or left.aux not=? right.aux or node_aux2(left.op_ext) not=? node_aux2(right.op_ext) or node_op(left.op_ext) not=? node_op(right.op_ext) or left.ival not=? right.ival or node_sval(left.op_ext) not=? node_sval(right.op_ext) or node_d(left.op_ext) not=? node_d(right.op_ext) or left.nlist not=? right.nlist or node_nlist2(left.op_ext) not=? 0 or node_nlist2(right.op_ext) not=? 0 {return false}
             if left.sym not=? right.sym {
                 if left.aux not=? int32(1) or left.sym <=? 0 or right.sym <=? 0 {return false}
                 let lx=MemberWord(left.sym)
@@ -116,14 +116,14 @@ fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
             continue
         }
         if k =? 'int_lit' {
-            if left.ival not=? right.ival or left.aux not=? right.aux or left.aux2 not=? right.aux2 or left.sym not=? right.sym or left.op not=? right.op or left.name not=? right.name or left.sval not=? right.sval or left.d not=? right.d or left.nlist not=? right.nlist or left.nlist2 not=? 0 or right.nlist2 not=? 0 {return false}
+            if left.ival not=? right.ival or left.aux not=? right.aux or node_aux2(left.op_ext) not=? node_aux2(right.op_ext) or left.sym not=? right.sym or node_op(left.op_ext) not=? node_op(right.op_ext) or left.name not=? right.name or node_sval(left.op_ext) not=? node_sval(right.op_ext) or node_d(left.op_ext) not=? node_d(right.op_ext) or left.nlist not=? right.nlist or node_nlist2(left.op_ext) not=? 0 or node_nlist2(right.op_ext) not=? 0 {return false}
             continue
         }
-        if left.op not=? right.op or left.ival not=? right.ival or left.name not=? right.name or left.aux2 not=? right.aux2 or left.d not=? right.d or left.nlist not=? right.nlist or left.nlist2 not=? 0 or right.nlist2 not=? 0 {return false}
+        if node_op(left.op_ext) not=? node_op(right.op_ext) or left.ival not=? right.ival or left.name not=? right.name or node_aux2(left.op_ext) not=? node_aux2(right.op_ext) or node_d(left.op_ext) not=? node_d(right.op_ext) or left.nlist not=? right.nlist or node_nlist2(left.op_ext) not=? 0 or node_nlist2(right.op_ext) not=? 0 {return false}
         if has_pos and (k =? 'str_lit' or k =? 'dotname') and member_templates.ptr[fms_index].positions.has(left.pos) {
             if k =? 'dotname' and tkind(ntype(x)) =? 'enum_' or k =? 'str_lit' and (left.aux not=? 0 or left.nlist not=? 0) {return false}
         }
-        else if left.sval not=? right.sval or left.aux not=? right.aux {return false}
+        else if node_sval(left.op_ext) not=? node_sval(right.op_ext) or left.aux not=? right.aux {return false}
         if left.sym not=? right.sym {
             if k not=? 'vardecl' or left.sym <=? 0 or right.sym <=? 0 {return false}
             let lx=MemberWord(left.sym)

@@ -5,7 +5,7 @@ from p"ast.jo" import (NF_LITERAL NF_LOOPCOUNT NF_STMT add_flag mk nodes set_lis
 from p"checker_tokens.dewy" import (Tok)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"lexer_errors.dewy" import (tok_name)
-from p"node_store.dewy" import (NK)
+from p"node_store.dewy" import (NK node_op node_with_op)
 from p"parse.jo" import (p_ntoks p_toks struct_body ti)
 from p"parser_ops.dewy" import (is_keyword_tok)
 from p"parser_cursor.dewy" import (advance cur_pos is_soft_kw pk space_before)
@@ -265,7 +265,7 @@ lx_expr_stmt=(e:SharedWord pos:SharedWord):>int64=>$unsafe {
 
 head_node=(op:SharedWord pos:SharedWord):>int64=>$unsafe {
     let n=mk('lhead' pos)
-    nodes.ptr[n].op=int32<overflow='wrap'>(op)
+    nodes.ptr[n].op_ext=node_with_op(nodes.ptr[n].op_ext (int32<overflow='wrap'>(op)))
     n
 }
 
@@ -273,8 +273,8 @@ head_node=(op:SharedWord pos:SharedWord):>int64=>$unsafe {
 head_collapse=(n:SharedWord):>int64=>$unsafe {
     let a=SharedWord(nodes.ptr[n].a)
     let b=SharedWord(nodes.ptr[n].b)
-    if nodes.ptr[a].op not=? 4 or nodes.ptr[b].op not=? 4 {return n}
-    let k:NK=if nodes.ptr[n].op =? 3 {'or_'} else {'and_'}
+    if node_op(nodes.ptr[a].op_ext) not=? 4 or node_op(nodes.ptr[b].op_ext) not=? 4 {return n}
+    let k:NK=if node_op(nodes.ptr[n].op_ext) =? 3 {'or_'} else {'and_'}
     let e=mk(k nodes.ptr[n].pos)
     nodes.ptr[e].a=nodes.ptr[a].a
     nodes.ptr[e].b=nodes.ptr[b].a

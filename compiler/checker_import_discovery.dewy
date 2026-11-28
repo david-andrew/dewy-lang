@@ -11,6 +11,7 @@ from p"checks_thin.dewy" import (module_path_key)
 from p"module_paths.dewy" import (module_candidates)
 from p"util.jo" import (files intern)
 from p"watch_ops.dewy" import (watch_missing_input)
+from p"node_store.dewy" import (node_with_aux2 node_with_sval)
 
 ImportWord:type=int64<overflow='wrap'>
 # ---------------- modules ----------------
@@ -41,8 +42,8 @@ register_bundled_import=(file:string alias:string pos:ImportWord):>void=>$unsafe
     let first_module=modules.length
     let first_import=from_imports.length
     let d=mk('import_' pos)
-    nodes.ptr[d].aux2=1
-    nodes.ptr[d].sval=int32<overflow='wrap'>(intern("@lib/{file}"))
+    nodes.ptr[d].op_ext=node_with_aux2(nodes.ptr[d].op_ext 1)
+    nodes.ptr[d].op_ext=node_with_sval(nodes.ptr[d].op_ext (int32<overflow='wrap'>(intern("@lib/{file}"))))
     nodes.ptr[d].name=int32<overflow='wrap'>(name)
     register_decls(m [d])
     modules[m].decls.push(d)

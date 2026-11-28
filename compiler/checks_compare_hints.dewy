@@ -28,6 +28,7 @@ from p"rational_types.dewy" import (bundled_rational_type)
 from p"util.jo" import (name_of pos_in_lib)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_op node_sval)
 
 CompareWord:type=int64<overflow='wrap'>
 variant_hint_for=(t:CompareWord name:string):>string=>{
@@ -130,7 +131,7 @@ cmp_error=(n:CompareWord ta:CompareWord tb:CompareWord):>void=>$unsafe {
     let why=variant_hint(CompareWord(nodes.ptr[n].b) ta)
     let a=CompareWord(nodes.ptr[n].a)
     if tkind(ta) =? 'bool_' and is_numeric(tb) and nodes.ptr[a].kind =? 'binary' {
-        let aop=cx_token_values.ptr[CompareWord(nodes.ptr[a].op)]
+        let aop=cx_token_values.ptr[CompareWord(node_op(nodes.ptr[a].op_ext))]
         if aop =? 'lt' or aop =? 'le' or aop =? 'gt' or aop =? 'ge' {why=if dewy_at(nodes.ptr[n].pos) {" (a parenthesized comparison is a bool; the chain `a <? x <? b` goes without parentheses)"} else {" (`a < x < b` is written `a < x and x < b`, or `x in a..b`)"}}
     }
     # (the member compared with: the same type, or a number for a number)
@@ -256,7 +257,7 @@ variant_hint=(a:CompareWord t0:CompareWord):>string=>$unsafe {
         # (load_texture("hero.png"): a file's bytes, not its name)
         if types.ptr[t].kind =? 'array' and prune(CompareWord(types.ptr[t].elem)) =? T_U8 and types.ptr[ft].kind =? 'str_' {
             if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0 {
-                let f=name_of(CompareWord(nodes.ptr[a].sval))
+                let f=name_of(CompareWord(node_sval(nodes.ptr[a].op_ext)))
                 return " (a file's bytes: `embed(\"{f}\")` builds the file into the program, `read_bytes(\"{f}\")!` reads it when the program runs; the `!` stops the program if the file is not there)"
             }
             return " (`bytes(s)` is a string's bytes; `embed(\"file\")` a file's)"
@@ -274,12 +275,12 @@ variant_hint=(a:CompareWord t0:CompareWord):>string=>$unsafe {
         # (circle(p, 8, "yellow"): a color is made of numbers)
         if type_eq(t T_VEC4) and types.ptr[ft].kind =? 'str_' {
             if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0 {
-                let cn=upper(name_of(CompareWord(nodes.ptr[a].sval)))
+                let cn=upper(name_of(CompareWord(node_sval(nodes.ptr[a].op_ext))))
                 if cn =? "GREY" {cn="GRAY"}
                 loop known in ["WHITE" "BLACK" "RED" "GREEN" "BLUE" "YELLOW" "ORANGE" "PURPLE" "CYAN" "MAGENTA" "GRAY"] {
                     if cn =? known {return " (a color is made of numbers: `{cn}`, or `rgb(r, g, b)` with each from 0 to 1)"}
                 }
-                if (cn as array<uint8>).length >? 0 and (cn as array<uint8>)[0] =? b'#' {return " (a color is made of numbers: `hex(\"{name_of(CompareWord(nodes.ptr[a].sval))}\")`, or `rgb(r, g, b)` with each from 0 to 1)"}
+                if (cn as array<uint8>).length >? 0 and (cn as array<uint8>)[0] =? b'#' {return " (a color is made of numbers: `hex(\"{name_of(CompareWord(node_sval(nodes.ptr[a].op_ext)))}\")`, or `rgb(r, g, b)` with each from 0 to 1)"}
             }
             return " (a color is made of numbers: `rgb(r, g, b)` with each from 0 to 1, or a named one such as `YELLOW`)"
         }
@@ -292,7 +293,7 @@ variant_hint=(a:CompareWord t0:CompareWord):>string=>$unsafe {
         if type_eq(ft T_VEC3) and type_eq(t T_VEC4) {return " (`vec4({c}, 1)` is a vec3 color with its alpha)"}
     }
     if types.ptr[t].kind not=? 'enum_' or nodes.ptr[a].kind not=? 'str_lit' or nodes.ptr[a].nlist >? 0 {return ""}
-    let w=name_of(CompareWord(nodes.ptr[a].sval))
+    let w=name_of(CompareWord(node_sval(nodes.ptr[a].op_ext)))
     let si=CompareWord(types.ptr[t].st)
     check_struct_fields(si)
     loop vi in [0..CompareWord(structs.ptr[si].nvariants)) {

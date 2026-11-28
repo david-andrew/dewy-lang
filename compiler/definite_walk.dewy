@@ -8,6 +8,7 @@ from p"util.jo" import (err_notes name_of)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"type_ops.dewy" import (dt)
 from p"isolation_ops.dewy" import isolation_children
+from p"node_store.dewy" import (node_aux2 node_d node_op node_sval)
 
 # Only functions holding a `let x:T` without a value, and programs with such globals, are walked.
 DefiniteWord:type=int64<overflow='wrap'>
@@ -32,7 +33,7 @@ da_path=(st0:DaState path:DefiniteWord):>DaState=>$unsafe {
     let st=st0
     loop l in st.unset {
         let d=da_names.get(l) ?? 0
-        if d not=? 0 and nodes.ptr[d].aux2 =? 1791 and not st.missing.has(l) {st.missing[l]=path}
+        if d not=? 0 and node_aux2(nodes.ptr[d].op_ext) =? 1791 and not st.missing.has(l) {st.missing[l]=path}
     }
     st
 }
@@ -64,8 +65,8 @@ da_read=(n:DefiniteWord st:DaState):>void=>$unsafe {
     if not st.unset.contains(l) {return}
     let nm=name_of(DefiniteWord(locals.ptr[l].name))
     let d=da_names.get(l) ?? 0
-    if d not=? 0 and nodes.ptr[d].aux2 =? 1791 {
-        nm=name_of(DefiniteWord(nodes.ptr[d].sval))
+    if d not=? 0 and node_aux2(nodes.ptr[d].op_ext) =? 1791 {
+        nm=name_of(DefiniteWord(node_sval(nodes.ptr[d].op_ext)))
         let path=st.missing.get(l) ?? 0
         let where_=path // 4
         let which=path % 4
@@ -103,7 +104,7 @@ da_walk=(n:DefiniteWord st0:DaState):>DaState=>$unsafe {
     if dg_active and ((k =? 'call' and nodes.ptr[n].aux =? 0) or k =? 'fnref' or k =? 'partial') {
         st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
         st=da_walk_all(kids(n) st)
-        let f=if k =? 'partial' {DefiniteWord(nodes.ptr[n].d)} else {DefiniteWord(nodes.ptr[n].sym)}
+        let f=if k =? 'partial' {DefiniteWord(node_d(nodes.ptr[n].op_ext))} else {DefiniteWord(nodes.ptr[n].sym)}
         let how=if k =? 'call' {"calls a function that reads"} else {"takes a function that reads"}
         dg_through(n f @st how k =? 'call')
         return st
@@ -132,17 +133,17 @@ da_walk=(n:DefiniteWord st0:DaState):>DaState=>$unsafe {
     }
     if k =? 'assign' {
         let lhs=DefiniteWord(nodes.ptr[n].a)
-        if nodes.ptr[n].op =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? DA_LOCAL {
+        if node_op(nodes.ptr[n].op_ext) =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? DA_LOCAL {
             st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
             da_remove(@st da_root(DefiniteWord(nodes.ptr[lhs].sym)))
             return st
         }
-        if dg_active and nodes.ptr[n].op =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? DA_GLOBAL {
+        if dg_active and node_op(nodes.ptr[n].op_ext) =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? DA_GLOBAL {
             st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
             da_remove(@st (-DefiniteWord(nodes.ptr[lhs].sym) - 1))
             return st
         }
-        if nodes.ptr[n].op =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'tuple' {
+        if node_op(nodes.ptr[n].op_ext) =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'tuple' {
             st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
             da_unpacked(lhs @st)
             return st
@@ -328,7 +329,7 @@ dg_collect=(n:DefiniteWord @seen:dict<int64 bool> @out:array<int64>):>void=>$uns
         return
     }
     if (k =? 'call' and nodes.ptr[n].aux =? 0) or k =? 'fnref' or (k =? 'lambda' and not has_flag(n NF_GENERIC)) {dg_collect_fn(DefiniteWord(nodes.ptr[n].sym) @seen @out)}
-    if k =? 'partial' {dg_collect_fn(DefiniteWord(nodes.ptr[n].d) @seen @out)}
+    if k =? 'partial' {dg_collect_fn(DefiniteWord(node_d(nodes.ptr[n].op_ext)) @seen @out)}
     let mask=isolation_children(k)
     if mask <? 0 {
         dg_collect(DefiniteWord(nodes.ptr[n].a) @seen @out)

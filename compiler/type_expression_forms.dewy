@@ -18,6 +18,7 @@ from p"reflection.jo" import (reflect_active)
 from p"type_ops.dewy" import (get_struct_inst mk_array)
 from p"types.jo" import (fields structs telem tkind types)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 TypeFormWord:type=int64<overflow='wrap'>
 
@@ -63,7 +64,7 @@ type_value_expr=(e:TypeFormWord):>bool=>$unsafe {
         return sk =? 'type_' or sk =? 'struct_' or sk =? 'enum_' or sk =? 'alias_'
     }
     # Node.op stores the frozen Tok.pipe (64) and Tok.amp (63) ordinals.
-    if k =? 'binary' and (nodes.ptr[e].op =? 64 or nodes.ptr[e].op =? 63) {
+    if k =? 'binary' and (node_op(nodes.ptr[e].op_ext) =? 64 or node_op(nodes.ptr[e].op_ext) =? 63) {
         return type_value_expr(TypeFormWord(nodes.ptr[e].a)) and type_value_expr(TypeFormWord(nodes.ptr[e].b))
     }
     if k =? 'field' and nodes.ptr[e].b =? 0 and nodes.ptr[TypeFormWord(nodes.ptr[e].a)].kind =? 'ident' {
@@ -93,7 +94,7 @@ dewy_bare_fn=(n:int64 is_callee:bool):>bool=>$unsafe {
     let receiver=n =? type_receiver_at and not has_flag(n NF_AT)
     if is_callee or (has_flag(n NF_MUT) and not receiver) or n =? assign_root or n =? capture_decl {return false}
     if nodes.ptr[n].kind =? 'ident' {
-        if nodes.ptr[n].aux2 =? 1 or starts_with(name_of(TypeFormWord(nodes.ptr[n].name)) "$") {return false}
+        if node_aux2(nodes.ptr[n].op_ext) =? 1 or starts_with(name_of(TypeFormWord(nodes.ptr[n].name)) "$") {return false}
     }
     if cur_assign not=? 0 and TypeFormWord(nodes.ptr[cur_assign].a) =? n {return false}
     files[pos_file(nodes.ptr[n].pos)].is_dewy

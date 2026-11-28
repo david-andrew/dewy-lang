@@ -18,6 +18,7 @@ from p"partition.jo" import (partition_active)
 from p"string_domain_ops.dewy" import (int_domain_capture string_domain_capture)
 from p"types.jo" import (T_MATH_INT T_STR tkind)
 from p"util.jo" import (files name_of pos_file)
+from p"node_store.dewy" import (node_aux2)
 
 CaptureWord:type=int64<overflow='wrap'>
 # Explicit $capture parameters share only names marked with @. Unlisted Dewy
@@ -37,7 +38,7 @@ task_copy_shared=(r:CaptureWord pos:CaptureWord):>void=>{
     let fl=CaptureWord(locals[r].flags)
     if fl & LF_CAPTURE =? 0 or fl & LF_VALUECAP =? 0 {return}
     let owner=CaptureWord(fns[CaptureWord(locals[r].owner)].decl)
-    if owner =? 0 or nodes[owner].kind not=? 'lambda' or nodes[owner].aux2 not=? 17 and not has_flag(owner NF_LANG_BODY) {return}
+    if owner =? 0 or nodes[owner].kind not=? 'lambda' or node_aux2(nodes[owner].op_ext) not=? 17 and not has_flag(owner NF_LANG_BODY) {return}
     let nm=name_of(CaptureWord(locals[r].name))
     fatal(pos "`$capture @{nm}` would share the copy of '{nm}' that the enclosing task or `parallel` body holds, not the '{nm}' outside it, so its changes would be lost: send results back through a task's result, a channel or an atomic, or make the variable inside the body")
 }

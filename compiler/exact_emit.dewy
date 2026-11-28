@@ -30,6 +30,7 @@ from p"lower_scalars.dewy" import (int_op math_int_guard)
 from p"lower_storage.dewy" import (V els endc enter_cond freeze_scalar iff leave_cond norm opt_has opt_value place_addr scope_push stmt_begin stmt_end vt_of)
 from p"math_ops.dewy" import (math_pack_word math_proven_word math_shift_count)
 from p"types.jo" import (T_F32 T_INT T_MATH_INT is_int prune types)
+from p"node_store.dewy" import (node_op)
 
 # Exact fixed-width emission: an expression's machine words, stores that narrow
 # them, policy conversions and the mathematical-int and float boundaries. The
@@ -39,7 +40,7 @@ from p"types.jo" import (T_F32 T_INT T_MATH_INT is_int prune types)
 ExactEmitWord:type=int64<overflow='wrap'>
 
 # A node's operator token.
-exact_emit_op=(n:ExactEmitWord):>Tok=>$unsafe {cx_token_values.ptr[ExactEmitWord(nodes.ptr[n].op)]}
+exact_emit_op=(n:ExactEmitWord):>Tok=>$unsafe {cx_token_values.ptr[ExactEmitWord(node_op(nodes.ptr[n].op_ext))]}
 
 # The significant bits of a nonnegative bound, with at most six tests.
 exact_emit_bits=(bound0:ExactEmitWord):>ExactEmitWord=>{
@@ -487,7 +488,7 @@ exact_gen_store=(n:ExactEmitWord):>Val=>$unsafe {
         proven=bound >=? 0 and sa_fits(bound t)
     }
     if not proven and t =? T_INT and eg_fits(source) {proven=true}
-    if not proven and t =? T_INT and nodes.ptr[source].kind =? 'binary' and nodes.ptr[source].aux =? 0 and nodes.ptr[source].op =? int32(58) {
+    if not proven and t =? T_INT and nodes.ptr[source].kind =? 'binary' and nodes.ptr[source].aux =? 0 and node_op(nodes.ptr[source].op_ext) =? int32(58) {
         let sa=ExactEmitWord(nodes.ptr[source].a)
         let sb=ExactEmitWord(nodes.ptr[source].b)
         let [kb kv]=integer_constant(sb)

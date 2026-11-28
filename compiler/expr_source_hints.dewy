@@ -12,6 +12,7 @@ from p"ownership_checks.dewy" import (LF_ALIAS)
 from p"type_ops.dewy" import (dt)
 from p"types.jo" import (prune telem tkind)
 from p"util.jo" import (files name_of pos_file pos_off)
+from p"node_store.dewy" import (node_op)
 
 SourceHintWord:type=int64<overflow='wrap'>
 regroup_op_name=(p:SourceHintWord):>string=>$unsafe {
@@ -19,7 +20,7 @@ regroup_op_name=(p:SourceHintWord):>string=>$unsafe {
     if k =? 'and_' {return "and"}
     if k =? 'or_' {return "or"}
     if k =? 'not_' {return "not"}
-    op_text(cx_token_values.ptr[SourceHintWord(nodes.ptr[p].op)] nodes.ptr[p].pos)
+    op_text(cx_token_values.ptr[SourceHintWord(node_op(nodes.ptr[p].op_ext))] nodes.ptr[p].pos)
 }
 # the source between two places of one file, on one line, without the blanks around it ("" if not)
 regroup_source=(f:SourceHintWord from0:SourceHintWord to0:SourceHintWord):>string=>{

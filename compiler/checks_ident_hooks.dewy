@@ -40,7 +40,7 @@ from p"ide.jo" import (ide_on)
 from p"ide_index.dewy" import (ide_sym_ref)
 from p"ide_ops.dewy" import (ide_fn_ref)
 from p"juxtapose.dewy" import (juxt_spaced_unit)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_op)
 from p"types.jo" import (has_var prune structs telem tkind types)
 from p"type_ops.dewy" import (dt get_struct_inst mk_modval mk_typeval)
 from p"units.jo" import (quantity_scales)
@@ -63,7 +63,7 @@ ident_unknown=(n:int64 expected:int64 nm:int64):>void=>$unsafe {
     # (score += 1 with Score = 0 above: its capitals)
     let capsug=suggestion(name_of(nm) visible_names())
     if byte_find(capsug "capital letters") >=? 0 {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}'{capsug}")}
-    if cur_assign not=? 0 and nodes.ptr[cur_assign].a =? int32(n) and nodes.ptr[cur_assign].op not=? int32(47) {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")}
+    if cur_assign not=? 0 and nodes.ptr[cur_assign].a =? int32(n) and node_op(nodes.ptr[cur_assign].op_ext) not=? int32(47) {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")}
     # (score = score + 1: the same, written out)
     if cur_assign not=? 0 and nodes.ptr[IdentHookWord(nodes.ptr[cur_assign].a)].kind =? 'ident' and IdentHookWord(nodes.ptr[IdentHookWord(nodes.ptr[cur_assign].a)].name) =? nm {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")}
     let ph=phaser_hint(name_of(nm) member_after(nodes.ptr[n].pos (name_of(nm) as array<uint8>).length))
@@ -129,7 +129,7 @@ ident_early_use=(n:int64 g:int64):>void=>$unsafe {
     let dp=nodes.ptr[IdentHookWord(globals.ptr[g].decl)].pos
     if pos_file(dp) =? pos_file(nodes.ptr[n].pos) and not early_set.has(g) {
         # (set above its line, as `runs = 3` in a block before `runs = 0`: read after that)
-        if cur_assign not=? 0 and nodes.ptr[cur_assign].a =? int32(n) and nodes.ptr[cur_assign].op =? int32(47) {early_set[g]=true} else {
+        if cur_assign not=? 0 and nodes.ptr[cur_assign].a =? int32(n) and node_op(nodes.ptr[cur_assign].op_ext) =? int32(47) {early_set[g]=true} else {
             let [ln c]=line_col(dp)
             fatal(nodes.ptr[n].pos "'{name_of(nm)}' is used before line {ln} gives it its value (the program runs from the top down)")
         }

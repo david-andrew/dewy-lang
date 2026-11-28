@@ -63,7 +63,7 @@ from p"collection_checks.dewy" import (as_conversion)
 from p"call_argument_checks.dewy" import (arg_type nargs_check)
 from p"arena_ops.dewy" import (arena_check_result)
 from p"types.jo" import (T_BOOL T_F32 T_FLOAT T_I32 T_INT T_IVEC2 T_IVEC3 T_MAT4 T_MATH_INT T_NEVER T_RAWPTR T_STR T_U64 T_U8 T_VEC4 T_VOID fields has_var is_int is_union prune struct_targ structs talign targ telem tkind tsize type_eq types union_members variants)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_sval node_with_aux2 node_with_sval)
 from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_MUT NF_PRIVATE_SETLEN NF_SQUOTE NF_U64 RANGE_EXHAUSTION add_flag clear_flag clone has_flag kid mk nkids nodes set_list set_list2)
 from p"refinement_types.dewy" import (FactRequest)
 from p"expr.jo" import (CV FMT_DEWY IN coerce_hint embedded_files fmt_plain last_checked setting_site)
@@ -394,7 +394,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
     }
     else if id =? int64(IN.unreachable) {r=T_NEVER}
     else if id =? int64(IN.assert) or id =? int64(IN.runtime_assert) {
-        if nodes.ptr[n].aux2 =? int32<overflow='wrap'>(RANGE_EXHAUSTION) {
+        if node_aux2(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(RANGE_EXHAUSTION) {
             let t=representation_type(arg_type(args 2 0))
             let initial=integer_constant(args[2])
             nodes[n].ival = (if is_int(t) and types.ptr[t].bits =? 64 and initial[0] and (types.ptr[t].sign or initial[1] >=? 0) and initial[1] >=? -72057594037927936 and initial[1] <=? 72057594037927936 {1} else {0})
@@ -450,12 +450,12 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
             }
             if i >? 0 {
                 let sp=mk('str_lit' nodes.ptr[n].pos)
-                nodes[sp].sval = int32<overflow='wrap'>(ci(19 " "))
+                nodes[sp].op_ext=node_with_sval(nodes[sp].op_ext (int32<overflow='wrap'>(ci(19 " "))))
                 parts.push(sp)
             }
             let part=mk('pair' nodes.ptr[n].pos)
             nodes[part].a = int32<overflow='wrap'>(a)
-            nodes[part].sval = -1
+            nodes[part].op_ext=node_with_sval(nodes[part].op_ext (-1))
             parts.push(part)
         }
         set_list(s parts)
@@ -479,7 +479,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         nargs_check(n nargs 1 1 "embed")
         let a=args[0]
         if nodes.ptr[a].kind not=? 'str_lit' or nodes.ptr[a].aux not=? 0 {fatal(nodes.ptr[n].pos "embed() needs a string literal path")}
-        let rel=name_of(IntrinsicExpressionsWord(nodes.ptr[a].sval))
+        let rel=name_of(IntrinsicExpressionsWord(node_sval(nodes.ptr[a].op_ext)))
         let path=rel
         if not is_abs_path(rel) {path="{files.ptr[pos_file(nodes.ptr[n].pos)].dir}/{rel}"}
         path=path_norm(path)
@@ -497,7 +497,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
             }
             fatal(nodes.ptr[n].pos "embed: cannot read '{path}'")
         }
-        nodes[n].sval = int32<overflow='wrap'>(intern(d ?? ""))
+        nodes[n].op_ext=node_with_sval(nodes[n].op_ext (int32<overflow='wrap'>(intern(d ?? ""))))
         r=mk_array(T_U8)
     }
     else if id =? int64(IN.embed_dir) {
@@ -506,7 +506,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         nargs_check(n nargs 1 1 "embed_dir")
         let a=args[0]
         if nodes.ptr[a].kind not=? 'str_lit' or nodes.ptr[a].aux not=? 0 {fatal(nodes.ptr[n].pos "embed_dir() needs a string literal path")}
-        let rel=name_of(IntrinsicExpressionsWord(nodes.ptr[a].sval))
+        let rel=name_of(IntrinsicExpressionsWord(node_sval(nodes.ptr[a].op_ext)))
         let path=rel
         if not is_abs_path(rel) {path="{files.ptr[pos_file(nodes.ptr[n].pos)].dir}/{rel}"}
         if not is_dir(path) {fatal(nodes.ptr[n].pos "embed_dir: '{path}' is not a directory")}
@@ -541,7 +541,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         if nodes.ptr[args[0]].kind not=? 'str_lit' {fatal(nodes.ptr[args[0]].pos "an offset unit's symbol is a string literal")}
         arg_type(args 1 0);
         arg_type(args 2 0);
-        return quantity_offset_unit(n name_of(IntrinsicExpressionsWord(nodes.ptr[args[0]].sval)) args[1] args[2])
+        return quantity_offset_unit(n name_of(IntrinsicExpressionsWord(node_sval(nodes.ptr[args[0]].op_ext))) args[1] args[2])
     }
     else if id =? int64(IN.mul_hi) {
         # (the high 64 bits of a 128-bit product: the dictionaries' keyed hash, lib/core/map.jo)
@@ -647,7 +647,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         # (a type with the program's own `str = (b: Big) -> str`: shown as the text it gives,
         # and to_text, while it writes, as its fields: `if __text_exact: fields else: str(x)`)
         let sf:IntrinsicExpressionsWord=0
-        if not fmt_plain.has(n) and IntrinsicExpressionsWord(nodes.ptr[n].aux2) & FMT_DEWY =? 0 {sf=program_str_fn(t nodes.ptr[n].pos)}
+        if not fmt_plain.has(n) and IntrinsicExpressionsWord(node_aux2(nodes.ptr[n].op_ext)) & FMT_DEWY =? 0 {sf=program_str_fn(t nodes.ptr[n].pos)}
         if sf not=? 0 {
             let pos=nodes.ptr[n].pos
             let plain=nodes.length
@@ -680,7 +680,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
             check_struct_fields(si)
             loop i in fmt_field_order(si) {
                 let ft=IntrinsicExpressionsWord(fields.ptr[IntrinsicExpressionsWord(structs.ptr[si].fields) + i].type)
-                if not fmt_hidden(ft nodes.ptr[n].aux2) {fts.push(ft)}
+                if not fmt_hidden(ft node_aux2(nodes.ptr[n].op_ext)) {fts.push(ft)}
             }
         }
         else if k =? 'tuple' {
@@ -698,8 +698,8 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         else if k not=? 'fn_' {fatal(nodes.ptr[n].pos "cannot format a value of type {dt(t)}")}
         let refs:array<int64>=[]
         # (a union shows just its value: quoted inside a container, as a string would be)
-        let dewy=IntrinsicExpressionsWord(nodes.ptr[n].aux2) & FMT_DEWY not=? 0
-        let top=is_union(t) and IntrinsicExpressionsWord(nodes.ptr[n].aux2) & 1 =? 0
+        let dewy=IntrinsicExpressionsWord(node_aux2(nodes.ptr[n].op_ext)) & FMT_DEWY not=? 0
+        let top=is_union(t) and IntrinsicExpressionsWord(node_aux2(nodes.ptr[n].op_ext)) & 1 =? 0
         let fname=ci(20 "__fmt_elem")
         if top {fname=ci(21 "__fmt")}
         if dewy and top {fname=ci(22 "__dewy_fmt")}
@@ -879,7 +879,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
     else if id =? int64(IN.setting_read) {
         # __setting_read("time.zone"), `$time.zone`: the setting where this is read, or at the
         # call a parameter's default is filled in for; none when no scope sets it
-        let setting=IntrinsicExpressionsWord(nodes.ptr[args[0]].sval)
+        let setting=IntrinsicExpressionsWord(node_sval(nodes.ptr[args[0]].op_ext))
         if setting =? intern("__zone_values") {
             nodes[n] = Node(kind = 'bool_lit' pos = nodes.ptr[n].pos ival = (if dir_runtime_policies.has(setting) {1} else {0}))
             return check_expr(n expected)
@@ -909,7 +909,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
                     if (host as array<uint8>).length =? 0 {fatal(dir_scopes[local].at "`$time.zone = 'build'` needs the building machine to name its zone")}
                     value=intern(host)
                 }
-                nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos sval = int32<overflow='wrap'>(value))
+                nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos op_ext = node_with_sval(uint32(0) int32<overflow='wrap'>(value)))
                 return check_expr(n expected)
             }
         }
@@ -952,9 +952,9 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
             return check_expr(n expected)
         }
         let pos=nodes.ptr[n].pos
-        let scope=dir_find(IntrinsicExpressionsWord(nodes.ptr[args[0]].sval) if setting_site not=? 0 {setting_site} else {pos})
-        if dir_program_setting(name_of(IntrinsicExpressionsWord(nodes.ptr[args[0]].sval))) {
-            scope=dir_program_values.get(IntrinsicExpressionsWord(nodes.ptr[args[0]].sval)) ?? -1
+        let scope=dir_find(IntrinsicExpressionsWord(node_sval(nodes.ptr[args[0]].op_ext)) if setting_site not=? 0 {setting_site} else {pos})
+        if dir_program_setting(name_of(IntrinsicExpressionsWord(node_sval(nodes.ptr[args[0]].op_ext)))) {
+            scope=dir_program_values.get(IntrinsicExpressionsWord(node_sval(nodes.ptr[args[0]].op_ext))) ?? -1
         }
         if scope <? 0 or dir_scopes[scope].value <? 2 {
             nodes[n] = Node(kind = 'none_lit' pos = pos)
@@ -962,12 +962,12 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         }
         let value=dir_scopes[scope].value - 2
         # (`$time.zone = 'build'`: the machine doing this build, pinned now)
-        if value =? intern("build") and name_of(IntrinsicExpressionsWord(nodes.ptr[args[0]].sval)) =? "time.zone" {
+        if value =? intern("build") and name_of(IntrinsicExpressionsWord(node_sval(nodes.ptr[args[0]].op_ext))) =? "time.zone" {
             let host=__system_zone_name()
             if (host as array<uint8>).length =? 0 {fatal(dir_scopes[scope].at "`$time.zone = 'build'` pins the zone of the machine building this, and this machine does not name one: name the zone instead, as `$time.zone = 'America/New_York'`")}
             value=intern(host)
         }
-        nodes[n] = Node(kind = 'str_lit' pos = pos sval = int32<overflow='wrap'>(value))
+        nodes[n] = Node(kind = 'str_lit' pos = pos op_ext = node_with_sval(uint32(0) int32<overflow='wrap'>(value)))
         return check_expr(n expected)
     }
     else if id =? int64(IN.read_fields) {
@@ -988,7 +988,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         let t=arg_type(args 1 0)
         if is_union(t) {
             nodes[n].aux = int32<overflow='wrap'>(int64(IN.fmt_struct))
-            nodes[n].aux2 = 1
+            nodes[n].op_ext=node_with_aux2(nodes[n].op_ext 1)
             return check_intrinsic(n int64(IN.fmt_struct) args expected)
         }
         # (a Dewy object with its own text, `__as__` to string, as a rational in a matrix: that text)
@@ -1039,8 +1039,8 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         }
         if own {
             nodes[n].aux = int32<overflow='wrap'>(int64(IN.fmt_struct))
-            nodes[n].aux2 = int32<overflow='wrap'>(FMT_DEWY)
-            if elem {nodes[n].aux2 = int32<overflow='wrap'>(FMT_DEWY | 1)}
+            nodes[n].op_ext=node_with_aux2(nodes[n].op_ext (int32<overflow='wrap'>(FMT_DEWY)))
+            if elem {nodes[n].op_ext=node_with_aux2(nodes[n].op_ext (int32<overflow='wrap'>(FMT_DEWY | 1)))}
             return check_intrinsic(n int64(IN.fmt_struct) args expected)
         }
         # (inside a structure, a container as it is on its own: a call, which copies a

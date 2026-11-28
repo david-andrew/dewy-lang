@@ -3,6 +3,7 @@ from p"ast.jo" import (nodes)
 from p"checker_expr.dewy" import (lookup)
 from p"check.jo" import (globals locals syms)
 from p"types.jo" import (is_numeric)
+from p"node_store.dewy" import (node_op)
 
 NumericBranchWord:type=int64<overflow='wrap'>
 
@@ -22,7 +23,7 @@ branch_numeric=(a:NumericBranchWord hidden:array<int64>):>bool=>$unsafe {
     if k =? 'unary' {return branch_numeric(NumericBranchWord(nodes.ptr[a].a) hidden)}
     if k =? 'binary' {
         # The five arithmetic Tok ordinals are contiguous, from plus to percent.
-        let op=nodes.ptr[a].op
+        let op=node_op(nodes.ptr[a].op_ext)
         if op <? 58 or op >? 62 {return false}
         return branch_numeric(NumericBranchWord(nodes.ptr[a].a) hidden) and branch_numeric(NumericBranchWord(nodes.ptr[a].b) hidden)
     }

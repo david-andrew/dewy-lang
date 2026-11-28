@@ -15,7 +15,7 @@ dewy_param_kinds: {int: int[]} = {}
 const NF_MUT = 1
 const NF_CHECKED = 128
 nkids = (d: int) -> int: int(nodes[d].nlist)
-nkids2 = (d: int) -> int: int(nodes[d].nlist2)
+nkids2 = (d: int) -> int: int(node_nlist2(nodes[d].op_ext))
 kid = (d: int, i: int) -> int: (decl_children.get(d) ?? [])[i]
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 add_flag = (n: int, f: int): nodes[n].flags |= i32(f)
@@ -73,7 +73,7 @@ exact_family_name = (n: int) -> bool: true
 exact_members_for = (ds: int[], n: int, xs: int[]) -> int[]:
     rational_module_found = -1
     ds + extra_family
-written_int_param = (d: int, i: int) -> bool: nodes[d].sval == 1
+written_int_param = (d: int, i: int) -> bool: node_sval(nodes[d].op_ext) == 1
 can_coerce = (n: int, a: int, b: int) -> bool: a == b
 ntype = (a: int) -> int: int(nodes[a].type)
 is_lit = (a: int) -> bool: int(nodes[a].flags) & 256 != 0
@@ -89,11 +89,11 @@ comprehension_settle = (xs: int[]) -> bool:
     settle_once = false
     events.push("settle")
     true
-decl_in_prelude = (d: int) -> bool: nodes[d].mod != 0
+decl_in_prelude = (d: int) -> bool: node_mod(nodes[d].op_ext) != 0
 exact_args = (cd: Cand) -> int: int(nodes[cd.decl].ival)
 call_map_candidate = (d: int, xs: int[], cd: mut Cand, kinds: int[], ufcs: bool, recv: mut bool, failure: mut CallFailure) -> bool:
     cd.missing = true
-    if nodes[d].sval == -1: failure.last_err_arg = 8; return false
+    if node_sval(nodes[d].op_ext) == -1: failure.last_err_arg = 8; return false
     cd.args = []
     loop a in xs: cd.args.push(unnamed(a))
     loop cd.args.len() < nkids(d): cd.args.push(0)
@@ -185,7 +185,7 @@ ref_array_call_finish = (n: int, prepared: RefArrayCall) -> int: T_BOOL
 representation_type = (t: int) -> int: t
 refine_read_type = (t: int) -> int: representation_type(t)
 ''',
-    'dewy_methods.jo': "use 'driver.jo'\ndewy_is_method = (d: int) -> bool: nodes[d].sval == 2\n",
+    'dewy_methods.jo': "use 'driver.jo'\ndewy_is_method = (d: int) -> bool: node_sval(nodes[d].op_ext) == 2\n",
     'ide.jo': 'ide_on = false\n',
     'proofs.jo': 'proof_active = false\n',
     'warn_if.jo': 'wi_any = false\n',
@@ -239,7 +239,7 @@ cr_decl = (ps: int[], ntp: int = 0, generic: bool = false, mask: int = 0, defaul
         p = node(.param)
         if i < defaults.len(): nodes[p].b = i32(defaults[i])
         ds.push(p)
-    d = node(.fn_); nodes[d].nlist = i32(ps.len()); nodes[d].nlist2 = i32(ntp)
+    d = node(.fn_); nodes[d].nlist = i32(ps.len()); nodes[d].op_ext = node_with_nlist2(nodes[d].op_ext, i32(i32(ntp)))
     nodes[d].aux = i32(decl_infos.len())
     decl_children[d] = ds
     decl_infos.push(DeclInfo(sig=FnSig(done=true, params=ps, ret=i32(T_INT), ntp=i32(ntp), generic=generic, mutmask=i32(mask))))
@@ -250,7 +250,7 @@ cr_arg = (kind: NK = .ident, t: int = 0, literal: bool = false) -> int:
     a
 cr_run = (ds: int[], xs: int[], expected: int = 0, closure: int = 0, partial: bool = false):
     n = node(.call)
-    if partial: nodes[n].aux2 = i32(AUX2_PARTIAL)
+    if partial: nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(i32(AUX2_PARTIAL)))
     t = resolve_fn_call(n, 45, ds, xs, expected, closure, true)
     print("result:{t}:{nodes[n].kind}:{nodes[n].sym}:{nodes[n].aux}:{nodes[n].a}:{nodes[n].type}")
     print(events); events = []
@@ -267,9 +267,9 @@ MAIN = r'''main = ():
     member_record = -1; ide_on = false; proof_active = false
     # Prefer nongeneric then user definitions, then exact argument matches.
     g = cr_decl([T_INT], generic=true)
-    lib = cr_decl([T_INT]); nodes[lib].mod = 1
+    lib = cr_decl([T_INT]); nodes[lib].op_ext = node_with_mod(nodes[lib].op_ext, i32(1))
     cr_run([g, lib, d], [x])
-    other = cr_decl([T_INT]); nodes[other].mod = 1; nodes[other].ival = 2
+    other = cr_decl([T_INT]); nodes[other].op_ext = node_with_mod(nodes[other].op_ext, i32(1)); nodes[other].ival = 2
     settle_once = true
     cr_run([lib, other], [x])
     assert(not settle_once)
@@ -292,7 +292,7 @@ MAIN = r'''main = ():
     def = cr_decl([T_INT, T_INT], defaults=[0, before])
     cr_run([def], [x])
     # Mutable method context is restored after finishing the receiver.
-    method = cr_decl([T_INT], mask=1); nodes[method].sval = 2; nodes[method].name = 99
+    method = cr_decl([T_INT], mask=1); nodes[method].op_ext = node_with_sval(nodes[method].op_ext, i32(2)); nodes[method].name = 99
     cr_run([method], [x])
     assert(place_method == 0)
     refine_active = true; decl_infos[decl_info(method)].sig.ret = i32(T_VOID)

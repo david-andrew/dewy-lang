@@ -15,6 +15,7 @@ from p"lower_scalars.dewy" import (positive_modulus)
 from p"refine_metadata.dewy" import (representation_type)
 from p"type_ops.dewy" import (int_policy)
 from p"types.jo" import (T_INT T_MATH_INT T_NEVER T_U64 is_int types)
+from p"node_store.dewy" import (node_op)
 
 ExactCheckWord:type=int64<overflow='wrap'>
 # Fixed Tok ordinals in the checked node operator field.
@@ -92,15 +93,15 @@ exact_operation=(n:ExactCheckWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
     if k =? 'intrinsic' {return nodes.ptr[n].aux =? int32(int64(IN.fixed_abs))}
     if k =? 'unary' {
-        if nodes.ptr[n].op not=? HOOK_TOK_MINUS {return false}
+        if node_op(nodes.ptr[n].op_ext) not=? HOOK_TOK_MINUS {return false}
     }
     else if k =? 'binary' and nodes.ptr[n].aux =? 0 {
-        let op=nodes.ptr[n].op
+        let op=node_op(nodes.ptr[n].op_ext)
         if op not=? HOOK_TOK_PLUS and op not=? HOOK_TOK_MINUS and op not=? HOOK_TOK_STAR and op not=? HOOK_TOK_STARSTAR and op not=? HOOK_TOK_SLASH and op not=? HOOK_TOK_SHL {return false}
     }
     else {return false}
     if nodes.ptr[n].type =? 0 or not exact_type(ntype(n) nodes.ptr[n].pos) {return false}
-    k not=? 'binary' or nodes.ptr[n].op not=? HOOK_TOK_SLASH or types.ptr[exact_representation(ntype(n))].sign
+    k not=? 'binary' or node_op(nodes.ptr[n].op_ext) not=? HOOK_TOK_SLASH or types.ptr[exact_representation(ntype(n))].sign
 }
 
 exact_note=(n:ExactCheckWord):>void=>$unsafe {
@@ -108,7 +109,7 @@ exact_note=(n:ExactCheckWord):>void=>$unsafe {
     let k=nodes[n].kind
     let ok=false
     if k =? 'binary' {
-        let op=nodes[n].op
+        let op=node_op(nodes[n].op_ext)
         if op =? HOOK_TOK_AMP or op =? HOOK_TOK_PIPE or op =? HOOK_TOK_CARET {ok=exact_potential(n)}
         else {ok=exact_operation(n)}
     }

@@ -20,6 +20,7 @@ from p"lower_primitives.dewy" import (rt)
 from p"lower_scalars.dewy" import (math_int_guard)
 from p"lower_storage.dewy" import (freeze_scalar)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN)
+from p"node_store.dewy" import (node_op)
 
 ChainWord:type=int64<overflow='wrap'>
 
@@ -45,7 +46,7 @@ exact_chain_plan=(n:ChainWord @plan:array<int64>):>bool=>$unsafe {
         return true
     }
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return false}
-    let op=cx_token_values.ptr[ChainWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[ChainWord(node_op(nodes.ptr[n].op_ext))]
     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return false}
     if not exact_chain_plan(ChainWord(nodes.ptr[n].a) @plan) or not exact_chain_plan(ChainWord(nodes.ptr[n].b) @plan) {return false}
     plan.push(n)
@@ -59,13 +60,13 @@ exact_affine_store=(n:ChainWord):>int64=>$unsafe {
     let source=ChainWord(nodes.ptr[n].a)
     loop exact_has_node(source) and (nodes.ptr[source].kind =? 'exprstmt' or nodes.ptr[source].kind =? 'conv' and (nodes.ptr[source].aux =? int32(int64(CV.int_)) or nodes.ptr[source].aux =? int32(int64(CV.none_)))) {source=ChainWord(nodes.ptr[source].a)}
     if nodes.ptr[source].kind not=? 'binary' or nodes.ptr[source].aux not=? 0 {return -1}
-    let op=cx_token_values.ptr[ChainWord(nodes.ptr[source].op)]
+    let op=cx_token_values.ptr[ChainWord(node_op(nodes.ptr[source].op_ext))]
     if op not=? 'plus' and op not=? 'minus' {return -1}
     let [known constant]=integer_constant(ChainWord(nodes.ptr[source].b))
     if not known or constant <? -2147483647 or constant >? 2147483647 {return -1}
     let offset:ChainWord=if op =? 'minus' {-constant} else {constant}
     let product=ChainWord(nodes.ptr[source].a)
-    if nodes.ptr[product].kind not=? 'binary' or cx_token_values.ptr[ChainWord(nodes.ptr[product].op)] not=? 'star' or nodes.ptr[product].aux not=? 0 or not exact_has_node(product) {return -1}
+    if nodes.ptr[product].kind not=? 'binary' or cx_token_values.ptr[ChainWord(node_op(nodes.ptr[product].op_ext))] not=? 'star' or nodes.ptr[product].aux not=? 0 or not exact_has_node(product) {return -1}
     let leaf:ChainWord=ChainWord(nodes.ptr[product].a)
     let [right_fixed right_scale]=integer_constant(ChainWord(nodes.ptr[product].b))
     let fixed=right_fixed
@@ -101,10 +102,10 @@ exact_offset_store=(n:ChainWord):>int64=>$unsafe {
     let source=ChainWord(nodes.ptr[n].a)
     loop exact_has_node(source) and (nodes.ptr[source].kind =? 'exprstmt' or nodes.ptr[source].kind =? 'conv' and (nodes.ptr[source].aux =? int32(int64(CV.int_)) or nodes.ptr[source].aux =? int32(int64(CV.none_)))) {source=ChainWord(nodes.ptr[source].a)}
     if nodes.ptr[source].kind not=? 'binary' or nodes.ptr[source].aux not=? 0 {return -1}
-    let op=cx_token_values.ptr[ChainWord(nodes.ptr[source].op)]
+    let op=cx_token_values.ptr[ChainWord(node_op(nodes.ptr[source].op_ext))]
     if op not=? 'plus' and op not=? 'minus' {return -1}
     let inner=ChainWord(nodes.ptr[source].a)
-    if not exact_has_node(inner) or nodes.ptr[inner].kind not=? 'binary' or nodes.ptr[inner].aux not=? 0 or nodes.ptr[inner].op not=? nodes.ptr[source].op {return -1}
+    if not exact_has_node(inner) or nodes.ptr[inner].kind not=? 'binary' or nodes.ptr[inner].aux not=? 0 or node_op(nodes.ptr[inner].op_ext) not=? node_op(nodes.ptr[source].op_ext) {return -1}
     let x=ChainWord(nodes.ptr[inner].a)
     let y=ChainWord(nodes.ptr[source].b)
     let [known offset]=integer_constant(ChainWord(nodes.ptr[inner].b))
@@ -130,7 +131,7 @@ exact_chain_store=(n:ChainWord):>int64=>$unsafe {
     loop p in plan {
         if exact_has_node(p) {
             operations+=1
-            if cx_token_values.ptr[ChainWord(nodes.ptr[p].op)] =? 'star' {multiplies+=1}
+            if cx_token_values.ptr[ChainWord(node_op(nodes.ptr[p].op_ext))] =? 'star' {multiplies+=1}
         }
     }
     if operations <? 2 or multiplies =? 0 {return -1}
@@ -148,7 +149,7 @@ exact_chain_store=(n:ChainWord):>int64=>$unsafe {
     e_block();
     loop p in plan {
         if not exact_has_node(p) {continue}
-        let op=cx_token_values.ptr[ChainWord(nodes.ptr[p].op)]
+        let op=cx_token_values.ptr[ChainWord(node_op(nodes.ptr[p].op_ext))]
         let a=values[ChainWord(nodes.ptr[p].a)]
         let b=values[ChainWord(nodes.ptr[p].b)]
         let value=e_bin((if op =? 'plus' {Op.add} else if op =? 'minus' {Op.sub} else {Op.mul}) VI a b)

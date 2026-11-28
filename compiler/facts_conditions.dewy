@@ -25,6 +25,7 @@ from p"proof_ops.dewy" import (result_activate)
 from p"refine.jo" import (refine_owners)
 from p"refinement_types.dewy" import (FactBound FactTerm)
 from p"types.jo" import (T_BOOL T_INT T_U64 is_union types)
+from p"node_store.dewy" import (node_aux2 node_op)
 
 ConditionWord:type=int64<overflow='wrap'>
 FactCondMeta:type=[reason:FactBound value:int64=0]
@@ -44,7 +45,7 @@ fact_cond_single_var=(n0:ConditionWord s:FactState membership_owner:bool):>[int6
     let target:ConditionWord=0
     if k =? 'ident' or k =? 'field' or k =? 'istype' {
         target=if k =? 'istype' {ConditionWord(nodes.ptr[n].a)} else {n}
-    } else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
+    } else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(node_op(nodes.ptr[n].op_ext)) {
         let a=ConditionWord(nodes.ptr[n].a)
         let b=ConditionWord(nodes.ptr[n].b)
         loop nodes.ptr[a].kind =? 'conv' and nodes.ptr[a].aux not=? int32(int64(CV.refinement)) {a=ConditionWord(nodes.ptr[a].a)}
@@ -643,10 +644,10 @@ fact_tag=(@s:FactState value:ConditionWord wanted:ConditionWord truth:bool):>voi
 # The tag one pattern establishes, or -1.
 fact_pattern_tag=(p:ConditionWord st:ConditionWord):>ConditionWord=>$unsafe {
     let k=nodes.ptr[p].kind
-    if is_union(st) and k =? 'pvariant' {return ConditionWord(nodes.ptr[p].aux2)}
-    if is_union(st) and k =? 'plit' {return ConditionWord(nodes.ptr[p].aux2)}
+    if is_union(st) and k =? 'pvariant' {return ConditionWord(node_aux2(nodes.ptr[p].op_ext))}
+    if is_union(st) and k =? 'plit' {return ConditionWord(node_aux2(nodes.ptr[p].op_ext))}
     if types.ptr[st].kind =? 'opt' {
-        if k =? 'ptype' and nodes.ptr[p].aux2 not=? 1 {return 1}
+        if k =? 'ptype' and node_aux2(nodes.ptr[p].op_ext) not=? 1 {return 1}
         if k =? 'plit' and nodes.ptr[ConditionWord(nodes.ptr[p].a)].kind =? 'none_lit' {return 0}
     }
     -1

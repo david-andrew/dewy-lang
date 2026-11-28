@@ -13,6 +13,7 @@ from p"refine.jo" import (str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
 from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_STR prune types)
 from p"util.jo" import (files name_of pos_file)
+from p"node_store.dewy" import (node_op node_sval)
 
 LiteralContextWord:type=int64<overflow='wrap'>
 
@@ -72,7 +73,7 @@ call_refined_literal_cost=(a:LiteralContextWord pat:LiteralContextWord):>Literal
     let value:LiteralContextWord=0
     let literal=true
     if nodes[a].kind =? 'int_lit' and not has_flag(a NF_U64) {value=nodes[a].ival}
-    else if nodes[a].kind =? 'unary' and nodes[a].op =? int32(59) and nodes[LiteralContextWord(nodes[a].a)].kind =? 'int_lit' {
+    else if nodes[a].kind =? 'unary' and node_op(nodes[a].op_ext) =? int32(59) and nodes[LiteralContextWord(nodes[a].a)].kind =? 'int_lit' {
         value= -LiteralContextWord(nodes[LiteralContextWord(nodes[a].a)].ival)
     }
     else {literal=false}
@@ -92,7 +93,7 @@ call_refined_literal_cost=(a:LiteralContextWord pat:LiteralContextWord):>Literal
 union_text_target=(n:LiteralContextWord ms:array<int64>):>LiteralContextWord=>{
     let e=if n not=? 0 {kid_lit(n)} else {0}
     let literal=e not=? 0 and nodes[e].kind =? 'str_lit' and nodes[e].aux not=? 1
-    let text=if literal {name_of(LiteralContextWord(nodes[e].sval))} else {""}
+    let text=if literal {name_of(LiteralContextWord(node_sval(nodes[e].op_ext)))} else {""}
     if literal {
         loop i in 0.. and m in ms {
             let set=str_set_of(m)
@@ -132,7 +133,7 @@ check_to=(n:int64 target:int64):>int64=>{
 
 lit_default=(n:int64):>int64=>$unsafe {
     let k=nodes.ptr[n].kind
-    if k =? 'float_lit' and nodes.ptr[n].sval not=? 0 {return decimal_type(nodes.ptr[n].pos)}
+    if k =? 'float_lit' and node_sval(nodes.ptr[n].op_ext) not=? 0 {return decimal_type(nodes.ptr[n].pos)}
     if k =? 'float_lit' {return T_FLOAT}
     if k =? 'unary' or k =? 'conv' {return lit_default(LiteralContextWord(nodes.ptr[n].a))}
     if k =? 'binary' {

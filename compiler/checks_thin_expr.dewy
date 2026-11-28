@@ -35,7 +35,7 @@ from p"expr_node_queries.dewy" import (receiver_fits)
 from p"expr_rare.dewy" import (dewy_positional_fits)
 from p"narrowing_checks.dewy" import (opt_rest_of)
 from p"juxtapose.dewy" import (juxt_group_product)
-from p"node_store.dewy" import (Node call_waits_never)
+from p"node_store.dewy" import (Node call_waits_never node_aux2 node_op)
 from p"refine.jo" import (ref_predicates str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
 from p"refine_intervals.dewy" import (ref_type_intervals ref_type_intervals_wide)
@@ -91,8 +91,8 @@ dewy_set_literal=(a:ThinExprWord):>bool=>$unsafe {
     nodes.ptr[a].kind =? 'call' and nodes.ptr[a].type =? 0 and nkids(a) =? 1 and nodes.ptr[ThinExprWord(nodes.ptr[a].a)].kind =? 'ident' and name_of(ThinExprWord(nodes.ptr[ThinExprWord(nodes.ptr[a].a)].name)) =? "__dewy_set"
 }
 oversized_literal=(a:ThinExprWord):>bool=>$unsafe {
-    if nodes.ptr[a].kind =? 'unary' and nodes.ptr[a].op =? int32(59) {return oversized_literal(ThinExprWord(nodes.ptr[a].a))}
-    nodes.ptr[a].kind =? 'call' and nodes.ptr[a].aux2 =? -1
+    if nodes.ptr[a].kind =? 'unary' and node_op(nodes.ptr[a].op_ext) =? int32(59) {return oversized_literal(ThinExprWord(nodes.ptr[a].a))}
+    nodes.ptr[a].kind =? 'call' and node_aux2(nodes.ptr[a].op_ext) =? -1
 }
 # `to_int(text max_digits=n)` with a literal n from 1 to 18 (lib/math_runtime.jo, __mi_parse_word).
 to_int_word_limit=(a0:ThinExprWord):>bool=>$unsafe {
@@ -283,7 +283,7 @@ binary_quantity_hint=(t:ThinExprWord):>int64=>{
     if is_float(quantity_base(t)) {quantity_base(t)} else {0}
 }
 binary_secret=(n:ThinExprWord a:ThinExprWord b:ThinExprWord):>int64=>$unsafe {
-    secret_binary(n cx_token_values.ptr[ThinExprWord(nodes.ptr[n].op)] a b)
+    secret_binary(n cx_token_values.ptr[ThinExprWord(node_op(nodes.ptr[n].op_ext))] a b)
 }
 # ---------------- match ----------------
 # The values an integer type admits, as sorted inclusive intervals

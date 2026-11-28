@@ -52,9 +52,9 @@ hv_fn = (kind: TK = .fn_, count: int = 2, keep: int = 0) -> int:
     t
 hv_call = (t: int, xs: int[], partial: bool = false) -> int:
     c = cr_arg(.ident, t); n = cr_arg(.call)
-    if partial: nodes[n].aux2 = i32(AUX2_PARTIAL)
+    if partial: nodes[n].op_ext = node_with_aux2(nodes[n].op_ext, i32(i32(AUX2_PARTIAL)))
     result = value_call(n, c, xs, T_FLOAT)
-    print("call:{result}:{nodes[n].a}:{nodes[n].sym}:{nodes[n].aux}:{nodes[n].aux2}:{nodes[n].type}")
+    print("call:{result}:{nodes[n].a}:{nodes[n].sym}:{nodes[n].aux}:{node_aux2(nodes[n].op_ext)}:{nodes[n].type}")
     if not partial and types[t].kind != .polyfn: assert(nodes[n].type == i32(T_BOOL))
     n
 '''

@@ -14,7 +14,7 @@ from p"dewy_directive_ops.dewy" import (dw_dir_apply)
 from p"dewy_ffi.jo" import (dw_export_pos)
 from p"dewy_ffi_attrs.dewy" import (dw_export_at dw_export_attach dw_ffi_attach)
 from p"directives.jo" import (dir_module_end dir_module_start)
-from p"node_store.dewy" import (node_kids node_kids2)
+from p"node_store.dewy" import (node_kids node_kids2 node_sval node_with_sval)
 from p"oom_ops.dewy" import (oom_module)
 from p"proofs.jo" import (proof_active proof_decls proof_pending)
 from p"refine.jo" import (refine_active)
@@ -39,7 +39,7 @@ dw_target_field_value=(field:NodeOpWord):>string=>{
 }
 dw_text=(text:string pos:NodeOpWord):>int64=>$unsafe {
     let n=mk('str_lit' pos)
-    nodes.ptr[n].sval=int32(intern(text))
+    nodes.ptr[n].op_ext=node_with_sval(nodes.ptr[n].op_ext (int32(intern(text))))
     n
 }
 # `$shadowable` before a module-level `const`
@@ -85,9 +85,9 @@ dw_top_declarations=(id:int64 pos:int64):>array<int64>=>{
                 proof_active=true
                 refine_active=true
             } else if text =? "export" {dw_export_at(pos "")} else if text =? "explicit_allocation_failure" {oom_module(pos_file(pos) pos)}
-        } else if form =? 2 {dw_export_at(pos name_of(NodeOpWord(nodes[NodeOpWord(result.a)].sval)))} else if form =? 3 {
+        } else if form =? 2 {dw_export_at(pos name_of(NodeOpWord(node_sval(nodes[NodeOpWord(result.a)].op_ext))))} else if form =? 3 {
             let names_:array<string>=[]
-            loop entry in kids(NodeOpWord(result.a)) {names_.push(name_of(NodeOpWord(nodes[entry].sval)))}
+            loop entry in kids(NodeOpWord(result.a)) {names_.push(name_of(NodeOpWord(node_sval(nodes[entry].op_ext))))}
             dw_supported_names(pos names_)
         } else if form =? 4 {dw_warn_if_pending.push(NodeOpWord(result.a))}
         return []

@@ -13,6 +13,7 @@ from p"parser_decls.dewy" import (parse_type parse_when)
 from p"parser_errors.dewy" import (keyword_name_error parse_empty_block)
 from p"parser_expr.dewy" import (parse_binary parse_expr)
 from p"util.jo" import (intern)
+from p"node_store.dewy" import (node_with_op)
 
 StmtWord:type=int64<overflow='wrap'>
 
@@ -412,7 +413,8 @@ parse_simple_stmt=():>int64=>$unsafe {
     if k2 =? 'assign' {
         let a=mk('assign' tp[t2].pos)
         ti=t2 + 1
-        nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+        # Frozen Tok.assign ordinal.
+        nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext 47)
         nodes.ptr[a].a=int32<overflow='wrap'>(e)
         let v=parse_expr()
         if tp[ti].kind =? 'comma' and not p_no_tuple {v=tuple_from(v)}
@@ -433,11 +435,13 @@ parse_simple_stmt=():>int64=>$unsafe {
     if k2 =? 'dotop' and tp[t2 + 1].kind =? 'assign' and not space_before(t2 + 1) {
         # xs .+= ys: xs = xs .+ ys
         let a=mk('assign' tp[t2].pos)
-        nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+        # Frozen Tok.assign ordinal.
+        nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext 47)
         nodes.ptr[a].a=int32<overflow='wrap'>(e)
         let b=mk('binary' tp[t2].pos)
         ti=t2 + 2
-        nodes.ptr[b].op=85 # Frozen Tok.dotop ordinal.
+        # Frozen Tok.dotop ordinal.
+        nodes.ptr[b].op_ext=node_with_op(nodes.ptr[b].op_ext 85)
         nodes.ptr[b].aux=int32<overflow='wrap'>(tp[t2].ival)
         nodes.ptr[b].a=int32<overflow='wrap'>(clone(e))
         nodes.ptr[b].b=int32<overflow='wrap'>(parse_expr())
@@ -449,7 +453,8 @@ parse_simple_stmt=():>int64=>$unsafe {
         ti=t2 + 1
         if k2 =? 'careteq' {
             # x ^= y: x = x ^ y (power)
-            nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+            # Frozen Tok.assign ordinal.
+            nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext 47)
             nodes.ptr[a].a=int32<overflow='wrap'>(e)
             let pw=mk('call' nodes.ptr[a].pos)
             let callee=mk('ident' nodes.ptr[a].pos)
@@ -468,7 +473,7 @@ parse_simple_stmt=():>int64=>$unsafe {
             else if k2 =? 'kw_or' {op=54} # Frozen Tok.pipeeq ordinal.
             else {op=55} # Frozen Tok.careteq ordinal.
         }
-        nodes.ptr[a].op=op
+        nodes.ptr[a].op_ext=node_with_op(nodes.ptr[a].op_ext op)
         nodes.ptr[a].a=int32<overflow='wrap'>(e)
         let v=parse_expr()
         if tp[ti].kind =? 'comma' and not p_no_tuple {v=tuple_from(v)}

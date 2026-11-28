@@ -3,6 +3,7 @@ from p"ast.jo" import (clone kid kids nkids nodes set_list)
 from p"check.jo" import (LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_ELEMALIAS LF_SHARED LF_SOAELEM interp_appends locals syms)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"types.jo" import (T_STR prune tkind)
+from p"node_store.dewy" import (node_op node_sval node_with_op)
 
 AppendAssignWord:type=int64<overflow='wrap'>
 # Frozen Tok ordinals stored in checked nodes.
@@ -16,7 +17,7 @@ append_assign=(s:AppendAssignWord):>void=>{
     if nodes[lhs].kind not=? 'ident' {return}
     let spine:array<int64>=[]
     let n=AppendAssignWord(nodes[s].b)
-    loop nodes[n].kind =? 'binary' and nodes[n].op =? append_plus {
+    loop nodes[n].kind =? 'binary' and node_op(nodes[n].op_ext) =? append_plus {
         spine.push(n)
         n=AppendAssignWord(nodes[n].a)
     }
@@ -29,7 +30,7 @@ append_assign=(s:AppendAssignWord):>void=>{
     let rest=nodes[spine[AppendAssignWord(spine.length) - 1]].b
     if spine.length =? 1 {nodes[s].b=rest}
     else {nodes[spine[AppendAssignWord(spine.length) - 2]].a=rest}
-    nodes[s].op=append_pluseq
+    nodes[s].op_ext=node_with_op(nodes[s].op_ext append_pluseq)
 }
 
 interp_append_assign=(s:AppendAssignWord):>void=>{
@@ -37,7 +38,7 @@ interp_append_assign=(s:AppendAssignWord):>void=>{
     let rhs=AppendAssignWord(nodes[s].b)
     if nodes[lhs].kind not=? 'ident' or nodes[rhs].kind not=? 'str_lit' or nodes[rhs].aux not=? 1 or nkids(rhs) <? 2 {return}
     let first=kid(rhs 0)
-    if nodes[first].kind not=? 'pair' or nodes[first].sval not=? -1 {return}
+    if nodes[first].kind not=? 'pair' or node_sval(nodes[first].op_ext) not=? -1 {return}
     let v=AppendAssignWord(nodes[first].a)
     if nodes[v].kind not=? 'ident' or nodes[v].name not=? nodes[lhs].name {return}
     let sy=lookup(AppendAssignWord(nodes[lhs].name))
@@ -48,6 +49,6 @@ interp_append_assign=(s:AppendAssignWord):>void=>{
     let rest=kids(rhs)
     rest.pop(0);
     set_list(rhs rest)
-    nodes[s].op=append_pluseq
+    nodes[s].op_ext=node_with_op(nodes[s].op_ext append_pluseq)
     interp_appends[s]=true
 }

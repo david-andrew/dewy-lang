@@ -13,6 +13,7 @@ from p"source_warnings.dewy" import (warn)
 from p"type_ops.dewy" import (dt)
 from p"types.jo" import (T_VEC4 prune type_eq)
 from p"util.jo" import (files intern name_of pos_file pos_off)
+from p"node_store.dewy" import (node_fval node_mod)
 
 GameCheckWord:type=int64<overflow='wrap'>
 # draw(prog, quad, Other(...)) where prog = make_shader(shader(vs, fs)) takes U: a Shader does not
@@ -64,7 +65,7 @@ angle_check=(decl:GameCheckWord args:array<int64>):>void=>$unsafe {
         let k=nodes.ptr[a].kind
         let v:float64=0.0
         if k =? 'int_lit' {v=float64(nodes.ptr[a].ival)}
-        else if k =? 'float_lit' {v=nodes.ptr[a].fval}
+        else if k =? 'float_lit' {v=node_fval(nodes.ptr[a].op_ext)}
         else {continue}
         if abs(v) <=? 6.3 {continue}
         let pn=name_of(GameCheckWord(nodes.ptr[kid(decl i)].name))
@@ -93,7 +94,7 @@ written_int=(a:GameCheckWord):>GameCheckWord=>$unsafe {
     loop o <? src.length and src[o] =? b' ' {o += 1}
     if o >=? src.length or (src[o] not=? b')' and src[o] not=? b',') {return -1}
     if nodes.ptr[a].kind =? 'int_lit' {return nodes.ptr[a].ival}
-    int64(nodes.ptr[a].fval)
+    int64(node_fval(nodes.ptr[a].op_ext))
 }
 
 # a library function called as another language's of the same name is (p5's line(x1, y1, x2,
@@ -135,7 +136,7 @@ frame_call_check=(n:GameCheckWord decl:GameCheckWord):>void=>$unsafe {
     let ci=GameCheckWord(ctxs.ptr[cx].inst)
     if ci <=? 0 or fns.ptr[ci].decl =? 0 {return}
     let fd=GameCheckWord(fns.ptr[ci].decl)
-    let mm=GameCheckWord(nodes.ptr[fd].mod)
+    let mm=GameCheckWord(node_mod(nodes.ptr[fd].op_ext))
     if not modules.ptr[mm].is_main {return}
     let here=if dewy_is_method(fd) {""} else {name_of(GameCheckWord(nodes.ptr[fd].name))}
     let fnm=name_of(GameCheckWord(nodes.ptr[decl].name))

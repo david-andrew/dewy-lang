@@ -26,6 +26,7 @@ from p"ownership_types.dewy" import (ownership_callable_cap ownership_type)
 from p"partition_ops.dewy" import (partition_fork partition_fork_safe partition_local_arg)
 from p"lower_analysis.dewy" import (place_var)
 from p"lower_races.dewy" import (race_check)
+from p"node_store.dewy" import (node_d)
 # Direct recursive lowering; shared state has one owner in parallel_lower.jo.
 MoveWord:type=int64<overflow='wrap'>
 parallel_prelude_call=(n:MoveWord name:string):>bool=>$unsafe {
@@ -117,7 +118,7 @@ parallel_scalar_uses=(n:MoveWord l:MoveWord count:MoveWord):>bool=>$unsafe {
     if not parallel_scalar_uses(MoveWord(nodes.ptr[n].b) l count) {return false}
     if k not=? 'for_' {
         if not parallel_scalar_uses(MoveWord(nodes.ptr[n].c) l count) {return false}
-        if k not=? 'partial' and not parallel_scalar_uses(MoveWord(nodes.ptr[n].d) l count) {return false}
+        if k not=? 'partial' and not parallel_scalar_uses(MoveWord(node_d(nodes.ptr[n].op_ext)) l count) {return false}
     }
     loop child in kids(n) {
         if not parallel_scalar_uses(child l count) {return false}
@@ -248,7 +249,7 @@ parallel_context_free=(n:MoveWord @seen:dict<int64 bool>):>bool=>$unsafe {
     if not parallel_context_free(MoveWord(nodes.ptr[n].b) @seen) {return false}
     if k not=? 'for_' {
         if not parallel_context_free(MoveWord(nodes.ptr[n].c) @seen) {return false}
-        if k not=? 'partial' and not parallel_context_free(MoveWord(nodes.ptr[n].d) @seen) {return false}
+        if k not=? 'partial' and not parallel_context_free(MoveWord(node_d(nodes.ptr[n].op_ext)) @seen) {return false}
     }
     loop child in kids(n) {
         if not parallel_context_free(child @seen) {return false}

@@ -24,6 +24,7 @@ from p"refine_metadata.dewy" import (ref_validate_signature)
 from p"refine_rare.dewy" import (ref_decl_mask)
 from p"type_ops.dewy" import (dt is_values mk_var unify)
 from p"types.jo" import (T_NEVER T_VOID has_var prune targ tkind types)
+from p"node_store.dewy" import (node_aux2)
 
 LambdaBodyWord:type=int64<overflow='wrap'>
 check_lambda_body=(f:LambdaBodyWord lam:LambdaBodyWord ret_hint:LambdaBodyWord):>void=>{
@@ -94,7 +95,7 @@ check_lambda_body=(f:LambdaBodyWord lam:LambdaBodyWord ret_hint:LambdaBodyWord):
     if declared not=? 0 {ctxs[context].ret=int32<overflow='wrap'>(declared)} else if ret_hint not=? 0 and not has_var(prune(ret_hint)) {ctxs[context].ret=int32<overflow='wrap'>(ret_hint)} else {
         # (a `spawn` body infers what it throws, as a function with no declared result does;
         # its result, with them, then settles what the call wants)
-        if nodes[lam].aux2 =? 17 and dewy_at(nodes[lam].pos) {
+        if node_aux2(nodes[lam].op_ext) =? 17 and dewy_at(nodes[lam].pos) {
             spawned_hint=ret_hint
             ctxs[context].ret=int32<overflow='wrap'>(mk_var())
             infer_throws[f]=[]

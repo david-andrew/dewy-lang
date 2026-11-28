@@ -16,6 +16,7 @@ from p"check.jo" import (LF_ALIAS LF_UNNARROWED check_scopes ctxs cx game_lookup
 from p"expr.jo" import (CV opt_rest_aliases path_narrows path_rooted_g path_rooted_l)
 from p"types.jo" import (is_union prune telem tkind type_eq types union_members)
 from p"util.jo" import (intern name_of)
+from p"node_store.dewy" import (node_op)
 
 PathNarrowWord:type=int64<overflow='wrap'>
 const PATH_NARROW_LOCAL:int32=1 # SK.local in the frozen node ABI.
@@ -336,7 +337,7 @@ narrow_expr=(root:int64 ms:array<int64> pos:int64 name:int64):>void=>$unsafe {
 # arm of a match on it (opt_wild_narrow_path). O(members).
 narrow_opt_rest_by=(c:int64):>void=>$unsafe {
     let a=PathNarrowWord(nodes.ptr[c].a)
-    if nodes.ptr[a].kind not=? 'binary' or nodes.ptr[a].op not=? 70 or nodes.ptr[PathNarrowWord(nodes.ptr[a].b)].kind not=? 'none_lit' {return}
+    if nodes.ptr[a].kind not=? 'binary' or node_op(nodes.ptr[a].op_ext) not=? 70 or nodes.ptr[PathNarrowWord(nodes.ptr[a].b)].kind not=? 'none_lit' {return}
     let x=PathNarrowWord(nodes.ptr[a].a)
     let local=nodes.ptr[x].kind =? 'ident' and nodes.ptr[x].aux =? 1
     let l:PathNarrowWord=0
@@ -392,12 +393,12 @@ narrow_by=(c:int64 holds:bool):>void=>$unsafe {
     if holds and string_set_tests.length >? 0 and string_set_tests.has(c) {narrow_string_set(c)}
     let k=nodes.ptr[c].kind
     if k =? 'istype' {narrow_var(c holds)}
-    else if k =? 'binary' and (nodes.ptr[c].op =? 70 or nodes.ptr[c].op =? 69) and nodes.ptr[PathNarrowWord(nodes.ptr[c].b)].kind =? 'none_lit' {
+    else if k =? 'binary' and (node_op(nodes.ptr[c].op_ext) =? 70 or node_op(nodes.ptr[c].op_ext) =? 69) and nodes.ptr[PathNarrowWord(nodes.ptr[c].b)].kind =? 'none_lit' {
         # x != none: as `x is T` holding (x is its value from here)
         let isn=mk('istype' nodes.ptr[c].pos)
         nodes[isn].a = nodes.ptr[c].a
         nodes[isn].aux = -2
-        narrow_var(isn holds =? (nodes.ptr[c].op =? 70))
+        narrow_var(isn holds =? (node_op(nodes.ptr[c].op_ext) =? 70))
     }
     else if k =? 'not_' {narrow_by(PathNarrowWord(nodes.ptr[c].a) not holds)}
     else if k =? 'and_' and holds {

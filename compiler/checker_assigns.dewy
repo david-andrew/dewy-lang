@@ -2,7 +2,7 @@ $runtime_checks
 from p"coerce_expression.dewy" import (coerce)
 
 from p"checker_hooks.dewy" import (assign_begin)
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_aux2 node_op node_sval)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (FnCtx OptFill StatementWatch)
@@ -148,7 +148,7 @@ va_sourced=(lhs:AWord):>bool=>$unsafe {
     if va_nodes[0].ptr[lhs].kind =? 'ident' {return true}
     let p=lhs
     loop va_part(p) {
-        if va_nodes[0].ptr[p].kind =? 'index' and va_nodes[0].ptr[p].sval not=? 0 {return true}
+        if va_nodes[0].ptr[p].kind =? 'index' and node_sval(va_nodes[0].ptr[p].op_ext) not=? 0 {return true}
         p=AWord(va_nodes[0].ptr[p].a)
     }
     false
@@ -160,7 +160,7 @@ va_sourced=(lhs:AWord):>bool=>$unsafe {
 # tuple_type: the element's type), 7 refinement contracts (a block, or 0), 8 elements
 # converted (the statement or a block)).
 va_tuple=(s:AWord):>AWord=>$unsafe {
-    if va_nodes[0].ptr[s].op not=? 47 {assign_tuple(s 0 0 0 1);}
+    if node_op(va_nodes[0].ptr[s].op_ext) not=? 47 {assign_tuple(s 0 0 0 1);}
     let t=AWord(assign_tuple(s 0 0 0 3))
     let lhs=AWord(va_nodes[0].ptr[s].a)
     let n=AWord(va_nodes[0].ptr[lhs].nlist)
@@ -233,7 +233,7 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
     # (Dewy's integers update through their helpers)
     if l =? va_math_int_type[0] {return assign_update(s lt 0 5)}
     # (one view of the statement until a service runs)
-    let op=AWord(va_nodes[0][s].op)
+    let op=AWord(node_op(va_nodes[0][s].op_ext))
     let broadcast=AWord(va_nodes[0][s].flags) & 16384 not=? 0
     let pos=AWord(va_nodes[0][s].pos)
     let lhs=AWord(va_nodes[0][s].a)
@@ -243,14 +243,14 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
         if pluseq and va_dewy_at(pos) {assign_update(s l 0 3);}
         return assign_update(s lt 0 5)
     }
-    if lk =? 'ptr' and va_nodes[0][s].sval =? 0 and not broadcast {
+    if lk =? 'ptr' and node_sval(va_nodes[0][s].op_ext) =? 0 and not broadcast {
         check_expr(AWord(va_nodes[0][s].b) va_int_type[0]);
         va_nodes[0][s].b=int32<overflow='wrap'>(coerce(va_last[0] va_int_type[0]))
         va_nodes[0][s].aux=3
         return s
     }
     let lhk=va_nodes[0].ptr[lhs].kind
-    let helper=va_nodes[0][s].sval not=? 0 or broadcast or (lk not=? 'int_' and lk not=? 'float_' and lk not=? 'bool_') or lhk =? 'index' or lhk =? 'field' or (va_nodes[0][s].aux2 =? 1 and lk =? 'bool_')
+    let helper=node_sval(va_nodes[0][s].op_ext) not=? 0 or broadcast or (lk not=? 'int_' and lk not=? 'float_' and lk not=? 'bool_') or lhk =? 'index' or lhk =? 'field' or (node_aux2(va_nodes[0][s].op_ext) =? 1 and lk =? 'bool_')
     let rb=AWord(va_nodes[0][s].b)
     if not helper and lk =? 'int_' {
         # (the common implementation words are exact in Dewy only)
@@ -283,7 +283,7 @@ va_check=(s:AWord):>AWord=>$unsafe {
         if update not=? 0 {return update}
     }
     let lhs=AWord(va_nodes[0].ptr[s].a)
-    let op=AWord(va_nodes[0].ptr[s].op)
+    let op=AWord(node_op(va_nodes[0].ptr[s].op_ext))
     let k=va_nodes[0].ptr[lhs].kind
     if k =? 'tuple' {return va_tuple(s)}
     if k =? 'field' or (k =? 'index' and (op not=? 47 or va_part(AWord(va_nodes[0].ptr[lhs].a)))) {

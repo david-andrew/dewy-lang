@@ -66,7 +66,7 @@ main = ():
     body = node(.tname, 0, 0, 10)
     d = node(.typealias, body)
     attr = node(.field, node(.str_lit), 1)
-    nodes[int(nodes[attr].a)].sval = 2
+    nodes[int(nodes[attr].a)].op_ext = node_with_sval(nodes[int(nodes[attr].a)].op_ext, i32(2))
     attrs = node(.block)
     nodes[attrs].list = i32(lists.len()); nodes[attrs].nlist = 1; lists.push(i32(attr))
     nodes[d].c = i32(attrs)
@@ -79,7 +79,7 @@ main = ():
     assert(ca_resolve_alias(d, [], 41) == 11)
     assert(events.len() == count + 1, "cached aliases still resume deferred refinements")
     generic = node(.typealias, body)
-    nodes[generic].nlist2 = 1
+    nodes[generic].op_ext = node_with_nlist2(nodes[generic].op_ext, i32(1))
     assert(ca_resolve_alias(generic, [123], 42) == 10 and nodes[generic].type == 0)
     assert(ca_resolve_alias(generic, [456], 43) == 10 and nodes[generic].aux == 0)
     order = node(.typealias)
@@ -120,11 +120,11 @@ def test_checker_alias_twins(compiler, tmp_path, release):  # noqa: F811
 
 
 @pytest.mark.parametrize('setup,error', [
-    ('nodes[d].nlist2 = 1', 1),
+    pytest.param('nodes[d].op_ext = node_with_nlist2(nodes[d].op_ext, i32(1))', 1, id='nodes[d].nlist2 = 1-1'),
     ('nodes[d].a = i32(d)', 2),
     ('nodes[attr].a = 0', 3),
     ('nodes[int(nodes[attr].a)].kind = .int_lit', 3),
-    ('nodes[int(nodes[attr].a)].sval = 4', 4),
+    pytest.param('nodes[int(nodes[attr].a)].op_ext = node_with_sval(nodes[int(nodes[attr].a)].op_ext, i32(4))', 4, id='nodes[int(nodes[attr].a)].sval = 4-4'),
 ])
 def test_checker_alias_errors(compiler, tmp_path, setup, error):  # noqa: F811
     driver = DRIVER.split('main = ():')[0] + r'''main = ():
@@ -132,7 +132,7 @@ def test_checker_alias_errors(compiler, tmp_path, setup, error):  # noqa: F811
     grow = false
     d = node(.typealias, node(.tname, 0, 0, 10))
     attr = node(.field, node(.str_lit), 1)
-    nodes[int(nodes[attr].a)].sval = 2
+    nodes[int(nodes[attr].a)].op_ext = node_with_sval(nodes[int(nodes[attr].a)].op_ext, i32(2))
     attrs = node(.block)
     nodes[attrs].list = i32(lists.len()); nodes[attrs].nlist = 1; lists.push(i32(attr))
     nodes[d].c = i32(attrs)

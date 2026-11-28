@@ -3,7 +3,7 @@ from p"coerce_expression.dewy" import (coerce)
 from p"path_narrowing.dewy" import (narrow_by)
 from p"checker_scope_symbols.dewy" import (scope_reset)
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_with_op)
 from p"checker_types.dewy" import TypeInfo
 from p"checker_state.dewy" import CheckerScope
 from p"type_inference.dewy" import tu_prune
@@ -52,10 +52,10 @@ xg_check=(n:XGWord expected:XGWord ex:XGWord):>CheckerLogicResult=>$unsafe {
         if k =? 'not_' {
             xg_input[0].nodes[0][n].kind='unary'
             # Frozen Tok ordinals; the differential checks against checker_tokens.
-            xg_input[0].nodes[0][n].op=66
+            xg_input[0].nodes[0][n].op_ext=node_with_op(xg_input[0].nodes[0][n].op_ext 66)
         } else {
             xg_input[0].nodes[0][n].kind='binary'
-            xg_input[0].nodes[0][n].op=if k =? 'and_' {63} else {64}
+            xg_input[0].nodes[0][n].op_ext=node_with_op(xg_input[0].nodes[0][n].op_ext (if k =? 'and_' {63} else {64}))
         }
         return [type=check_expr(n expected) bypass=true]
     }

@@ -92,11 +92,11 @@ exact_count_bound=(n:CountWord):>FactBound=>$unsafe {
             else if l <? exact_initializers.length {out=exact_count_bound(exact_initializers[l])}
         }
     }
-    else if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) {out=exact_count_refined(CountWord(nodes.ptr[n].aux2))} else if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.fixed_store)) or nodes.ptr[n].aux =? int32(int64(CV.wrap_int))) {
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) {out=exact_count_refined(CountWord(node_aux2(nodes.ptr[n].op_ext)))} else if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.fixed_store)) or nodes.ptr[n].aux =? int32(int64(CV.wrap_int))) {
         let source=exact_count_bound(CountWord(nodes.ptr[n].a))
         if not source.wide and (t =? T_MATH_INT or is_int(t) and exact_count_fits(source.lo source.hi t)) {out=source}
     }
-    else if k =? 'unary' and cx_token_values.ptr[CountWord(nodes.ptr[n].op)] =? 'tilde' {
+    else if k =? 'unary' and cx_token_values.ptr[CountWord(node_op(nodes.ptr[n].op_ext))] =? 'tilde' {
         let source=exact_count_bound(CountWord(nodes.ptr[n].a))
         if not source.wide {out=FactBound(CountWord(-1) - CountWord(source.hi) CountWord(-1) - CountWord(source.lo))}
     }
@@ -107,7 +107,7 @@ exact_count_bound=(n:CountWord):>FactBound=>$unsafe {
     else {
         let modulus:CountWord=positive_modulus(n)
         if modulus >? 0 {out=FactBound(0 modulus - 1)} else if k =? 'binary' and nodes.ptr[n].aux =? 0 {
-            let op=cx_token_values.ptr[CountWord(nodes.ptr[n].op)]
+            let op=cx_token_values.ptr[CountWord(node_op(nodes.ptr[n].op_ext))]
             if op =? 'plus' or op =? 'minus' {
                 let a=exact_count_bound(CountWord(nodes.ptr[n].a))
                 let b=exact_count_bound(CountWord(nodes.ptr[n].b))
@@ -180,3 +180,4 @@ exact_bounded_count=(n:CountWord):>bool=>{
 }
 
 from p"facts_compare.dewy" import (fact_add_fits)
+from p"node_store.dewy" import (node_aux2 node_op)

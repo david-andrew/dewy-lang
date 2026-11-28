@@ -429,7 +429,7 @@ fact_loop_threshold=(at:LoopWord l:LoopWord past:LoopWord up:bool):>LoopWord=>$u
         if n <=? 0 {continue}
         let k=nodes.ptr[n].kind
         if k =? 'binary' {
-            let op=cx_token_values.ptr[LoopWord(nodes.ptr[n].op)]
+            let op=cx_token_values.ptr[LoopWord(node_op(nodes.ptr[n].op_ext))]
             if op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' or op =? 'eq' or op =? 'ne' {
                 let a=LoopWord(nodes.ptr[n].a)
                 let b=LoopWord(nodes.ptr[n].b)
@@ -468,11 +468,11 @@ fact_offset_guarded=(e:LoopWord @out:array<int64> depth:LoopWord):>void=>$unsafe
         fact_offset_guarded(LoopWord(nodes.ptr[e].b) @out depth + 1)
         return
     }
-    if k not=? 'binary' or not fact_comparison_raw(nodes.ptr[e].op) {return}
+    if k not=? 'binary' or not fact_comparison_raw(node_op(nodes.ptr[e].op_ext)) {return}
     loop side in [LoopWord(nodes.ptr[e].a) LoopWord(nodes.ptr[e].b)] {
         let x=side
         loop x not=? 0 and nodes.ptr[x].kind =? 'conv' {x=LoopWord(nodes.ptr[x].a)}
-        if x =? 0 or nodes.ptr[x].kind not=? 'binary' or (nodes.ptr[x].op not=? int32(58) and nodes.ptr[x].op not=? int32(59)) {continue}
+        if x =? 0 or nodes.ptr[x].kind not=? 'binary' or (node_op(nodes.ptr[x].op_ext) not=? int32(58) and node_op(nodes.ptr[x].op_ext) not=? int32(59)) {continue}
         loop operand in [LoopWord(nodes.ptr[x].a) LoopWord(nodes.ptr[x].b)] {
             if nodes.ptr[operand].kind =? 'ident' and nodes.ptr[operand].aux =? int32(1) {out.push(LoopWord(nodes.ptr[operand].sym))}
         }
@@ -519,7 +519,7 @@ fact_guarded_rows=(e:LoopWord back:FactState @carried:array<FactDifference> dept
         fact_guarded_rows(LoopWord(nodes.ptr[e].b) back @carried depth + 1)
         return
     }
-    if k not=? 'binary' or nodes.ptr[e].aux not=? 0 or not fact_comparison_raw(nodes.ptr[e].op) {return}
+    if k not=? 'binary' or nodes.ptr[e].aux not=? 0 or not fact_comparison_raw(node_op(nodes.ptr[e].op_ext)) {return}
     let sides=[LoopWord(nodes.ptr[e].a) LoopWord(nodes.ptr[e].b)]
     loop direction in [0..2) {
         let a=sides[direction]
@@ -550,7 +550,7 @@ fact_guard_pairs=(e:LoopWord entry:FactState back:FactState @out:array<FactDiffe
         return
     }
     if k not=? 'binary' or nodes.ptr[e].aux not=? 0 {return}
-    let op=cx_token_values.ptr[LoopWord(nodes.ptr[e].op)]
+    let op=cx_token_values.ptr[LoopWord(node_op(nodes.ptr[e].op_ext))]
     if op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return}
     let a=LoopWord(nodes.ptr[e].a)
     let b=LoopWord(nodes.ptr[e].b)
@@ -884,7 +884,7 @@ fact_loop_roots=(n:LoopWord @s:FactState @budget:LoopWord):>void=>$unsafe {
     if k =? 'ident' {
         if fact_preread_local(n) {fact_read(@s n);}
     }
-    else if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
+    else if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(node_op(nodes.ptr[n].op_ext)) {
         fact_loop_roots(LoopWord(nodes.ptr[n].a) @s @budget)
         fact_loop_roots(LoopWord(nodes.ptr[n].b) @s @budget)
     }
@@ -907,7 +907,7 @@ fact_cursor_predicate=(n:LoopWord cursor:LoopWord @budget:LoopWord):>bool=>$unsa
     let k=nodes.ptr[n].kind
     let a=LoopWord(nodes.ptr[n].a)
     let b=LoopWord(nodes.ptr[n].b)
-    if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
+    if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(node_op(nodes.ptr[n].op_ext)) {
         return fact_cursor_predicate(a cursor @budget) and fact_cursor_predicate(b cursor @budget)
     }
     if k =? 'not_' {return fact_cursor_predicate(a cursor @budget)}
@@ -962,7 +962,7 @@ fact_cursor_flag_assign=(stmt0:LoopWord cursor:LoopWord limit:LoopWord cond:Loop
         stmt=kid(stmt 0)
         if nodes.ptr[stmt].kind =? 'exprstmt' {stmt=LoopWord(nodes.ptr[stmt].a)}
     }
-    if nodes.ptr[stmt].kind not=? 'assign' or nodes.ptr[stmt].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[stmt].op)] not=? 'assign' {return 0}
+    if nodes.ptr[stmt].kind not=? 'assign' or nodes.ptr[stmt].aux not=? 0 or cx_token_values.ptr[LoopWord(node_op(nodes.ptr[stmt].op_ext))] not=? 'assign' {return 0}
     let target=LoopWord(nodes.ptr[stmt].a)
     let rhs=LoopWord(nodes.ptr[stmt].b)
     if not fact_cursor_local(target) or ntype(target) not=? T_BOOL or nodes.ptr[rhs].kind not=? 'bool_lit' {return 0}
@@ -1002,7 +1002,7 @@ fact_cursor_shape=(n:LoopWord):>bool=>$unsafe {
     let guard=LoopWord(nodes.ptr[condition].a)
     let body=LoopWord(nodes.ptr[n].b)
     let nstmts=nkids(body)
-    if nodes.ptr[guard].kind not=? 'binary' or nodes.ptr[guard].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[guard].op)] not=? 'lt' or nodes.ptr[body].kind not=? 'block' or nstmts <? 1 or nstmts >? 8 {return false}
+    if nodes.ptr[guard].kind not=? 'binary' or nodes.ptr[guard].aux not=? 0 or cx_token_values.ptr[LoopWord(node_op(nodes.ptr[guard].op_ext))] not=? 'lt' or nodes.ptr[body].kind not=? 'block' or nstmts <? 1 or nstmts >? 8 {return false}
     let cursor=LoopWord(nodes.ptr[guard].a)
     let limit=LoopWord(nodes.ptr[guard].b)
     let limit_sym:LoopWord=0
@@ -1018,11 +1018,11 @@ fact_cursor_shape=(n:LoopWord):>bool=>$unsafe {
     let target=LoopWord(nodes.ptr[store].a)
     if nodes.ptr[store].kind not=? 'assign' or nodes.ptr[store].aux not=? 0 or not fact_preread_local(target) or nodes.ptr[target].sym not=? nodes.ptr[cursor].sym or ntype(target) not=? T_INT {return false}
     let rhs=LoopWord(nodes.ptr[store].b)
-    let op=cx_token_values.ptr[LoopWord(nodes.ptr[store].op)]
+    let op=cx_token_values.ptr[LoopWord(node_op(nodes.ptr[store].op_ext))]
     if op =? 'assign' {
         # A checked int64 compound update is lowered to a fixed store of i+1.
         if nodes.ptr[rhs].kind =? 'conv' and nodes.ptr[rhs].aux =? int32(int64(CV.fixed_store)) and ntype(rhs) =? T_INT {rhs=LoopWord(nodes.ptr[rhs].a)}
-        if nodes.ptr[rhs].kind not=? 'binary' or nodes.ptr[rhs].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[rhs].op)] not=? 'plus' or ntype(rhs) not=? T_INT {return false}
+        if nodes.ptr[rhs].kind not=? 'binary' or nodes.ptr[rhs].aux not=? 0 or cx_token_values.ptr[LoopWord(node_op(nodes.ptr[rhs].op_ext))] not=? 'plus' or ntype(rhs) not=? T_INT {return false}
         let read=LoopWord(nodes.ptr[rhs].a)
         if not fact_preread_local(read) or nodes.ptr[read].sym not=? nodes.ptr[cursor].sym {return false}
         rhs=LoopWord(nodes.ptr[rhs].b)
@@ -1190,6 +1190,7 @@ from p"facts_compare.dewy" import (fact_compare)
 from p"refine_metadata.dewy" import (refine_storage)
 from p"refine_transfers.dewy" import (ref_assume)
 from p"types.jo" import (is_int prune)
+from p"node_store.dewy" import (node_op)
 
 # Jo owns the speculation and shared step budget. Bind their places once;
 # nested attempts retain direct reads and restore only the original fields.
@@ -1308,7 +1309,7 @@ fact_loop_step=(e0:LoopWord x:LoopWord):>bool=>$unsafe {
     let e=e0
     loop e not=? 0 and nodes.ptr[e].kind =? 'conv' {e=LoopWord(nodes.ptr[e].a)}
     # Tok.plus/minus retain node-ABI ordinals 58/59.
-    if e =? 0 or nodes.ptr[e].kind not=? 'binary' or nodes.ptr[e].op not=? 58 and nodes.ptr[e].op not=? 59 {return false}
+    if e =? 0 or nodes.ptr[e].kind not=? 'binary' or node_op(nodes.ptr[e].op_ext) not=? 58 and node_op(nodes.ptr[e].op_ext) not=? 59 {return false}
     loop side in [LoopWord(nodes.ptr[e].a) LoopWord(nodes.ptr[e].b)] {
         let v:LoopWord=side
         loop v not=? 0 and nodes.ptr[v].kind =? 'conv' {v=LoopWord(nodes.ptr[v].a)}

@@ -103,7 +103,7 @@ assign_of = (t: int, op: int = 47, lhs: NK = .ident) -> int:
     s = dewy_node(.assign, typed(lhs, t))
     nodes[int(nodes[s].a)].aux = 1
     nodes[s].b = i32(typed(.int_lit, t))
-    nodes[s].op = i32(op)
+    nodes[s].op_ext = node_with_op(nodes[s].op_ext, i32(i32(op)))
     s
 # A statement `if` on a condition with else-less (or else) bodies the conditional host checks.
 if_of = (other: bool = false, flags: int = 0) -> int:
@@ -135,7 +135,7 @@ main = ():
     run(block_of([tuple_set]))
     run(block_of([assign_of(T_INT, 48), assign_of(T_INT, 47, .field)]))
     checked = let_of(12, T_INT); nodes[checked].flags = i32(128)
-    shaped = let_of(12, T_INT); nodes[shaped].aux2 = 1789
+    shaped = let_of(12, T_INT); nodes[shaped].op_ext = node_with_aux2(nodes[shaped].op_ext, i32(1789))
     run(block_of([checked, shaped, dewy_node(.reflect_scope)]))
     db_exact = true
     run(block_of([assign_of(T_INT, 48), assign_of(T_INT)]))
@@ -245,7 +245,7 @@ def test_checker_blocks_twins(compiler, tmp_path, release):  # noqa: F811
     ('run(block_of([dewy_node(.import_)]))', 1),
     ('run(block_of([dewy_node(.int_lit)]))', 2),
     ('run(block_of([if_of(), dewy_node(.struct_)]))', 1),
-    ('s = assign_of(T_INT, 48); spawned = typed(.call, T_INT); nodes[spawned].aux2 = 17; nodes[s].b = i32(spawned); run(block_of([s]))', 3),
+    pytest.param('s = assign_of(T_INT, 48); spawned = typed(.call, T_INT); nodes[spawned].op_ext = node_with_aux2(nodes[spawned].op_ext, i32(17)); nodes[s].b = i32(spawned); run(block_of([s]))', 3, id='s = assign_of(T_INT, 48); spawned = typed(.call, T_INT); nodes[spawned].aux2 = 17; nodes[s].b = i32(spawned); run(block_of([s]))-3'),
 ])
 def test_checker_blocks_errors(compiler, tmp_path, case, code):  # noqa: F811
     main = f'''

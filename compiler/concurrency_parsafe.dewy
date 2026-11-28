@@ -9,6 +9,7 @@ from p"lower_races.dewy" import (in_lib race_arg)
 from p"ast.jo" import (kid kid2 kids nkids nkids2 nodes)
 from p"types.jo" import (tkind)
 from p"concurrency_tasks.dewy" import (concurrency_callback concurrency_task_globals)
+from p"node_store.dewy" import (node_d)
 # Demanded parallel callback contracts; shared state has one owner in concurrency.jo.
 ParSafeWord:type=int64<overflow='wrap'>
 parsafe_key=(f:ParSafeWord i:ParSafeWord):>int64=>$unsafe {
@@ -142,7 +143,7 @@ parsafe_index=(n:ParSafeWord @call_head:dict<int64 int64> @call_node:array<int64
     parsafe_index(ParSafeWord(nodes.ptr[n].b) @call_head @call_node @call_next @values);
     if k not=? 'for_' {
         parsafe_index(ParSafeWord(nodes.ptr[n].c) @call_head @call_node @call_next @values);
-        if k not=? 'partial' {parsafe_index(ParSafeWord(nodes.ptr[n].d) @call_head @call_node @call_next @values);}
+        if k not=? 'partial' {parsafe_index(ParSafeWord(node_d(nodes.ptr[n].op_ext)) @call_head @call_node @call_next @values);}
     }
     loop i in [0..nkids(n)) {parsafe_index(kid(n i) @call_head @call_node @call_next @values);}
     loop i in [0..nkids2(n)) {parsafe_index(kid2(n i) @call_head @call_node @call_next @values);}

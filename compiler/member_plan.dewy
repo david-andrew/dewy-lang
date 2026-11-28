@@ -24,7 +24,7 @@ from p"lower.jo" import (opt_release)
 from p"main.jo" import (debug_vars host_ir repl_image)
 from p"member_admit.dewy" import (member_copy member_replay_scope)
 from p"member_replay.jo" import (MemberTemplate member_compact_enabled member_compact_owners member_scopes member_templates member_words)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_op node_with_sval)
 from p"ownership.jo" import (ownership_decls)
 from p"partition.jo" import (partition_active)
 from p"proofs.jo" import (proof_active result_active)
@@ -79,7 +79,7 @@ member_column_sites=(n:PlanWord @t:MemberTemplate allowed:bool word:bool @sites:
         args=true
     }
     else if k =? 'binary' {
-        if nd.aux not=? 0 or not fact_comparison_raw(nd.op) {return false}
+        if nd.aux not=? 0 or not fact_comparison_raw(node_op(nd.op_ext)) {return false}
     }
     else if k not=? 'block' and k not=? 'exprstmt' and k not=? 'vardecl' and k not=? 'and_' and k not=? 'or_' and k not=? 'not_' and k not=? 'if_' and k not=? 'index' and k not=? 'field' {return false}
     let mask=isolation_children(k)
@@ -149,7 +149,7 @@ member_checked_view=(@t:MemberTemplate sites:array<int64> at:PlanWord):>PlanWord
             loop i in [0..t.texts.length) {
                 let v=nodes.length
                 nodes.push(nodes.ptr[site])
-                if set =? 0 {nodes.ptr[v].sval=int32(t.values[set][i])}
+                if set =? 0 {nodes.ptr[v].op_ext=node_with_sval(nodes.ptr[v].op_ext (int32(t.values[set][i])))}
                 else {
                     nodes.ptr[v].aux=int32(t.values[set][i])
                     nodes.ptr[v].name=int32(intern(t.texts[i]))

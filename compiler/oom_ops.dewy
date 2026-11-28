@@ -11,6 +11,7 @@ from p"oom.jo" import (oom_files)
 from p"ownership.jo" import (ownership_hooks)
 from p"arena_ops.dewy" import (runtime_switch_on)
 from p"check.jo" import (target_wasm)
+from p"node_store.dewy" import (node_aux2 node_sval node_with_aux2 node_with_sval)
 # Direct recursive lowering; shared state has one owner in oom.jo.
 MoveWord:type=int64<overflow='wrap'>
 oom_module=(file:MoveWord pos:MoveWord):>void=>$unsafe {
@@ -31,7 +32,7 @@ oom_body_allocates=(n:MoveWord):>bool=>$unsafe {
     if k =? 'ident' or k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'break_' or k =? 'continue_' {return false}
     if k =? 'vardecl' {
         # (a value parameter's own binding, dewy_nodes.jo dw_finish_function, has its type)
-        if nodes.ptr[n].aux2 =? 1 {return false}
+        if node_aux2(nodes.ptr[n].op_ext) =? 1 {return false}
         if nodes.ptr[n].a =? 0 or not oom_fixed_type(MoveWord(nodes.ptr[n].a)) {return true}
         return oom_body_allocates(MoveWord(nodes.ptr[n].b))
     }
@@ -64,7 +65,7 @@ oom_declarations=(n:MoveWord):>array<int64>=>$unsafe {
     let w=mk('fn_' pos)
     nodes.ptr[w].name = nodes.ptr[n].name;
     # (the frame answers to the function's own row, as its body does)
-    nodes.ptr[w].sval = nodes.ptr[n].sval;
+    nodes.ptr[w].op_ext=node_with_sval(nodes.ptr[w].op_ext (node_sval(nodes.ptr[n].op_ext)));
     nodes.ptr[n].name = int32<overflow='wrap'>(intern(inner));
     if nkids2(n) >? 0 and has_flag(n NF_GENERIC) {
         let type_params:array<int64>=[]
@@ -79,7 +80,7 @@ oom_declarations=(n:MoveWord):>array<int64>=>$unsafe {
         params.push(clone(p));
         let arg=mk('ident' nodes.ptr[p].pos)
         nodes.ptr[arg].name = nodes.ptr[p].name;
-        nodes.ptr[arg].aux2 = 1;
+        nodes.ptr[arg].op_ext=node_with_aux2(nodes.ptr[arg].op_ext 1);
         if has_flag(p NF_MUT) {add_flag(arg NF_MUT);}
         args.push(arg);
     }
@@ -108,7 +109,7 @@ oom_declarations=(n:MoveWord):>array<int64>=>$unsafe {
     return [w n]
 }
 oom_row=(n:MoveWord):>int64=>$unsafe {
-    if nodes.ptr[n].sval not=? 0 {return MoveWord(nodes.ptr[n].sval)}
+    if node_sval(nodes.ptr[n].op_ext) not=? 0 {return MoveWord(node_sval(nodes.ptr[n].op_ext))}
     if not dir_rows_any {return 0}
     let body:MoveWord=MoveWord(nodes.ptr[n].b)
     let p=if body not=? 0 {nodes.ptr[body].pos} else {nodes.ptr[n].pos}

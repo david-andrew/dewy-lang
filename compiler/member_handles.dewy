@@ -21,7 +21,7 @@ from p"refine.jo" import (ref_predicates)
 from p"refine_metadata.dewy" import (representation_type)
 from p"refinement_types.dewy" import (RefTerm)
 from p"@lib/core/str.jo" import (to_int)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_mod node_with_aux2 node_with_sval)
 from p"ast.jo" import (NF_AT NF_CHECKED NF_MUT NF_SPREAD add_flag clear_flag clone has_flag kids nodes set_list)
 from p"expr.jo" import (AUX2_PARTIAL AUX2_PLACE bc_count last_checked race_name_ids race_needs_id select_name_id type_name_id)
 
@@ -50,7 +50,7 @@ race_spread=(n:int64 expected:int64):>int64=>$unsafe {
     if concurrency_first_ok_module <? 0 or not dewy_at(nodes.ptr[n].pos) {return -1}
     if ds.length =? 0 {return -1}
     loop d in ds {
-        if MemberHandlesWord(nodes.ptr[d].mod) not=? concurrency_first_ok_module {return -1}
+        if MemberHandlesWord(node_mod(nodes.ptr[d].op_ext)) not=? concurrency_first_ok_module {return -1}
     }
     let args=kids(n)
     let spreads:array<int64>=[]
@@ -230,7 +230,7 @@ type_name_member=(n:int64):>bool=>$unsafe {
         }
     }
     if member =? range_words_slot {
-        nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos sval = int32<overflow='wrap'>(intern(type_range_words(t))) type = int32<overflow='wrap'>(T_STR) flags = int32<overflow='wrap'>(NF_CHECKED))
+        nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos op_ext = node_with_sval(uint32(0) int32<overflow='wrap'>(intern(type_range_words(t)))) type = int32<overflow='wrap'>(T_STR) flags = int32<overflow='wrap'>(NF_CHECKED))
         last_checked_slot=n
         return true
     }
@@ -245,7 +245,7 @@ type_name_member=(n:int64):>bool=>$unsafe {
         return true
     }
     if (text as array<uint8>).length =? 0 {fatal(nodes.ptr[n].pos "{dt(t)} has no name of its own: an anonymous record, a union or a computed type has none (give it one, `Name:type = ...`)")}
-    nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos sval = int32<overflow='wrap'>(intern(text)) type = int32<overflow='wrap'>(T_STR) flags = int32<overflow='wrap'>(NF_CHECKED))
+    nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos op_ext = node_with_sval(uint32(0) int32<overflow='wrap'>(intern(text))) type = int32<overflow='wrap'>(T_STR) flags = int32<overflow='wrap'>(NF_CHECKED))
     last_checked_slot=n
     true
 }
@@ -254,7 +254,7 @@ type_name_member=(n:int64):>bool=>$unsafe {
 # parameters, with x evaluated now, as `@x.method()` gives; a data member stays a place.
 # -1 when n is not such a handle. O(the record's fields), only for `@` on a member.
 dewy_method_handle=(n:int64 expected:int64):>int64=>$unsafe {
-    if not has_flag(n NF_AT) or nodes.ptr[n].b not=? 0 or nodes.ptr[n].aux2 =? int32<overflow='wrap'>(AUX2_PLACE) or not dewy_at(nodes.ptr[n].pos) {return -1}
+    if not has_flag(n NF_AT) or nodes.ptr[n].b not=? 0 or node_aux2(nodes.ptr[n].op_ext) =? int32<overflow='wrap'>(AUX2_PLACE) or not dewy_at(nodes.ptr[n].pos) {return -1}
     let rt=prune(check_expr(MemberHandlesWord(nodes.ptr[n].a) 0))
     nodes[n].a = int32<overflow='wrap'>(last_checked)
     add_flag(last_checked NF_CHECKED)
@@ -270,6 +270,6 @@ dewy_method_handle=(n:int64 expected:int64):>int64=>$unsafe {
     nodes.push(nodes.ptr[n])
     clear_flag(callee NF_AT | NF_MUT | NF_CHECKED)
     nodes[callee].type = 0
-    nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(callee) aux2 = int32<overflow='wrap'>(AUX2_PARTIAL))
+    nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(callee) op_ext = node_with_aux2(uint32(0) int32<overflow='wrap'>(AUX2_PARTIAL)))
     dewy_partial(n expected)
 }

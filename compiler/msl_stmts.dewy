@@ -26,6 +26,7 @@ from p"msl_ops.dewy" import (ml_ctx_args ml_drain ml_err ml_first ml_is_floaty m
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
 from p"types.jo" import (T_FLOAT T_I32 T_IVEC2 T_IVEC3 T_MAT4 T_MATH_INT T_VEC4 fields is_vec prune structs tkind tsize types)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_aux2 node_d node_fval node_mod node_op)
 
 MslStmtWord:type=int64<overflow='wrap'>
 ml_head=():>string=>{
@@ -160,7 +161,7 @@ ml_stmt=(s:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
     else if k =? 'assign' {
         if nodes.ptr[s].aux not=? 0 {ml_err(nodes.ptr[s].pos "unsupported assignment in shader")}
         let a=MslStmtWord(nodes.ptr[s].a)
-        let op=MslStmtWord(nodes.ptr[s].op)
+        let op=MslStmtWord(node_op(nodes.ptr[s].op_ext))
         let ta=prune(ntype(a))
         let b=MslStmtWord(nodes.ptr[s].b)
         if op =? 47 {
@@ -211,7 +212,7 @@ ml_stmt=(s:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
         if nodes.ptr[s].aux =? 1 {
             r=ml_ref(MslStmtWord(nodes.ptr[s].a))
             if (r.base as array<uint8>).length =? 0 {
-                arr=ml_local(MslStmtWord(nodes.ptr[s].d))
+                arr=ml_local(MslStmtWord(node_d(nodes.ptr[s].op_ext)))
                 ml_out.push("{pre}{ml_type(ct nodes.ptr[s].pos)} {arr} = {ml_expr(MslStmtWord(nodes.ptr[s].a))};\n")
             }
         }
@@ -280,7 +281,7 @@ ml_expr=(e:MslStmtWord):>string=>$unsafe {
         if nodes.ptr[e].ival <? -2147483648 or nodes.ptr[e].ival >? 4294967295 {ml_err(nodes.ptr[e].pos "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")}
         return ml_int(MslStmtWord(nodes.ptr[e].ival))
     }
-    if k =? 'float_lit' {return ml_float(nodes.ptr[e].fval)}
+    if k =? 'float_lit' {return ml_float(node_fval(nodes.ptr[e].op_ext))}
     if k =? 'bool_lit' {
         if nodes.ptr[e].ival not=? 0 {return "true"}
         return "false"
@@ -305,7 +306,7 @@ ml_expr=(e:MslStmtWord):>string=>$unsafe {
     if k =? 'binary' {
         let a=MslStmtWord(nodes.ptr[e].a)
         let b=MslStmtWord(nodes.ptr[e].b)
-        let op=cx_token_values.ptr[MslStmtWord(nodes.ptr[e].op)]
+        let op=cx_token_values.ptr[MslStmtWord(node_op(nodes.ptr[e].op_ext))]
         let ta=ntype(a)
         let tb=ntype(b)
         if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
@@ -330,13 +331,13 @@ ml_expr=(e:MslStmtWord):>string=>$unsafe {
             if op =? 'caret' {return "({x} != {y})"}
         }
         # (Dewy's `//` and `%` of signed integers floor, as on the CPU)
-        if nodes.ptr[e].aux2 =? -1 and (op =? 'slash' or op =? 'percent') and types.ptr[t].kind =? 'int_' and types.ptr[t].sign {return gl_narrow("{ml_floor(op =? 'percent')}(int({x}), int({y}))" t)}
+        if node_aux2(nodes.ptr[e].op_ext) =? -1 and (op =? 'slash' or op =? 'percent') and types.ptr[t].kind =? 'int_' and types.ptr[t].sign {return gl_narrow("{ml_floor(op =? 'percent')}(int({x}), int({y}))" t)}
         return ml_arith(op x y ta t tb)
     }
     if k =? 'unary' {
         let x=ml_expr(MslStmtWord(nodes.ptr[e].a))
-        if nodes.ptr[e].op =? int32(58) {return x}
-        if nodes.ptr[e].op =? int32(59) {
+        if node_op(nodes.ptr[e].op_ext) =? int32(58) {return x}
+        if node_op(nodes.ptr[e].op_ext) =? int32(59) {
             # (integers through unsigned ones, which wrap)
             if types.ptr[t].kind =? 'int_' {return gl_narrow("as_type<int>(-as_type<uint>(int({x})))" t)}
             if is_vec(t) and types.ptr[t].sign {return "as_type<int{types.ptr[t].bits}>(-as_type<uint{types.ptr[t].bits}>({x}))"}
@@ -529,7 +530,7 @@ ml_call=(e:MslStmtWord):>string=>$unsafe {
     let f=MslStmtWord(nodes.ptr[e].sym)
     let decl=MslStmtWord(fns.ptr[f].decl)
     let nm=name_of(MslStmtWord(nodes.ptr[decl].name))
-    if modules[MslStmtWord(nodes.ptr[decl].mod)].is_prelude {
+    if modules[MslStmtWord(node_mod(nodes.ptr[decl].op_ext))].is_prelude {
         if nm =? "discard" {
             if ml_stage not=? "fragment" {ml_err(pos "discard() can only be used in the fragment shader")}
             return "discard_fragment()"

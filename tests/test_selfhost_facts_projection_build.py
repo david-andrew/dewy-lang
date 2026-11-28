@@ -82,7 +82,7 @@ main = ():
     loop i in [0..40): fact_project(s, base, 100 + i, false, T_INT)
     if not fact_projections_indexed(s) or before.projections.len() >= s.projections.len() or fact_project(s, base, b, true, T_INT) != value: fail(25)
     # Literal text identity does not publish a generic projection.
-    nodes[5] = Node(kind=.str_lit, sval=123, aux=0)
+    nodes[5] = Node(kind=.str_lit, aux=0, op_ext=node_with_sval(u32(0), i32(123)))
     text = fact_new(s, FactBound(), FactTerm(origin=5, type=T_STR)); count = s.projections.len()
     identity = fact_project(s, text, FACT_TEXT_ID, false, T_INT)
     if fact_bound(s, identity).lo != 123 or fact_bound(s, identity).hi != 123 or s.projections.len() != count: fail(26)

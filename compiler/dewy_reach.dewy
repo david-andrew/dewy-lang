@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import Node, node_mk, node_set_list, node_set_list2, node_kids, node_kids2, node_clone
+from p"node_store.dewy" import Node, node_aux2, node_clone, node_d, node_kids, node_kids2, node_mk, node_op, node_set_list, node_set_list2
 
 from p"dewy_parser.dewy" import ParserContext, dc_parser_word
 from p"dewy_builders.dewy" import ParserBuilderHost, db_receiver_field
@@ -104,7 +104,7 @@ dm_reach_statement=(@context:ParserContext @store:array<Node> @lists:array<int32
     let k=store[s].kind
     if k =? 'vardecl' or k =? 'const_' {
         # (a parameter's value binding, dw_finish_function: never a member)
-        if store[s].aux2 =? 1 {return true}
+        if node_aux2(store[s].op_ext) =? 1 {return true}
         if int64(store[s].nlist) >? 0 {
             if not dm_reach(@context @store @lists @host @texts int64(store[s].b)) or not dm_reach_type(@context @store @lists @host @texts int64(store[s].a)) {return false}
             let names:array<int64>=[]
@@ -161,7 +161,7 @@ dm_reach_in=(@context:ParserContext @store:array<Node> @lists:array<int32> @host
 }
 
 dm_reach_head=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> h:int64):>bool=>{
-    let op=store[h].op
+    let op=node_op(store[h].op_ext)
     if op =? 1 {return dm_reach_in(@context @store @lists @host @texts node_kids(@store @lists h) int64(store[h].a))}
     if op =? 4 {return dm_reach(@context @store @lists @host @texts int64(store[h].a))}
     dm_reach_head(@context @store @lists @host @texts int64(store[h].a)) and dm_reach_head(@context @store @lists @host @texts int64(store[h].b))
@@ -193,7 +193,7 @@ dm_reach_fn=(@context:ParserContext @store:array<Node> @lists:array<int32> @host
         let captured=node_kids2(@store @lists n)
         if ((int64(store[n].flags) & DM_GENERIC) not=? 0) {
             captured=[]
-            if store[n].d not=? 0 {captured = node_kids(@store @lists int64(store[n].d))}
+            if node_d(store[n].op_ext) not=? 0 {captured = node_kids(@store @lists int64(node_d(store[n].op_ext)))}
         # (`$capture @hits` of a member: the closure writes it through the receiver's place, one
         # capture of the receiver for every member, context.reach.captures, dw_function)
         }
@@ -219,7 +219,7 @@ dm_reach_fn=(@context:ParserContext @store:array<Node> @lists:array<int32> @host
         }
         if members.length >? 0 {
             context.reach.captures[n] = members
-            if ((int64(store[n].flags) & DM_GENERIC) not=? 0) {node_set_list(@store @lists int64(store[n].d) kept)}
+            if ((int64(store[n].flags) & DM_GENERIC) not=? 0) {node_set_list(@store @lists int64(node_d(store[n].op_ext)) kept)}
             else {node_set_list2(@store @lists n kept)}
         }
     }

@@ -36,6 +36,7 @@ from p"diagnostic_exit.dewy" import (fatal)
 from p"expr.jo" import (AUX2_PLACE CallFailure DRAWING_FNS Rejection fn_used id_draw id_hsv id_rgb id_rgba id_update quat_nodes)
 from p"argument_order.dewy" import (map_args)
 from p"types.jo" import (T_STR prune types)
+from p"node_store.dewy" import (node_aux2 node_mod node_sval)
 
 CallArgWord:type=int64<overflow='wrap'>
 
@@ -138,7 +139,7 @@ call_string_cost=(a:int64 p:int64 sp:int64 @binds:array<int64>):>int64=>$unsafe 
         let ps=str_set_of(sp)
         if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux not=? 1 {
             if member_record >=? 0 {member_string_decision(a ps)}
-            return if str_sets[ps].contains(name_of(CallArgWord(nodes.ptr[a].sval))) {0} else {-1}
+            return if str_sets[ps].contains(name_of(CallArgWord(node_sval(nodes.ptr[a].op_ext)))) {0} else {-1}
         }
         let at=prune(ntype(a))
         if at =? sp {return 0}
@@ -147,7 +148,7 @@ call_string_cost=(a:int64 p:int64 sp:int64 @binds:array<int64>):>int64=>$unsafe 
         let e=kid_lit(a)
         if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].aux not=? 1 {
             if member_record >=? 0 {member_string_decision(e ps)}
-            return if str_sets[ps].contains(name_of(CallArgWord(nodes.ptr[e].sval))) {0} else {-1}
+            return if str_sets[ps].contains(name_of(CallArgWord(node_sval(nodes.ptr[e].op_ext)))) {0} else {-1}
         }
         return 2
     }
@@ -192,12 +193,12 @@ call_decl_checks=(n:int64 name:int64 decl:int64 args:array<int64> cd_args:array<
     let self_call=ci >? 0 and CallArgWord(fns.ptr[ci].decl) =? decl
     # (draw() inside draw: as a way to draw it again, it calls itself without end)
     if self_call {
-        if (name =? id_draw or name =? id_update) and modules.ptr[CallArgWord(nodes.ptr[decl].mod)].is_main {
+        if (name =? id_draw or name =? id_update) and modules.ptr[CallArgWord(node_mod(nodes.ptr[decl].op_ext))].is_main {
             fatal(nodes.ptr[n].pos "{name_of(name)} calls itself here, which repeats without end: the game calls {name_of(name)} by itself, each frame")
         }
         if self_call_is_body(n decl args) and caller_dewy() {self_call_error(n name ufcs args)}
     }
-    let na2=nodes.ptr[n].aux2
+    let na2=node_aux2(nodes.ptr[n].op_ext)
     if na2 =? int32<overflow='wrap'>(AUX2_PLACE) or na2 =? int32<overflow='wrap'>(AUX2_PLACE_TAKEN) or (place_methods.length >? 0 and place_methods.has(decl)) {place_call_seen(n decl)}
     let bundled=decl_in_prelude(decl)
     if bundled {
@@ -225,7 +226,7 @@ call_decl_checks=(n:int64 name:int64 decl:int64 args:array<int64> cd_args:array<
                 }
                 if (tag & uint8(64)) not=? uint8(0) and target_wasm and cd_args.length >? 0 and cd_args[0] not=? 0 and nodes.ptr[cd_args[0]].kind =? 'str_lit' and nodes.ptr[cd_args[0]].aux =? 0 {
                     let fnm=name_of(CallArgWord(nodes.ptr[decl].name))
-                    let f=name_of(CallArgWord(nodes.ptr[cd_args[0]].sval))
+                    let f=name_of(CallArgWord(node_sval(nodes.ptr[cd_args[0]].op_ext)))
                     warn(nodes.ptr[n].pos "a web page has no files from the disk: {fnm}(\"{f}\") finds only what the page wrote itself; `embed(\"{f}\")` builds the file into the program")
                 }
             }

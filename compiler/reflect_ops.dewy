@@ -24,7 +24,7 @@ from p"checks_thin_expr.dewy" import (int_intervals is_map_type)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_if bc_int bc_str)
 from p"member_admit.dewy" import (member_prepare)
 from p"member_replay.jo" import (member_scopes)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_op node_sval node_with_aux2 node_with_sval)
 from p"refine.jo" import (str_sets)
 from p"refine_metadata.dewy" import (str_set_of mk_refined ref_intern)
 from p"refine_ops.dewy" import (str_set_type)
@@ -101,17 +101,17 @@ literal_members=(t0:ReflectWord pos:ReflectWord @out:array<int64> @singletons:ar
 # values of integer literals, and the types of the other members.
 members_leaves=(e:ReflectWord @texts:array<string> @ints:array<int64> @others:array<int64>):>void=>$unsafe {
     let k=nodes.ptr[e].kind
-    if k =? 'binary' and nodes.ptr[e].op =? int32(64) {
+    if k =? 'binary' and node_op(nodes.ptr[e].op_ext) =? int32(64) {
         members_leaves(ReflectWord(nodes.ptr[e].a) @texts @ints @others)
         members_leaves(ReflectWord(nodes.ptr[e].b) @texts @ints @others)
     }
     else if k =? 'str_lit' and nodes.ptr[e].aux not=? 1 {
-        if not texts.contains(name_of(ReflectWord(nodes.ptr[e].sval))) {texts.push(name_of(ReflectWord(nodes.ptr[e].sval)))}
+        if not texts.contains(name_of(ReflectWord(node_sval(nodes.ptr[e].op_ext)))) {texts.push(name_of(ReflectWord(node_sval(nodes.ptr[e].op_ext))))}
     }
     else if k =? 'int_lit' and not has_flag(e NF_U64) {
         if not ints.contains(nodes.ptr[e].ival) {ints.push(nodes.ptr[e].ival)}
     }
-    else if k =? 'unary' and nodes.ptr[e].op =? int32(59) and nodes.ptr[ReflectWord(nodes.ptr[e].a)].kind =? 'int_lit' and not has_flag(ReflectWord(nodes.ptr[e].a) NF_U64) {
+    else if k =? 'unary' and node_op(nodes.ptr[e].op_ext) =? int32(59) and nodes.ptr[ReflectWord(nodes.ptr[e].a)].kind =? 'int_lit' and not has_flag(ReflectWord(nodes.ptr[e].a) NF_U64) {
         if not ints.contains(-nodes.ptr[ReflectWord(nodes.ptr[e].a)].ival) {ints.push(-nodes.ptr[ReflectWord(nodes.ptr[e].a)].ival)}
     }
     # These syntax kinds reached here because they are not literal type leaves.
@@ -163,7 +163,7 @@ members_literal=(n:ReflectWord):>ReflectWord=>$unsafe {
     literal_members(u pos @values @singletons)
     let items:array<int64>=[]
     loop value in values {
-        if nodes.ptr[value].kind =? 'str_lit' {items.push(bc_str(name_of(ReflectWord(nodes.ptr[value].sval)) pos))}
+        if nodes.ptr[value].kind =? 'str_lit' {items.push(bc_str(name_of(ReflectWord(node_sval(nodes.ptr[value].op_ext))) pos))}
         else {items.push(bc_int(nodes.ptr[value].ival pos))}
     }
     nodes.ptr[n]=Node(kind='array' pos=pos)
@@ -206,7 +206,7 @@ reflect_sequence=(e0:ReflectWord binder:ReflectWord):>array<int64>=>$unsafe {
             let scope=mk('reflect_scope' nodes.ptr[e].pos)
             nodes.ptr[scope].name=int32(binder)
             nodes.ptr[scope].a=int32(value)
-            nodes.ptr[scope].aux2=int32(singletons[i])
+            nodes.ptr[scope].op_ext=node_with_aux2(nodes.ptr[scope].op_ext (int32(singletons[i])))
             out.push(scope)
         }
     }
@@ -251,7 +251,7 @@ reflect_bind=(s:ReflectWord):>void=>$unsafe {
         let initial=ReflectWord(nodes.ptr[s].a)
         let g=globals.length
         # (a literal member is its own singleton: `return m` fits the union)
-        let t=if nodes.ptr[s].aux2 not=? 0 {ReflectWord(nodes.ptr[s].aux2)} else {ntype(initial)}
+        let t=if node_aux2(nodes.ptr[s].op_ext) not=? 0 {ReflectWord(node_aux2(nodes.ptr[s].op_ext))} else {ntype(initial)}
         globals.push(Global(name=int32(name) type=int32(t) init=int32(initial) mod=int32(cur_mod()) is_const=true state=2))
         push_scope_sym(name new_sym(name 'const_' g 0))
     }
@@ -274,7 +274,7 @@ reflect_member=(n:ReflectWord):>bool=>$unsafe {
     let f=fields.ptr[ReflectWord(syms.ptr[s].ref)]
     let member=name_of(ReflectWord(nodes.ptr[n].name))
     let pos=nodes.ptr[n].pos
-    if member =? "name" {nodes.ptr[n]=Node(kind='str_lit' pos=pos sval=f.name type=int32(T_STR) flags=int32(NF_CHECKED))}
+    if member =? "name" {nodes.ptr[n]=Node(kind='str_lit' pos=pos op_ext=node_with_sval(uint32(0) f.name) type=int32(T_STR) flags=int32(NF_CHECKED))}
     else if member =? "type" {
         let name=intern("$field_type{int64(f.type)}")
         push_scope_sym(name new_sym(name 'type_' int64(f.type) 0))

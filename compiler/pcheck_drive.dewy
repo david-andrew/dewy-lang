@@ -41,6 +41,7 @@ from p"byte_append.dewy" import (append_bytes)
 from p"witness.jo" import (wit_collect wit_tentative wit_tentative_failed)
 from p"x64_allocate.dewy" import (ra_dump)
 from p"x64_emit.dewy" import (ra_stat)
+from p"node_store.dewy" import (node_d)
 
 PcWord:type=int64<overflow='wrap'>
 # (the no-traps default's obligations are decided in each process for its own
@@ -436,7 +437,7 @@ pc_tree=(n:PcWord):>bool=>$unsafe {
     }
     if not pc_tree(PcWord(nodes.ptr[n].a)) or not pc_tree(PcWord(nodes.ptr[n].b)) {return false}
     if k not=? 'for_' {
-        if not pc_tree(PcWord(nodes.ptr[n].c)) or not pc_tree(PcWord(nodes.ptr[n].d)) {return false}
+        if not pc_tree(PcWord(nodes.ptr[n].c)) or not pc_tree(PcWord(node_d(nodes.ptr[n].op_ext))) {return false}
     }
     loop i in [0..nkids(n)) {
         if not pc_tree(kid(n i)) {return false}

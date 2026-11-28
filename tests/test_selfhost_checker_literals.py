@@ -110,7 +110,7 @@ main = ():
     # (int-to-float of an exact operation is noted; of anything else, not asked about)
     n = node(.conv); nodes[n].aux = 2
     count = events.len(); xl_finish(n, T_INT, 0); assert(events.len() == count and literal_last == n)
-    src = node(.binary); nodes[src].type = i32(T_I32); nodes[src].op = 58
+    src = node(.binary); nodes[src].type = i32(T_I32); nodes[src].op_ext = node_with_op(nodes[src].op_ext, i32(58))
     n = node(.conv, src); nodes[n].aux = 2
     count = events.len(); xl_finish(n, T_INT, 0); assert(events.len() == count + 1 and literal_last == n)
     n = node(.conv)
@@ -154,8 +154,8 @@ def test_checker_literals_float_error(compiler, tmp_path):  # noqa: F811
     driver = DRIVER.split('main = ():')[0] + r'''main = ():
     prepare()
     n = node(.float_lit)
-    nodes[n].sval = 1
-    nodes[n].fval = f64_from_bits(0x7ff0000000000000)
+    nodes[n].op_ext = node_with_sval(nodes[n].op_ext, i32(1))
+    nodes[n].op_ext = node_with_fval(nodes[n].op_ext, f64_from_bits(0x7ff0000000000000))
     xl_check_scalar(n, T_FLOAT)
 '''
     compare_leaf(compiler, tmp_path, False, driver, 'literal_check', status=22,

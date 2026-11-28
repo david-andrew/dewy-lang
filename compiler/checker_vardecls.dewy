@@ -6,7 +6,7 @@ from p"checker_assignment_decls.dewy" import (decl_observed)
 from p"checker_scope_symbols.dewy" import (new_local)
 
 from p"checker_hooks.dewy" import (decl_annotated decl_sibling decl_literal decl_quantity_literal decl_after)
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_aux2 node_op)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local FnCtx StatementWatch)
@@ -134,8 +134,8 @@ vd_or_flags=(l:VWord f:VWord):>void=>$unsafe {vd_locals[0][l].flags=int32<overfl
 vd_literal_unit=(e:VWord):>VWord=>$unsafe {
     if e =? 0 or vd_flag(e 128) {return 0}
     let k=vd_nodes[0].ptr[e].kind
-    if k =? 'unary' and vd_nodes[0].ptr[e].op =? 59 {return vd_literal_unit(VWord(vd_nodes[0].ptr[e].a))}
-    if k not=? 'binary' or vd_nodes[0].ptr[e].op not=? 60 {return 0}
+    if k =? 'unary' and node_op(vd_nodes[0].ptr[e].op_ext) =? 59 {return vd_literal_unit(VWord(vd_nodes[0].ptr[e].a))}
+    if k not=? 'binary' or node_op(vd_nodes[0].ptr[e].op_ext) not=? 60 {return 0}
     let x=vd_nodes[0].ptr[VWord(vd_nodes[0].ptr[e].a)].kind
     let u=VWord(vd_nodes[0].ptr[e].b)
     if (x not=? 'int_lit' and x not=? 'float_lit') or vd_nodes[0].ptr[u].kind not=? 'ident' {return 0}
@@ -176,14 +176,14 @@ vd_pattern=(s:VWord):>bool=>$unsafe {
         if vd_nodes[0].ptr[id].kind not=? 'hole' {
             let l=VWord(new_local(VWord(vd_nodes[0].ptr[id].name) tu_targ(t i) VWord(vd_nodes[0].ptr[id].pos)))
             let f:VWord=if VWord(vd_nodes[0].ptr[s].flags) & 262144 not=? 0 {197120} else {66048}
-            if vd_nodes[0].ptr[s].aux2 =? 1 {f=f | 524288}
+            if node_aux2(vd_nodes[0].ptr[s].op_ext) =? 1 {f=f | 524288}
             vd_locals[0][l].flags=int32<overflow='wrap'>(f)
             vd_nodes[0][id].sym=int32<overflow='wrap'>(l)
         }
         i=i + 1
     }
     vd_nodes[0][s].type=int32<overflow='wrap'>(t)
-    loop j in [0..VWord(vd_nodes[0].ptr[s].nlist)) {let id=vd_kid(s j);if vd_nodes[0].ptr[id].aux2 =? 1798 {decl_after(s 0 t 12);break}}
+    loop j in [0..VWord(vd_nodes[0].ptr[s].nlist)) {let id=vd_kid(s j);if node_aux2(vd_nodes[0].ptr[id].op_ext) =? 1798 {decl_after(s 0 t 12);break}}
     true
 }
 # The forms another service declares (NF_SOA 131072, NF_ALIASDECL 8388608, NF_MUT 1,
@@ -191,13 +191,13 @@ vd_pattern=(s:VWord):>bool=>$unsafe {
 # true when one did.
 vd_forms=(s:VWord):>bool=>$unsafe {
     let b=VWord(vd_nodes[0].ptr[s].b)
-    if b >? 0 and vd_nodes[0].ptr[b].kind =? 'call' and vd_nodes[0].ptr[b].aux2 =? 17 {decl_form(s 1);}
+    if b >? 0 and vd_nodes[0].ptr[b].kind =? 'call' and node_aux2(vd_nodes[0].ptr[b].op_ext) =? 17 {decl_form(s 1);}
     if VWord(vd_nodes[0].ptr[s].flags) & 131072 not=? 0 {return decl_form(s 2)}
     if VWord(vd_nodes[0].ptr[s].flags) & 8388608 not=? 0 {return vd_element_alias(s)}
     if b not=? 0 {
         let c=b
         if vd_nodes[0].ptr[c].kind =? 'propagate' {c=VWord(vd_nodes[0].ptr[c].a)}
-        if (vd_nodes[0].ptr[c].kind =? 'call' or vd_nodes[0].ptr[c].kind =? 'field') and vd_nodes[0].ptr[c].aux2 =? -11 and decl_form(s 4) {return true}
+        if (vd_nodes[0].ptr[c].kind =? 'call' or vd_nodes[0].ptr[c].kind =? 'field') and node_aux2(vd_nodes[0].ptr[c].op_ext) =? -11 and decl_form(s 4) {return true}
         if vd_nodes[0].ptr[s].nlist =? 0 and VWord(vd_nodes[0].ptr[s].flags) & 2048 =? 0 and VWord(vd_nodes[0].ptr[s].flags) & 262144 =? 0 and VWord(vd_nodes[0].ptr[b].flags) & 1 not=? 0 and vd_file_dewy(vd_nodes[0].ptr[s].pos) and decl_form(s 5) {return true}
     }
     let tn=VWord(vd_nodes[0].ptr[s].a)
@@ -268,7 +268,7 @@ vd_decl=(s:VWord):>void=>$unsafe {
     }
     if vd_effects[0] and not typed {t=decl_storage(s t)}
     # (a value parameter's binding keeps its integer refinement: `s:-1|1` stays one)
-    if vd_nodes[0].ptr[s].aux2 =? 1 and not typed and vd_refining[0] and vd_nodes[0].ptr[s].b not=? 0 {t=decl_value_param(s t)}
+    if node_aux2(vd_nodes[0].ptr[s].op_ext) =? 1 and not typed and vd_refining[0] and vd_nodes[0].ptr[s].b not=? 0 {t=decl_value_param(s t)}
     if t =? 0 {decl_error(s 0 2)}
     if unit not=? 0 {t=decl_temperature(s t unit)}
     let tk=vd_kind(t)
@@ -284,7 +284,7 @@ vd_decl=(s:VWord):>void=>$unsafe {
     let b=VWord(vd_nodes[0].ptr[s].b)
     if b not=? 0 and vd_watch[0].quaternions >? 0 and vd_quat_nodes[0].has(b) {vd_quat_locals[0][l]=true}
     let sfl=VWord(vd_nodes[0].ptr[s].flags)
-    let saux2=vd_nodes[0].ptr[s].aux2
+    let saux2=node_aux2(vd_nodes[0].ptr[s].op_ext)
     let lfl:VWord=if (sfl & 33554432) not=? 0 {66048} else if (sfl & 262144) not=? 0 {197120} else {512}
     if saux2 =? 1 {lfl |= 524288}
     let lp=vd_locals[0].ptr + l

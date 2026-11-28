@@ -21,6 +21,7 @@ from p"types.jo" import (T_VOID fields prune structs tkind type_eq types)
 from p"type_ops.dewy" import (dt)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_aux2 node_with_aux2 node_with_op)
 
 PlaceWord:type=int64<overflow='wrap'>
 # the first ident among n's nodes named in names, or 0
@@ -41,8 +42,8 @@ place_names_used=(n:PlaceWord names:dict<int64 bool>):>PlaceWord=>$unsafe {
 # a data field remains the same place as @m.field. O(receiver + record fields),
 # only when the parser marked a grouped @ operand.
 place_grouped_call=(n:PlaceWord):>bool=>$unsafe {
-    if n =? 0 or nodes.ptr[n].kind not=? 'field' or nodes.ptr[n].aux2 not=? int32(AUX2_PLACE) {return false}
-    nodes.ptr[n].aux2=0
+    if n =? 0 or nodes.ptr[n].kind not=? 'field' or node_aux2(nodes.ptr[n].op_ext) not=? int32(AUX2_PLACE) {return false}
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
     let recv=clone(PlaceWord(nodes.ptr[n].a))
     let t=prune(check_expr(recv 0))
     let name=PlaceWord(nodes.ptr[n].name)
@@ -65,19 +66,19 @@ place_grouped_call=(n:PlaceWord):>bool=>$unsafe {
     clear_flag(callee NF_MUT | NF_AT)
     let call=mk('call' nodes.ptr[n].pos)
     nodes.ptr[call].a=int32(callee)
-    nodes.ptr[call].aux2=int32(AUX2_PLACE)
+    nodes.ptr[call].op_ext=node_with_aux2(nodes.ptr[call].op_ext (int32(AUX2_PLACE)))
     nodes.ptr[n]=nodes.ptr[call]
     true
 }
 # check_call reached a call: a place method only through `@(...)`, and `@(...)` only of one.
 place_call_seen=(n:PlaceWord decl:PlaceWord):>void=>$unsafe {
     let nm=name_of(PlaceWord(nodes.ptr[decl].name))
-    if nodes.ptr[n].aux2 =? int32(AUX2_PLACE) {fatal(nodes.ptr[n].pos "`@(...)` takes the place a method returns as `let name = @(x.{nm}())` or `match @(x.{nm}()) \{...}`")}
+    if node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PLACE) {fatal(nodes.ptr[n].pos "`@(...)` takes the place a method returns as `let name = @(x.{nm}())` or `match @(x.{nm}()) \{...}`")}
     if not place_methods.has(decl) {
-        if nodes.ptr[n].aux2 =? int32(AUX2_PLACE_TAKEN) {fatal(nodes.ptr[n].pos "'{nm}' gives a value, not a place: drop the `@(...)`")}
+        if node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PLACE_TAKEN) {fatal(nodes.ptr[n].pos "'{nm}' gives a value, not a place: drop the `@(...)`")}
         return
     }
-    if nodes.ptr[n].aux2 not=? int32(AUX2_PLACE_TAKEN) {fatal(nodes.ptr[n].pos "'{nm}' lends a place inside its object: take it with `let name = @(x.{nm}())`")}
+    if node_aux2(nodes.ptr[n].op_ext) not=? int32(AUX2_PLACE_TAKEN) {fatal(nodes.ptr[n].pos "'{nm}' lends a place inside its object: take it with `let name = @(x.{nm}())`")}
     place_call_decl=decl
 }
 # The receiver and method name of `@(recv.m(args))`.
@@ -102,7 +103,7 @@ place_root_name=(recv:PlaceWord):>PlaceWord=>$unsafe {
 # `recv.m$suffix(args)`, a copy of the written call with the receiver named by `$recvN`
 place_member_call=(call:PlaceWord recv_name:string method:string pos:PlaceWord):>PlaceWord=>$unsafe {
     let c=clone(call)
-    nodes.ptr[c].aux2=0
+    nodes.ptr[c].op_ext=node_with_aux2(nodes.ptr[c].op_ext 0)
     let callee=PlaceWord(nodes.ptr[c].a)
     nodes.ptr[callee].name=int32(intern(method))
     let r=bc_ident(recv_name pos)
@@ -172,7 +173,7 @@ place_let_decl=(s:PlaceWord):>bool=>$unsafe {
     if lock_all_decl(s) {return true}
     let init=PlaceWord(nodes.ptr[s].b)
     place_grouped_call(init);
-    if init =? 0 or nodes.ptr[init].kind not=? 'call' or nodes.ptr[init].aux2 not=? int32(AUX2_PLACE) {return false}
+    if init =? 0 or nodes.ptr[init].kind not=? 'call' or node_aux2(nodes.ptr[init].op_ext) not=? int32(AUX2_PLACE) {return false}
     let pos=nodes.ptr[s].pos
     if nodes.ptr[s].a not=? 0 or nkids(s) >? 0 or has_flag(s NF_GLOBAL) or has_flag(s NF_RDONLY) {fatal(pos "a returned place is bound by name alone: `let a = @(acct.lock())`")}
     let b=sibling_block
@@ -198,7 +199,7 @@ place_take=(name:PlaceWord init:PlaceWord b:PlaceWord i:PlaceWord pos:PlaceWord 
     place_count += 1
     let gn="$guard{place_count}"
     let call=place_member_call(init rn name_of(parts[1]) nodes.ptr[init].pos)
-    nodes.ptr[call].aux2=int32(AUX2_PLACE_TAKEN)
+    nodes.ptr[call].op_ext=node_with_aux2(nodes.ptr[call].op_ext (int32(AUX2_PLACE_TAKEN)))
     place_call_decl=0
     let g=bc_let(gn call pos)
     check_vardecl(g)
@@ -240,7 +241,7 @@ lock_all_decl=(s:PlaceWord):>bool=>$unsafe {
     if init =? 0 {return false}
     let thrown=nodes.ptr[init].kind =? 'propagate'
     let call=if thrown {PlaceWord(nodes.ptr[init].a)} else {init}
-    if nodes.ptr[call].kind not=? 'call' or nodes.ptr[call].aux2 not=? int32(AUX2_PLACE) {return false}
+    if nodes.ptr[call].kind not=? 'call' or node_aux2(nodes.ptr[call].op_ext) not=? int32(AUX2_PLACE) {return false}
     let callee=PlaceWord(nodes.ptr[call].a)
     if nodes.ptr[callee].kind not=? 'ident' or name_of(PlaceWord(nodes.ptr[callee].name)) not=? "lock_all" {return false}
     let pos=nodes.ptr[s].pos
@@ -283,7 +284,7 @@ lock_all_decl=(s:PlaceWord):>bool=>$unsafe {
     let p=mk('propagate' nodes.ptr[init].pos)
     nodes.ptr[p].a=int32(status)
     let discard=mk('assign' pos)
-    nodes.ptr[discard].op=int32(47)
+    nodes.ptr[discard].op_ext=node_with_op(nodes.ptr[discard].op_ext (int32(47)))
     nodes.ptr[discard].a=int32(mk('hole' pos))
     nodes.ptr[discard].b=int32(p)
     let st=discard
@@ -297,7 +298,7 @@ lock_all_decl=(s:PlaceWord):>bool=>$unsafe {
         }
         let take=bc_method(bc_ident(receivers[j] pos) "__take" [] nodes.ptr[args[j]].pos)
         add_flag(PlaceWord(nodes.ptr[take].a) NF_LOOPCOUNT)
-        nodes.ptr[take].aux2=int32(AUX2_PLACE)
+        nodes.ptr[take].op_ext=node_with_aux2(nodes.ptr[take].op_ext (int32(AUX2_PLACE)))
         loop t in place_take(PlaceWord(nodes.ptr[nm].name) take b i pos roots[j]) {stmts.push(t)}
     }
     let block=bc_block(stmts pos)
@@ -320,7 +321,7 @@ place_range=(b:PlaceWord i:PlaceWord name:PlaceWord root:PlaceWord pos:PlaceWord
 }
 place_lends=(c:PlaceWord root:PlaceWord):>bool=>$unsafe {
     place_grouped_call(c);
-    nodes.ptr[c].kind =? 'call' and nodes.ptr[c].aux2 =? int32(AUX2_PLACE) and nodes.ptr[PlaceWord(nodes.ptr[c].a)].kind =? 'field' and place_route_base(PlaceWord(nodes.ptr[PlaceWord(nodes.ptr[c].a)].a)) =? root
+    nodes.ptr[c].kind =? 'call' and node_aux2(nodes.ptr[c].op_ext) =? int32(AUX2_PLACE) and nodes.ptr[PlaceWord(nodes.ptr[c].a)].kind =? 'field' and place_route_base(PlaceWord(nodes.ptr[PlaceWord(nodes.ptr[c].a)].a)) =? root
 }
 place_route_base=(n0:PlaceWord):>PlaceWord=>$unsafe {
     let n=n0
@@ -377,7 +378,7 @@ place_match=(m:PlaceWord expected:PlaceWord):>PlaceWord=>$unsafe {
     let recv=parts[0]
     let mname=name_of(parts[1])
     let probe=clone(call)
-    nodes.ptr[probe].aux2=int32(AUX2_PLACE_TAKEN)
+    nodes.ptr[probe].op_ext=node_with_aux2(nodes.ptr[probe].op_ext (int32(AUX2_PLACE_TAKEN)))
     place_call_decl=0
     check_expr(probe 0);
     if not place_methods.has(place_call_decl) {fatal(nodes.ptr[call].pos "'{mname}' gives a value, not a place: drop the `@(...)`")}
@@ -418,7 +419,7 @@ place_match=(m:PlaceWord expected:PlaceWord):>PlaceWord=>$unsafe {
     place_count += 1
     let decided="$decided{place_count}"
     let first=place_member_call(call rn mname nodes.ptr[call].pos)
-    nodes.ptr[first].aux2=int32(AUX2_PLACE_TAKEN)
+    nodes.ptr[first].op_ext=node_with_aux2(nodes.ptr[first].op_ext (int32(AUX2_PLACE_TAKEN)))
     stmts.push(bc_let(decided first pos))
     let taken:PlaceWord=0
     loop arm in kids(m) {
@@ -430,7 +431,7 @@ place_match=(m:PlaceWord expected:PlaceWord):>PlaceWord=>$unsafe {
         let bind=mk('vardecl' nodes.ptr[p].pos)
         nodes.ptr[bind].name=nodes.ptr[p].name
         let acquire=place_member_call(call rn "{mname}$acquire" nodes.ptr[call].pos)
-        nodes.ptr[acquire].aux2=int32(AUX2_PLACE)
+        nodes.ptr[acquire].op_ext=node_with_aux2(nodes.ptr[acquire].op_ext (int32(AUX2_PLACE)))
         nodes.ptr[bind].b=int32(acquire)
         nodes.ptr[p].name=0
         let lent=mk('tname' nodes.ptr[p].pos)

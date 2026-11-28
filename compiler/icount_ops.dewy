@@ -10,6 +10,7 @@ from p"icount.jo" import (IC_LIB IC_PHASES IC_ROOT IC_SHARED ic_bucket ic_counts
 from p"lower.jo" import (LK_INST lfuncs)
 from p"util.jo" import (files lib_root pl_files pl_inst_decls pl_on pl_reached pl_units pos_file pos_off)
 from p"source_queries.dewy" import (code_lines)
+from p"node_store.dewy" import (node_aux2)
 CountWord:type=int64<overflow='wrap'>
 ic_read=():>int64=>$unsafe {
     if $target.os =? 'linux' and $target.arch =? 'x86_64' {
@@ -219,7 +220,7 @@ ic_lines_report=():>void=>$unsafe {
     loop [b stop] in dc_parser.reader.dc_lazy_span_end {
         let f=pos_file(nodes.ptr[b].pos)
         let key=(f << 32) | nodes.ptr[b].ival
-        if nodes.ptr[b].aux2 =? DC_LAZY_SPAN and f >=? 0 and f <? files.length and not waiting.has(key) {
+        if node_aux2(nodes.ptr[b].op_ext) =? DC_LAZY_SPAN and f >=? 0 and f <? files.length and not waiting.has(key) {
             waiting[key]=1
             let n=code_lines(files[f].src CountWord(nodes.ptr[b].ival) stop)
             per[f]=(per.get(f) ?? 0) - n

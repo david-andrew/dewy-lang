@@ -51,11 +51,11 @@ sibling_index = 0
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
 kid_c = (n: int) -> int: int(nodes[n].c)
-kid_d = (n: int) -> int: int(nodes[n].d)
+kid_d = (n: int) -> int: int(node_d(nodes[n].op_ext))
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 kids2 = (n: int) -> int[]:
     out: int[]
-    loop i in [0..int(nodes[n].nlist2)): out.push(int(lists2[int(nodes[n].list2) + i]))
+    loop i in [0..int(node_nlist2(nodes[n].op_ext))): out.push(int(lists2[int(node_list2(nodes[n].op_ext)) + i]))
     out
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 ensure_global = (g: int, pos: int, in_flow: bool = false):
@@ -116,11 +116,11 @@ ilit = (v: int) -> int:
     n
 flit = (v: float64) -> int:
     n = fresh(.float_lit)
-    nodes[n].fval = v
+    nodes[n].op_ext = node_with_fval(nodes[n].op_ext, v)
     n
 bin = (op: Tok, a: int, b: int) -> int:
     n = fresh(.binary)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 dot = (c: int, a: int, b: int) -> int:
     n = bin(.dotop, a, b)
@@ -128,7 +128,7 @@ dot = (c: int, a: int, b: int) -> int:
     n
 neg = (a: int) -> int:
     n = fresh(.unary)
-    nodes[n].op = i32(int(Tok.minus)); nodes[n].a = i32(a)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(Tok.minus)))); nodes[n].a = i32(a)
     n
 juxt = (n: int) -> int:
     nodes[n].flags = i32(int(nodes[n].flags) | NF_JUXT)
@@ -136,7 +136,7 @@ juxt = (n: int) -> int:
 temp = (v: int, unit: int) -> int: juxt(bin(.star, ilit(v), ident(unit)))
 assign = (op: Tok, a: int, b: int) -> int:
     n = fresh(.assign)
-    nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].op_ext = node_with_op(nodes[n].op_ext, i32(i32(int(op)))); nodes[n].a = i32(a); nodes[n].b = i32(b)
     n
 vardecl = (name: int, value: int) -> int:
     n = fresh(.vardecl)
@@ -238,7 +238,7 @@ main = ():
     keep = tks.name
     print("{tk_partner(scoped, uses, 0)} {tks.name == keep} {tk_decls.len()} {tk_direct.has(scoped)}")
     d3 = vardecl(61, temp(1, CELSIUS))
-    nodes[d3].flags = i32(NF_GLOBAL); nodes[d3].mod = 0
+    nodes[d3].flags = i32(NF_GLOBAL); nodes[d3].op_ext = node_with_mod(nodes[d3].op_ext, i32(0))
     modules[0].decls = [d3, fresh(.fn_)]
     modules[0].inits = [d3, bin(.minus, ident(61), checked(ident(1), T_POINT))]
     print(tk_partner(d3, 0, 0))
@@ -251,7 +251,7 @@ main = ():
     loop x in [0, checked(ident(1), T_DELTA), checked(ident(1), 0), temp(1, CELSIUS), temp(1, KELVIN), ilit(1), flit(1.0), fresh(.str_lit), fresh(.bool_lit), fresh(.none_lit), neg(checked(ident(1), T_DELTA)), neg(ilit(1)), fresh(.call), fresh(.field), fresh(.index), fresh(.if_), fresh(.match_), fresh(.block), fresh(.tuple)]:
         print("c {tk_class(x, 0)}")
     print(tk_class(ilit(1), 7))
-    un = fresh(.unary); nodes[un].op = i32(int(Tok.tilde)); nodes[un].a = i32(checked(ident(1), T_DELTA))
+    un = fresh(.unary); nodes[un].op_ext = node_with_op(nodes[un].op_ext, i32(i32(int(Tok.tilde)))); nodes[un].a = i32(checked(ident(1), T_DELTA))
     print(tk_class(un, 0))
     loop inner in [checked(ident(1), T_DELTA), temp(1, CELSIUS), ident(50), checked(ident(1), T_POINT)]:
         c = fresh(.cast); nodes[c].a = i32(inner)
@@ -321,7 +321,7 @@ main = ():
     use_at(bin(.slash, me(), ident(CELSIUS)))
     use_at(neg(me()))
     use_at(neg(point()))
-    no_minus = fresh(.unary); nodes[no_minus].op = i32(int(Tok.plus)); nodes[no_minus].a = i32(me())
+    no_minus = fresh(.unary); nodes[no_minus].op_ext = node_with_op(nodes[no_minus].op_ext, i32(i32(int(Tok.plus)))); nodes[no_minus].a = i32(me())
     use_at(no_minus)
     use_at(assign(.assign, me(), temp(1, CELSIUS)))
     use_at(assign(.assign, me(), temp(1, KELVIN)))
@@ -362,9 +362,9 @@ main = ():
     walk_at(assign(.assign, ident(CELSIUS), neg(me())))
     walk_at(assign(.assign, me(), temp(1, CELSIUS)))
     walk_at(assign(.pluseq, ident(54), neg(me())))
-    children = fresh(.if_); nodes[children].a = i32(neg(me())); nodes[children].b = i32(neg(me())); nodes[children].c = i32(neg(me())); nodes[children].d = i32(neg(me()))
+    children = fresh(.if_); nodes[children].a = i32(neg(me())); nodes[children].b = i32(neg(me())); nodes[children].c = i32(neg(me())); nodes[children].op_ext = node_with_d(nodes[children].op_ext, i32(i32(neg(me()))))
     walk_at(children)
-    second = fresh(.match_); nodes[second].list2 = i32(lists2.len()); nodes[second].nlist2 = 1; lists2.push(i32(neg(me())))
+    second = fresh(.match_); nodes[second].op_ext = node_with_list2(nodes[second].op_ext, i32(i32(lists2.len()))); nodes[second].op_ext = node_with_nlist2(nodes[second].op_ext, i32(1)); lists2.push(i32(neg(me())))
     walk_at(second)
     # A declaration statement remembers its place; the binding's own declaration is skipped.
     reset_scan()
@@ -416,7 +416,7 @@ main = ():
     binding([neg(me()), bin(.minus, me(), point())], false)
     binding([bin(.star, me(), ilit(2)), bin(.lt, me(), point())], false)
     decl = vardecl(50, checked(temp(20, CELSIUS), T_POINT))
-    nodes[decl].mod = 0
+    nodes[decl].op_ext = node_with_mod(nodes[decl].op_ext, i32(0))
     modules[0].decls = [decl, fresh(.fn_)]
     modules[0].inits = [decl, neg(me())]
     reset_scan()

@@ -39,6 +39,7 @@ from p"secrets.jo" import (secret_checks)
 from p"witness.jo" import (wit_holder_text)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_op wit_ref_text)
+from p"node_store.dewy" import (node_aux2)
 
 RefineOpWord:type=int64<overflow='wrap'>
 ref_addr_max=():>int64=>{
@@ -238,7 +239,7 @@ ref_check_owner=(f:RefineOpWord):>RefineOpWord=>$unsafe {
 }
 ref_gen_check=(n:int64 self:int64 args:array<int64> arg_types:array<int64>):>void=>$unsafe {
     if nodes.ptr[n].ival =? 1 {return}
-    let t=zonk(RefineOpWord(nodes.ptr[n].aux2))
+    let t=zonk(RefineOpWord(node_aux2(nodes.ptr[n].op_ext)))
     let biased=is_int(representation_type(t)) and not types.ptr[representation_type(t)].sign
     let shown=wit_text(RefineOpWord(nodes.ptr[n].a))
     if shown =? "" {shown="the value"}

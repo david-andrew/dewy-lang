@@ -6,7 +6,7 @@ from p"literal_context.dewy" import (lit_default)
 from p"types.jo" import (T_STR prune type_eq union_members)
 from p"ast.jo" import (NF_CHECKED nodes set_list)
 from p"facts.jo" import (fact_divisors fact_fixed_requests)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_with_aux2)
 
 UnionConvWord:type=int64<overflow='wrap'>
 
@@ -32,7 +32,7 @@ wrap_union=(n:UnionConvWord vi:UnionConvWord target:UnionConvWord):>void=>$unsaf
     let inner=nodes.length
     nodes.push(nodes[n])
     move_divisor(n inner)
-    nodes[n]=Node(kind='call' pos=nodes.ptr[inner].pos aux=3 aux2=int32(vi) type=int32(target) flags=int32(NF_CHECKED))
+    nodes[n]=Node(kind='call' pos=nodes.ptr[inner].pos aux=3 op_ext=node_with_aux2(uint32(0) int32(vi)) type=int32(target) flags=int32(NF_CHECKED))
     set_list(n [inner])
 }
 

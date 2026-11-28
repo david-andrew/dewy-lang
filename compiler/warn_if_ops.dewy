@@ -18,6 +18,7 @@ from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"directives.jo" import (dir_find dir_module_start dir_runtime_policies dir_scopes)
 from p"warn_if.jo" import (WI_FACTS WI_PATH WI_TYPE WarnIf wi_any wi_decls wi_fact_calls wi_fact_requests wi_fact_targs)
+from p"node_store.dewy" import (node_op node_sval)
 
 WarnWord:type=int64<overflow='wrap'>
 wi_reset=():>void=>{
@@ -37,7 +38,7 @@ wi_read_decl=(decl:WarnWord):>void=>$unsafe {
         let msg=WarnWord(nodes.ptr[at].b)
         if cond =? 0 or msg =? 0 or nodes.ptr[msg].kind not=? 'str_lit' or nodes.ptr[msg].aux not=? 0 {fatal(nodes.ptr[at].pos "a soft precondition takes a condition and a message string: `$warn_if condition \"message\"`")}
         let w=wi_read(decl cond)
-        w.message=name_of(WarnWord(nodes.ptr[msg].sval))
+        w.message=name_of(WarnWord(node_sval(nodes.ptr[msg].op_ext)))
         out.push(w)
     }
     if out.length =? 0 {return}
@@ -94,8 +95,8 @@ wi_negation=(decl:WarnWord c:WarnWord @out:array<RefAtom>):>void=>$unsafe {
         wi_affirm(decl WarnWord(nodes.ptr[c].a) @out)
         return
     }
-    if k =? 'binary' and fact_comparison_raw(nodes.ptr[c].op) {
-        ref_add(fact_inverse(cx_token(nodes.ptr[c].op)) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
+    if k =? 'binary' and fact_comparison_raw(node_op(nodes.ptr[c].op_ext)) {
+        ref_add(fact_inverse(cx_token(node_op(nodes.ptr[c].op_ext))) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
         return
     }
     wi_unsupported(c)
@@ -112,8 +113,8 @@ wi_affirm=(decl:WarnWord c:WarnWord @out:array<RefAtom>):>void=>$unsafe {
         wi_negation(decl WarnWord(nodes.ptr[c].a) @out)
         return
     }
-    if k =? 'binary' and fact_comparison_raw(nodes.ptr[c].op) {
-        ref_add(cx_token(nodes.ptr[c].op) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
+    if k =? 'binary' and fact_comparison_raw(node_op(nodes.ptr[c].op_ext)) {
+        ref_add(cx_token(node_op(nodes.ptr[c].op_ext)) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
         return
     }
     wi_unsupported(c)
@@ -121,7 +122,7 @@ wi_affirm=(decl:WarnWord c:WarnWord @out:array<RefAtom>):>void=>$unsafe {
 wi_term=(decl:WarnWord n:WarnWord):>RefTerm=>$unsafe {
     let k=nodes.ptr[n].kind
     if k =? 'int_lit' {return RefTerm(1 nodes.ptr[n].ival)}
-    if k =? 'unary' and nodes.ptr[n].op =? int32(59) and nodes.ptr[WarnWord(nodes.ptr[n].a)].kind =? 'int_lit' {return RefTerm(1 (-nodes.ptr[WarnWord(nodes.ptr[n].a)].ival))}
+    if k =? 'unary' and node_op(nodes.ptr[n].op_ext) =? int32(59) and nodes.ptr[WarnWord(nodes.ptr[n].a)].kind =? 'int_lit' {return RefTerm(1 (-nodes.ptr[WarnWord(nodes.ptr[n].a)].ival))}
     if k =? 'field' and name_of(WarnWord(nodes.ptr[n].name)) =? "length" {
         let i=wi_param(decl WarnWord(nodes.ptr[n].a))
         if i >=? 0 {return RefTerm(2 i path=[-1])}

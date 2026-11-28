@@ -76,9 +76,9 @@ set_list = (n: int, xs: int[]): node_set_list(nodes, lists, n, xs)
 set_list2 = (n: int, xs: int[]): node_set_list2(nodes, lists, n, xs)
 set_list_span = (n: int, buf: mut int[], base: int): node_set_list_span(nodes, lists, n, buf, base)
 kid = (n: int, i: int) -> int: int(data(lists)[int(data(nodes)[n].list) + i])
-kid2 = (n: int, i: int) -> int: int(data(lists)[int(data(nodes)[n].list2) + i])
+kid2 = (n: int, i: int) -> int: int(data(lists)[int(node_list2(data(nodes)[n].op_ext)) + i])
 nkids = (n: int) -> int: int(data(nodes)[n].nlist)
-nkids2 = (n: int) -> int: int(data(nodes)[n].nlist2)
+nkids2 = (n: int) -> int: int(node_nlist2(data(nodes)[n].op_ext))
 set_kid = (n: int, i: int, v: int): data(lists)[int(data(nodes)[n].list) + i] = i32(v)
 # n's c and d where they hold child nodes, for walks over every field of any node. A checked
 # for keeps locals in c and d (its index and the iterable's snapshot), a partial a function
@@ -87,7 +87,7 @@ set_kid = (n: int, i: int, v: int): data(lists)[int(data(nodes)[n].list) + i] = 
 kid_c = (n: int) -> int: if data(nodes)[n].kind == .for_: 0 else: int(data(nodes)[n].c)
 kid_d = (n: int) -> int:
     k = data(nodes)[n].kind
-    if k == .for_ or k == .partial: 0 else: int(data(nodes)[n].d)
+    if k == .for_ or k == .partial: 0 else: int(node_d(data(nodes)[n].op_ext))
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 kids2 = (n: int) -> int[]: node_kids2(nodes, lists, n)
 has_flag = (n: int, f: int) -> bool: int(data(nodes)[n].flags) & f != 0

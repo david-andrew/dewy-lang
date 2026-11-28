@@ -17,6 +17,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 from p"types.jo" import (T_MATH_INT is_int types)
 from p"type_ops.dewy" import (int_policy)
 from p"util.jo" import (name_of)
+from p"node_store.dewy" import (node_mod node_op)
 
 ProgressWord:type=int64<overflow='wrap'>
 # The default progress axiom covers additive updates of 64-bit storage by a
@@ -256,7 +257,7 @@ fact_progress_bound=(n0:ProgressWord):>ProgressWord=>$unsafe {
         return fact_progress_bound(exact_initializers[l])
     }
     if nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 {return -1}
-    let op=cx_token_values.ptr[ProgressWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[ProgressWord(node_op(nodes.ptr[n].op_ext))]
     if op not=? 'plus' and op not=? 'minus' {return -1}
     let a=fact_progress_bound(ProgressWord(nodes.ptr[n].a))
     if a <? 0 {return -1}
@@ -297,7 +298,7 @@ fact_progress_note=(assignment:ProgressWord):>void=>$unsafe {
         }
     }
     if nodes.ptr[operation].kind not=? 'binary' or nodes.ptr[operation].aux not=? 0 {return}
-    let op=cx_token_values.ptr[ProgressWord(nodes.ptr[operation].op)]
+    let op=cx_token_values.ptr[ProgressWord(node_op(nodes.ptr[operation].op_ext))]
     if op not=? 'plus' and op not=? 'minus' {return}
     let increment=ProgressWord(nodes.ptr[operation].b)
     if not fact_progress_same(target ProgressWord(nodes.ptr[operation].a)) {
@@ -346,7 +347,7 @@ fact_progress_prelude_call=(n0:ProgressWord name:string count:ProgressWord):>boo
     let n=fact_progress_strip(n0)
     if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nkids(n) not=? count or nodes.ptr[n].sym <=? 0 {return false}
     let d=ProgressWord(fns.ptr[ProgressWord(nodes.ptr[n].sym)].decl)
-    d not=? 0 and modules.ptr[ProgressWord(nodes.ptr[d].mod)].is_prelude and name_of(ProgressWord(nodes.ptr[d].name)) =? name
+    d not=? 0 and modules.ptr[ProgressWord(node_mod(nodes.ptr[d].op_ext))].is_prelude and name_of(ProgressWord(nodes.ptr[d].name)) =? name
 }
 # `m.get(k) ?? c` reading back the entry `m[k] = ...` stores, with a bounded default c.
 fact_progress_entry_read=(n0:ProgressWord store_call:ProgressWord):>bool=>$unsafe {
@@ -370,7 +371,7 @@ fact_progress_note_entry=(call:ProgressWord):>void=>$unsafe {
     let source=ProgressWord(nodes.ptr[store].a)
     let operation=fact_progress_strip(source)
     if nodes.ptr[operation].kind not=? 'binary' or nodes.ptr[operation].aux not=? 0 {return}
-    if cx_token_values.ptr[ProgressWord(nodes.ptr[operation].op)] not=? 'plus' {return}
+    if cx_token_values.ptr[ProgressWord(node_op(nodes.ptr[operation].op_ext))] not=? 'plus' {return}
     exact_dependency_epoch += 1
     exact_dependency_budget=64
     let increment=ProgressWord(nodes.ptr[operation].b)

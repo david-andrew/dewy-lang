@@ -15,7 +15,7 @@ from p"dewy_tokens.dewy" import DewyKind, DewyLexeme, DewyToken, dn_token_assign
 from p"dewy_walk.dewy" import dr_arms_kind, dr_block_tail_kind, dr_collect, dr_collect_block, dr_copy_last, dr_copy_value, dr_flow_arms, dr_kind_of, dr_last_kind, dr_push, dr_tail_kind
 from p"literals.dewy" import LiteralProblem, literal_limbs, literal_packed, literal_string_text, literal_unsigned
 from p"module_paths.dewy" import strip_ext
-from p"node_store.dewy" import NK, Node, node_kids, node_kids2, node_mk, node_set_list, node_set_list2
+from p"node_store.dewy" import NK, Node, node_aux2, node_d, node_fval, node_kids, node_kids2, node_mk, node_op, node_set_list, node_set_list2, node_sval, node_with_aux2, node_with_d, node_with_fval, node_with_op, node_with_sval
 from p"targets.dewy" import target_arches, target_names, target_os_of, target_oses
 const AUX2_PARTIAL:int64=(-10)
 const AUX2_PLACE:int64=(-11)
@@ -194,7 +194,7 @@ rd_bc_stmt=(@reader_nodes:array<Node> e:int64 pos:int64):>int64=>$unsafe {
 
 rd_bc_str=(@reader_ctx:ParserContext @reader_nodes:array<Node> s:string pos:int64):>int64=>$unsafe {
     let n:int64=node_mk(@reader_nodes 'str_lit' pos)
-    reader_nodes.ptr[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(s))
+    reader_nodes.ptr[n].op_ext=node_with_sval(reader_nodes.ptr[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(s))))
     n
 }
 
@@ -235,7 +235,7 @@ rd_dc_allocator=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyL
     if ((arena =? 0) or (not rd_dn_accept(@reader_ctx 'rparen'))) {
         return 0
     }
-    if (not (rd_has_flag(@reader_nodes arena NF_AT) or ((reader_nodes[arena].kind =? 'call') and ((reader_nodes[arena].aux2 =? int32<overflow='wrap'>(AUX2_PARTIAL)) or (reader_nodes[arena].aux2 =? int32<overflow='wrap'>(AUX2_PLACE)))))) {
+    if (not (rd_has_flag(@reader_nodes arena NF_AT) or ((reader_nodes[arena].kind =? 'call') and ((node_aux2(reader_nodes[arena].op_ext) =? int32<overflow='wrap'>(AUX2_PARTIAL)) or (node_aux2(reader_nodes[arena].op_ext) =? int32<overflow='wrap'>(AUX2_PLACE)))))) {
         return 0
     }
     reader_ctx.stores.host[0].g_dw_allocators_set((int64<overflow='wrap'>(reader_ctx.stores.host[0].g_dw_allocators()) + 1))
@@ -498,7 +498,7 @@ rd_dc_argument_body=(@reader_ctx:ParserContext @reader_nodes:array<Node> declara
     }
     let body=node_mk(@reader_nodes 'block' reader_nodes[declarations[0]].pos)
     reader_nodes[body].aux=5
-    reader_nodes[body].aux2=if value =? 0 {1796} else {1795} # zero or one argument
+    reader_nodes[body].op_ext=node_with_aux2(reader_nodes[body].op_ext (if value =? 0 {1796} else {1795})) # zero or one argument
     rd_add_flag(@reader_nodes body NF_UNSCOPED);
     node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body statements);
     body
@@ -906,7 +906,7 @@ rd_dc_assertion=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyL
     }
     else if runtime {
         let text:int64=node_mk(@reader_nodes 'str_lit' pos)
-        reader_nodes[text].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("{"assertion failed: "}{reader_ctx.stores.host[0].join(reader_ctx.stores.host[0].words(reader_ctx.stores.host[0].bytes_slice(source first stop)) " ")}"))
+        reader_nodes[text].op_ext=node_with_sval(reader_nodes[text].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("{"assertion failed: "}{reader_ctx.stores.host[0].join(reader_ctx.stores.host[0].words(reader_ctx.stores.host[0].bytes_slice(source first stop)) " ")}"))))
         args.push(text);
     }
     let callee:int64=node_mk(@reader_nodes 'ident' pos)
@@ -926,12 +926,12 @@ rd_dc_assign_node=(@reader_ctx:ParserContext @reader_nodes:array<Node> op0:DewyT
         rd_add_flag(@reader_nodes n NF_BROADCAST);
         op = scalar
     }
-    reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(rd_dn_assign_tok(op)))
+    reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(rd_dn_assign_tok(op)))))
     if ((op =? 'and_assign') or (op =? 'or_assign')) {
-        reader_nodes[n].aux2 = 1
+        reader_nodes[n].op_ext=node_with_aux2(reader_nodes[n].op_ext 1)
     }
     if ((((op =? 'slash_assign') or (op =? 'floor_assign')) or (op =? 'percent_assign')) or (op =? 'power_assign')) {
-        reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern((if (op =? 'slash_assign') "__dewy_divide" else (if (op =? 'floor_assign') "__floor_div" else (if (op =? 'percent_assign') "__floor_mod" else "__dewy_power")))))
+        reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern((if (op =? 'slash_assign') "__dewy_divide" else (if (op =? 'floor_assign') "__floor_div" else (if (op =? 'percent_assign') "__floor_mod" else "__dewy_power")))))))
     }
     reader_nodes[n].a = int32<overflow='wrap'>(left)
     reader_nodes[n].b = int32<overflow='wrap'>(right)
@@ -1014,8 +1014,8 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
         let fast:float64?=rd_dc_short_real(@reader_ctx token)
         if (fast isnt? none) {
             let n:int64=node_mk(@reader_nodes 'float_lit' pos)
-            reader_nodes[n].fval = fast
-            reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern_sub(reader_ctx.source token.start (int64<overflow='wrap'>(token.stop) - int64<overflow='wrap'>(token.start))))
+            reader_nodes[n].op_ext=node_with_fval(reader_nodes[n].op_ext fast)
+            reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern_sub(reader_ctx.source token.start (int64<overflow='wrap'>(token.stop) - int64<overflow='wrap'>(token.start))))))
             rd_add_flag(@reader_nodes n NF_LITERAL);
             return n
         }
@@ -1083,15 +1083,15 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
         }
         # (`@(m.lock())`: the operand is one group, whose call takes the place it returns)
         if (((reader_nodes[e].kind =? 'call') and (reader_ctx.tokens[operand].symbol =? 'lparen')) and (rd_dc_closing(@reader_ctx operand) =? (int64<overflow='wrap'>(reader_ctx.at) - 1))) {
-            reader_nodes[e].aux2 = int32<overflow='wrap'>(AUX2_PLACE)
+            reader_nodes[e].op_ext=node_with_aux2(reader_nodes[e].op_ext (int32<overflow='wrap'>(AUX2_PLACE)))
         }
         else if (reader_nodes[e].kind =? 'field') and (reader_ctx.tokens[operand].symbol =? 'lparen') and (rd_dc_closing(@reader_ctx operand) =? (int64<overflow='wrap'>(reader_ctx.at) - 1)) {
             # Resolve the ordinary grouped member before taking its place.
-            reader_nodes[e].aux2 = int32<overflow='wrap'>(AUX2_PLACE)
+            reader_nodes[e].op_ext=node_with_aux2(reader_nodes[e].op_ext (int32<overflow='wrap'>(AUX2_PLACE)))
             rd_add_flag(@reader_nodes e (NF_MUT or NF_AT));
         }
         else if (reader_nodes[e].kind =? 'call') {
-            reader_nodes[e].aux2 = int32<overflow='wrap'>(AUX2_PARTIAL)
+            reader_nodes[e].op_ext=node_with_aux2(reader_nodes[e].op_ext (int32<overflow='wrap'>(AUX2_PARTIAL)))
         }
         else {
             rd_add_flag(@reader_nodes e (NF_MUT or NF_AT));
@@ -1125,7 +1125,7 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
             return 0
         }
         let n:int64=node_mk(@reader_nodes 'unary' pos)
-        reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>((if (op =? 'dot_minus') 59 else 58)))
+        reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>((if (op =? 'dot_minus') 59 else 58)))))
         reader_nodes[n].a = int32<overflow='wrap'>(e)
         rd_add_flag(@reader_nodes n NF_BROADCAST);
         return n
@@ -1137,7 +1137,7 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
             return 0
         }
         let n:int64=node_mk(@reader_nodes 'not_' pos)
-        reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(58)))
+        reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(58)))))
         reader_nodes[n].a = int32<overflow='wrap'>(e)
         return n
     }
@@ -1146,27 +1146,27 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
         if (e =? 0) {
             return 0
         }
-        if (((op =? 'minus') and (reader_nodes[e].kind =? 'int_lit')) and (reader_nodes[e].aux2 =? 0)) {
+        if (((op =? 'minus') and (reader_nodes[e].kind =? 'int_lit')) and (node_aux2(reader_nodes[e].op_ext) =? 0)) {
             if (rd_has_flag(@reader_nodes e NF_U64) and (reader_nodes[e].ival not=? (int64<overflow='wrap'>(int64(-9223372036854775807)) - 1))) {
                 let magnitude:uint64=uint64<overflow='wrap'>(reader_nodes[e].ival)
                 return rd_dc_bigint_value(@reader_ctx [(magnitude and 0xFFFFFFFF) (magnitude >> 32)] pos true)
             }
             reader_nodes[e].ival = (-int64<overflow='wrap'>(reader_nodes[e].ival))
             reader_nodes[e].pos = pos
-            reader_nodes[e].aux2 = 1
+            reader_nodes[e].op_ext=node_with_aux2(reader_nodes[e].op_ext 1)
             rd_clear_flag(@reader_nodes e NF_U64);
             return e
         }
         if ((op =? 'minus') and (reader_nodes[e].kind =? 'float_lit')) {
-            reader_nodes[e].fval = (-reader_nodes[e].fval)
-            if (reader_nodes[e].sval not=? 0) {
-                reader_nodes[e].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("{"-"}{rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[e].sval))}"))
+            reader_nodes[e].op_ext=node_with_fval(reader_nodes[e].op_ext (-node_fval(reader_nodes[e].op_ext)))
+            if (node_sval(reader_nodes[e].op_ext) not=? 0) {
+                reader_nodes[e].op_ext=node_with_sval(reader_nodes[e].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("{"-"}{rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[e].op_ext)))}"))))
             }
             reader_nodes[e].pos = pos
             return e
         }
         let n:int64=node_mk(@reader_nodes (if (op =? 'kw_not') 'not_' else 'unary') pos)
-        reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>((if (op =? 'minus') 59 else 58)))
+        reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>((if (op =? 'minus') 59 else 58)))))
         reader_nodes[n].a = int32<overflow='wrap'>(e)
         return n
     }
@@ -1244,7 +1244,7 @@ rd_dc_axes=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 first:in
         if (token.kind =? 'eof') {
             return rd_dc_axes_end(@reader_ctx mark false)
         }
-        reader_nodes[n].aux2 = int32<overflow='wrap'>(args.length)
+        reader_nodes[n].op_ext=node_with_aux2(reader_nodes[n].op_ext (int32<overflow='wrap'>(args.length)))
         reader_ctx.reader.dc_range_call = 0
         if rd_dc_named_next(@reader_ctx) {
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
@@ -1359,7 +1359,7 @@ rd_dc_based_string=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:De
         }
     }
     let text:int64=node_mk(@reader_nodes 'str_lit' pos)
-    reader_nodes.ptr[text].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(reader_ctx.stores.host[0].str_from_bytes(packed)))
+    reader_nodes.ptr[text].op_ext=node_with_sval(reader_nodes.ptr[text].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(reader_ctx.stores.host[0].str_from_bytes(packed)))))
     let callee:int64=node_mk(@reader_nodes 'ident' pos)
     reader_nodes.ptr[callee].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("bytes"))
     let call:int64=node_mk(@reader_nodes 'call' pos)
@@ -1410,7 +1410,7 @@ rd_dc_binary=(@reader_ctx:ParserContext @reader_nodes:array<Node> op:DewyToken l
         return 0
     }
     let n:int64=node_mk(@reader_nodes (if (op =? 'kw_and') 'and_' else (if (op =? 'kw_or') 'or_' else 'binary')) pos)
-    reader_nodes.ptr[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(token))
+    reader_nodes.ptr[n].op_ext=node_with_op(reader_nodes.ptr[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(token))))
     reader_nodes.ptr[n].a = int32<overflow='wrap'>(left)
     reader_nodes.ptr[n].b = int32<overflow='wrap'>(right)
     n
@@ -1548,7 +1548,7 @@ rd_dc_binding_items=(@reader_ctx:ParserContext @reader_nodes:array<Node> @seen:a
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
             let pattern:int64=node_mk(@reader_nodes 'tuple' pos)
             if (renamed not=? 0) {
-                reader_nodes[pattern].sval = int32<overflow='wrap'>(renamed)
+                reader_nodes[pattern].op_ext=node_with_sval(reader_nodes[pattern].op_ext (int32<overflow='wrap'>(renamed)))
             }
             let inner:array<int64>=rd_dc_binding_items(@reader_ctx @reader_nodes @seen)
             if (inner.length =? 0) {
@@ -1625,7 +1625,7 @@ rd_dc_binding_items=(@reader_ctx:ParserContext @reader_nodes:array<Node> @seen:a
         reader_nodes[n].name = t.name
         reader_nodes[n].a = int32<overflow='wrap'>(annotation)
         if (source not=? 0) {
-            reader_nodes[n].sval = int32<overflow='wrap'>(source)
+            reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(source)))
         }
         if rest {
             rd_add_flag(@reader_nodes n NF_SPREAD);
@@ -1734,7 +1734,7 @@ rd_dc_body_metatag=(@reader_ctx:ParserContext @reader_nodes:array<Node> stmt_bas
         let expression=rd_dc_expr(@reader_ctx @reader_nodes 0)
         if expression =? 0 {return -1}
         let value=-expression-2
-        if reader_nodes[expression].kind =? 'str_lit' and full not=? "program.max_cores" {value=int64(reader_nodes[expression].sval)+2}
+        if reader_nodes[expression].kind =? 'str_lit' and full not=? "program.max_cores" {value=int64(node_sval(reader_nodes[expression].op_ext))+2}
         if full =? "program.max_cores" and reader_nodes[expression].kind =? 'int_lit' {
             if reader_nodes[expression].ival <? 1 {reader_ctx.stores.host[0].fatal(reader_nodes[expression].pos "`$program.max_cores` must be at least 1")}
             value=reader_ctx.stores.host[0].intern("{reader_nodes[expression].ival}")+2
@@ -1794,7 +1794,7 @@ rd_dc_body_metatag=(@reader_ctx:ParserContext @reader_nodes:array<Node> stmt_bas
     if (((k not=? 'loopx') and (k not=? 'for_')) and (k not=? 'while_')) {
         return (-1)
     }
-    reader_nodes[statement].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(name))
+    reader_nodes[statement].op_ext=node_with_sval(reader_nodes[statement].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(name))))
     rd_stmt_buf.push(statement);
     1
 }
@@ -1823,7 +1823,7 @@ rd_dc_body_read=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
     if rd_dc_body_parens(@reader_ctx) {return rd_dc_paren_block(@reader_ctx @reader_nodes)}
     let implicit=rd_dn_peek(@reader_ctx) =? 'kw_if' or rd_dn_peek(@reader_ctx) =? 'kw_match'
     let body=rd_dc_body_within(@reader_ctx @reader_nodes 'lbrace' 'rbrace')
-    if body not=? 0 and implicit {rd_add_flag(@reader_nodes body NF_UNSCOPED);reader_nodes[body].aux2=1794}
+    if body not=? 0 and implicit {rd_add_flag(@reader_nodes body NF_UNSCOPED);reader_nodes[body].op_ext=node_with_aux2(reader_nodes[body].op_ext 1794)}
     body
 }
 
@@ -1955,7 +1955,7 @@ rd_dc_body_within=(@reader_ctx:ParserContext @reader_nodes:array<Node> open:Dewy
             if rd_dc_accept_semi(@reader_ctx braced) {
                 statement = node_mk(@reader_nodes 'assign' at)
                 let h:int64=node_mk(@reader_nodes 'hole' at)
-                reader_nodes.ptr[statement].op = int32(47)
+                reader_nodes.ptr[statement].op_ext=node_with_op(reader_nodes.ptr[statement].op_ext (int32(47)))
                 reader_nodes.ptr[statement].a = int32<overflow='wrap'>(h)
                 reader_nodes.ptr[statement].b = int32<overflow='wrap'>(value)
             }
@@ -2091,9 +2091,9 @@ rd_dc_broadcast=(@reader_ctx:ParserContext @reader_nodes:array<Node> op:DewyToke
         return 0
     }
     let n:int64=node_mk(@reader_nodes 'binary' pos)
-    reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(85)))
+    reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(85)))))
     reader_nodes[n].aux = int32<overflow='wrap'>((dn_token_text(spelling) as array<uint8>)[0])
-    reader_nodes[n].aux2 = (if ((spelling =? 'le') or (spelling =? 'ge')) int32(1) else int32(0))
+    reader_nodes[n].op_ext=node_with_aux2(reader_nodes[n].op_ext (if ((spelling =? 'le') or (spelling =? 'ge')) int32(1) else int32(0)))
     reader_nodes[n].ival = (if (spelling not=? op) 1 else 0)
     reader_nodes[n].a = int32<overflow='wrap'>(a)
     reader_nodes[n].b = int32<overflow='wrap'>(b)
@@ -2149,7 +2149,7 @@ rd_dc_valued_value=(@reader_ctx:ParserContext @reader_nodes:array<Node> text:str
     if (literal =? 0) or (reader_nodes[literal].kind not=? 'str_lit') or (rd_nkids(@reader_nodes literal) >? 0) {
         reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file value.start) "`${text}` is set to a name in quotes");
     }
-    int64<overflow='wrap'>(reader_nodes[literal].sval) + 2
+    int64<overflow='wrap'>(node_sval(reader_nodes[literal].op_ext)) + 2
 }
 
 # The same setting at the top of a module: a statement declaring nothing. 0 for another form.
@@ -2207,7 +2207,7 @@ rd_dc_build_setting=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64
         let example:string=(if target "aarch64-linux" else "release")
         reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file value.start) "`{text}` is set to a name in quotes, as `{text} = '{example}'`");
     }
-    reader_ctx.stores.host[0].build_setting_apply(target text pos rd_mkpos(reader_ctx.file value.start) rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[literal].sval)));
+    reader_ctx.stores.host[0].build_setting_apply(target text pos rd_mkpos(reader_ctx.file value.start) rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[literal].op_ext))));
     reader_ctx.at = (int64<overflow='wrap'>(place_stop) + 2)
     rd_module_empty(@reader_ctx token.start)
 }
@@ -2498,7 +2498,7 @@ rd_dc_chain_build=(@reader_ctx:ParserContext @reader_nodes:array<Node> mark:int6
 # The link at entry k, from the value left of it (dw_chain_from).
 rd_dc_chain_from=(@reader_ctx:ParserContext @reader_nodes:array<Node> k:int64 left:int64 pos:int64):>int64=>$unsafe {
     let comparison:int64=node_mk(@reader_nodes 'binary' pos)
-    reader_nodes[comparison].op = int32<overflow='wrap'>(int64<overflow='wrap'>(rd_dc_binary_token(reader_ctx.reader.dc_chain_ops[k])))
+    reader_nodes[comparison].op_ext=node_with_op(reader_nodes[comparison].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(rd_dc_binary_token(reader_ctx.reader.dc_chain_ops[k])))))
     reader_nodes[comparison].a = int32<overflow='wrap'>(left)
     let right:int64=reader_ctx.reader.dc_chain_operands[k]
     reader_nodes[comparison].b = int32<overflow='wrap'>(right)
@@ -2681,7 +2681,7 @@ rd_dc_coalesce_arithmetic=(@reader_ctx:ParserContext @reader_nodes:array<Node> l
         let k:NK=reader_nodes[first].kind
         let o:string=""
         if ((k =? 'binary') and (not rd_has_flag(@reader_nodes first NF_JUXT))) {
-            let t:int64=int64<overflow='wrap'>(reader_nodes[first].op)
+            let t:int64=int64<overflow='wrap'>(node_op(reader_nodes[first].op_ext))
             if (t =? 58) {
                 o = "+"
             }
@@ -2767,7 +2767,7 @@ rd_dc_collector=(@reader_ctx:ParserContext @reader_nodes:array<Node> items:array
         let at:int64=starts[i]
         if (i in? discards) {
             let n:int64=node_mk(@reader_nodes 'assign' at)
-            reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))
+            reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))))
             reader_nodes[n].a = int32<overflow='wrap'>(node_mk(@reader_nodes 'hole' at))
             reader_nodes[n].b = int32<overflow='wrap'>(item)
             statements.push(n);
@@ -3103,7 +3103,7 @@ rd_dc_condition=(@reader_ctx:ParserContext @reader_nodes:array<Node> base:int64)
         tested = int64<overflow='wrap'>(reader_nodes[predicate].a)
     }
     # (`m in? 2..254`: membership in a contiguous range, dw_ref_predicate's)
-    if (not ((k =? 'and_') or ((reader_nodes[tested].kind =? 'binary') and (rd_dc_comparison(int64<overflow='wrap'>(reader_nodes[tested].op)) or ((k =? 'binary') and (reader_nodes[tested].op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12))))))))) {
+    if (not ((k =? 'and_') or ((reader_nodes[tested].kind =? 'binary') and (rd_dc_comparison(int64<overflow='wrap'>(node_op(reader_nodes[tested].op_ext))) or ((k =? 'binary') and (node_op(reader_nodes[tested].op_ext) =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12))))))))) {
         return 0
     }
     reader_ctx.stores.host[0].g_refine_active_set(true)
@@ -3342,7 +3342,7 @@ rd_dc_directive_line=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
 rd_dc_directive_statement=(@reader_nodes:array<Node> call:int64 pos:int64 ended:bool):>int64=>$unsafe {
     if ended {
         let n:int64=node_mk(@reader_nodes 'assign' pos)
-        reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))
+        reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))))
         reader_nodes[n].a = int32<overflow='wrap'>(node_mk(@reader_nodes 'hole' pos))
         reader_nodes[n].b = int32<overflow='wrap'>(call)
         return n
@@ -3597,7 +3597,7 @@ rd_dc_effect_row=(@reader_ctx:ParserContext @reader_nodes:array<Node> owner:int6
     }
     reader_ctx.stores.host[0].g_effects_active_set(true)
     reader_ctx.stores.host[0].g_effect_syntax_push(entries);
-    reader_nodes[owner].sval = int32<overflow='wrap'>((int64<overflow='wrap'>(reader_ctx.stores.host[0].g_effect_syntax_len()) - 1))
+    reader_nodes[owner].op_ext=node_with_sval(reader_nodes[owner].op_ext (int32<overflow='wrap'>((int64<overflow='wrap'>(reader_ctx.stores.host[0].g_effect_syntax_len()) - 1))))
     true
 }
 
@@ -3610,7 +3610,7 @@ rd_dc_effect_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:Dew
     reader_ctx.stores.host[0].g_effect_syntax_push(entries);
     let n:int64=node_mk(@reader_nodes 'tname' rd_mkpos(reader_ctx.file token.start))
     reader_nodes[n].aux = (-8)
-    reader_nodes[n].sval = int32<overflow='wrap'>((int64<overflow='wrap'>(reader_ctx.stores.host[0].g_effect_syntax_len()) - 1))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>((int64<overflow='wrap'>(reader_ctx.stores.host[0].g_effect_syntax_len()) - 1))))
     reader_ctx.stores.host[0].g_effects_active_set(true)
     n
 }
@@ -3631,7 +3631,7 @@ rd_dc_excluded=(@reader_ctx:ParserContext @reader_nodes:array<Node> base:int64 v
     let named:int64=node_mk(@reader_nodes 'ident' pos)
     reader_nodes[named].name = int32<overflow='wrap'>(binder)
     let predicate:int64=node_mk(@reader_nodes 'binary' pos)
-    reader_nodes[predicate].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(70)))
+    reader_nodes[predicate].op_ext=node_with_op(reader_nodes[predicate].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(70)))))
     reader_nodes[predicate].a = int32<overflow='wrap'>(named)
     reader_nodes[predicate].b = int32<overflow='wrap'>(value)
     reader_nodes[n].b = int32<overflow='wrap'>(predicate)
@@ -3746,7 +3746,7 @@ rd_dc_expect_notes=(@reader_ctx:ParserContext @reader_nodes:array<Node> conditio
     if (reader_nodes[root].kind not=? 'binary') {
         return rd_dw_text(@reader_ctx @reader_nodes "" pos)
     }
-    let t:int64=int64<overflow='wrap'>(reader_nodes[root].op)
+    let t:int64=int64<overflow='wrap'>(node_op(reader_nodes[root].op_ext))
     if (not (((((t =? 69) or (t =? 71)) or (t =? 72)) or (t =? 73)) or (t =? 74))) {
         return rd_dw_text(@reader_ctx @reader_nodes "" pos)
     }
@@ -3814,7 +3814,7 @@ rd_dc_expect_notes=(@reader_ctx:ParserContext @reader_nodes:array<Node> conditio
         }
         let part:int64=node_mk(@reader_nodes 'pair' pos)
         reader_nodes[part].a = int32<overflow='wrap'>(again)
-        reader_nodes[part].sval = (-1)
+        reader_nodes[part].op_ext=node_with_sval(reader_nodes[part].op_ext (-1))
         pieces.push(part);
     }
     if (pieces.length =? 0) {
@@ -3836,14 +3836,14 @@ rd_dc_export_name=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64
         if (((literal =? 0) or (reader_nodes[literal].kind not=? 'str_lit')) or (rd_nkids(@reader_nodes literal) >? 0)) {
             return 0
         }
-        text = rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[literal].sval))
+        text = rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[literal].op_ext)))
         if (text =? "") {
             return 0
         }
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 3)
     }
     let n:int64=node_mk(@reader_nodes 'str_lit' pos)
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))))
     n
 }
 
@@ -4135,7 +4135,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
                 let after_p=toks_p + reader_ctx.at
                 let joined:bool=(after_p[0].symbol =? 'lbrack') or (after_p[0].symbol =? 'lparen') or (after_p[0].kind =? 'quoted') or (after_p[0].kind =? 'rawquoted') or ((after_p[0].symbol =? 'lbrace') and (not after_p[0].space))
                 if not joined {
-                    reader_nodes.ptr[n].aux2 = int32<overflow='wrap'>(AUX2_EMPTY_PARENS)
+                    reader_nodes.ptr[n].op_ext=node_with_aux2(reader_nodes.ptr[n].op_ext (int32<overflow='wrap'>(AUX2_EMPTY_PARENS)))
                 }
             }
             left = n
@@ -4264,7 +4264,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
             if (not read) {
                 return 0
             }
-            reader_nodes.ptr[n].aux2 = 0
+            reader_nodes.ptr[n].op_ext=node_with_aux2(reader_nodes.ptr[n].op_ext 0)
             left = n
             juxt_head = false
             continue
@@ -4472,7 +4472,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
             reader_nodes.ptr[n].a = int32<overflow='wrap'>(left)
             reader_nodes.ptr[n].b = int32<overflow='wrap'>(t)
             if (op =? 'kw_transmute') {
-                reader_nodes.ptr[n].aux2 = 1
+                reader_nodes.ptr[n].op_ext=node_with_aux2(reader_nodes.ptr[n].op_ext 1)
             }
             if (op =? 'isnt_type') {
                 let inverted:int64=node_mk(@reader_nodes 'not_' pos)
@@ -4636,7 +4636,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
         # Inline binary node construction (common binary/and_/or_/not_ + builtin calls without [left right] alloc)
         if binop_tok not=? 0 {
             let bn:int64=node_mk(@reader_nodes (if op_ord =? 78 {'and_'} else if op_ord =? 76 {'or_'} else {'binary'}) pos)
-            reader_nodes.ptr[bn].op = int32<overflow='wrap'>(binop_tok)
+            reader_nodes.ptr[bn].op_ext=node_with_op(reader_nodes.ptr[bn].op_ext (int32<overflow='wrap'>(binop_tok)))
             reader_nodes.ptr[bn].a = int32<overflow='wrap'>(left)
             reader_nodes.ptr[bn].b = int32<overflow='wrap'>(right)
             if scalar_ord not=? op_ord {
@@ -4708,7 +4708,7 @@ rd_dc_expression_statement=(@reader_ctx:ParserContext @reader_nodes:array<Node> 
     }
     if rd_dn_accept_semi(@reader_ctx) {
         let n:int64=node_mk(@reader_nodes 'assign' ended)
-        reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))
+        reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))))
         reader_nodes[n].a = int32<overflow='wrap'>(node_mk(@reader_nodes 'hole' ended))
         reader_nodes[n].b = int32<overflow='wrap'>(value)
         return n
@@ -5007,7 +5007,7 @@ rd_dc_flow=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
             return 0
         }
         # (`loop { ... }` then a new line: the block is the condition and the next line the body)
-        if (((((braced and (reader_nodes[head].op =? 4)) and (reader_nodes[int64<overflow='wrap'>(reader_nodes[head].a)].kind =? 'block')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol =? 'rbrace')) and reader_ctx.tokens[reader_ctx.at].newline) and dn_can_start(@reader_ctx.tokens reader_ctx.at)) {
+        if (((((braced and (node_op(reader_nodes[head].op_ext) =? 4)) and (reader_nodes[int64<overflow='wrap'>(reader_nodes[head].a)].kind =? 'block')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol =? 'rbrace')) and reader_ctx.tokens[reader_ctx.at].newline) and dn_can_start(@reader_ctx.tokens reader_ctx.at)) {
             rd_dc_loop_body_warning(@reader_ctx);
         }
     }
@@ -5070,7 +5070,7 @@ rd_dc_flow=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
             else {
                 alternative = node_mk(@reader_nodes 'block' pos)
                 rd_add_flag(@reader_nodes alternative NF_UNSCOPED);
-                reader_nodes[alternative].aux2=1794
+                reader_nodes[alternative].op_ext=node_with_aux2(reader_nodes[alternative].op_ext 1794)
                 node_set_list(@reader_nodes @reader_ctx.stores.lists[0] alternative [rd_dc_flow_stmt(@reader_nodes rest)]);
             }
         }
@@ -5125,7 +5125,7 @@ rd_dc_flow=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
             reader_nodes[n].kind = 'loopx'
             reader_nodes[n].a = int32<overflow='wrap'>(head)
         }
-        else if (reader_nodes[head].op =? 1) {
+        else if (node_op(reader_nodes[head].op_ext) =? 1) {
             reader_nodes[n].kind = 'for_'
             reader_nodes[n].a = reader_nodes[head].a
             if rd_has_flag(@reader_nodes head NF_MUT) {
@@ -5133,7 +5133,7 @@ rd_dc_flow=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
             }
             node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n node_kids(@reader_nodes @reader_ctx.stores.lists[0] head));
         }
-        else if (reader_nodes[head].op =? 4) {
+        else if (node_op(reader_nodes[head].op_ext) =? 4) {
             reader_nodes[n].kind = 'while_'
             reader_nodes[n].a = reader_nodes[head].a
         }
@@ -5751,7 +5751,7 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
         if (type_params.length >? 0) {
             let listed:int64=node_mk(@reader_nodes 'block' reader_nodes[n].pos)
             node_set_list(@reader_nodes @reader_ctx.stores.lists[0] listed captures);
-            reader_nodes[n].d = int32<overflow='wrap'>(listed)
+            reader_nodes[n].op_ext=node_with_d(reader_nodes[n].op_ext (int32<overflow='wrap'>(listed)))
         }
         else {
             node_set_list2(@reader_nodes @reader_ctx.stores.lists[0] n captures);
@@ -6232,7 +6232,7 @@ rd_dc_head_and=(@reader_ctx:ParserContext @reader_nodes:array<Node> first:int64)
 
 # A combined iteration binds by value, and steps a stepped range by its iterator.
 rd_dc_head_combined=(@reader_ctx:ParserContext @reader_nodes:array<Node> head:int64):>bool=>$unsafe {
-    if (reader_nodes[head].op not=? 1) {
+    if (node_op(reader_nodes[head].op_ext) not=? 1) {
         return true
     }
     if reader_ctx.stores.host[0].g_dewy_live_sources_has(int64<overflow='wrap'>(reader_nodes[head].a)) {
@@ -6257,7 +6257,7 @@ rd_dc_head_join=(@reader_ctx:ParserContext @reader_nodes:array<Node> op:int64 a:
         return 0
     }
     let n:int64=node_mk(@reader_nodes 'lhead' reader_nodes[a].pos)
-    reader_nodes[n].op = int32<overflow='wrap'>(op)
+    reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(op)))
     reader_nodes[n].a = int32<overflow='wrap'>(a)
     reader_nodes[n].b = int32<overflow='wrap'>(b)
     reader_ctx.stores.host[0].head_collapse(n)
@@ -6267,10 +6267,10 @@ rd_dc_head_join=(@reader_ctx:ParserContext @reader_nodes:array<Node> op:int64 a:
 # false for any other head. (`loop i in 0.. and x in a ?? b`: the last term of a combined head.)
 rd_dc_head_mistake=(@reader_ctx:ParserContext @reader_nodes:array<Node> head:int64):>bool=>$unsafe {
     let last:int64=head
-    loop (reader_nodes[last].op =? 2) or (reader_nodes[last].op =? 3) {
+    loop (node_op(reader_nodes[last].op_ext) =? 2) or (node_op(reader_nodes[last].op_ext) =? 3) {
         last = int64<overflow='wrap'>(reader_nodes[last].b)
     }
-    if ((not reader_ctx.flags.report_now) or (reader_nodes[last].op not=? 1)) {
+    if ((not reader_ctx.flags.report_now) or (node_op(reader_nodes[last].op_ext) not=? 1)) {
         return false
     }
     let next:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
@@ -6331,11 +6331,11 @@ rd_dc_head_term=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
             return 0
         }
         # (`x in? xs`: a membership, a condition; `f(x) in xs` is no expression dc_expr reads)
-        reader_nodes[head].op = 4
+        reader_nodes[head].op_ext=node_with_op(reader_nodes[head].op_ext 4)
         reader_nodes[head].a = int32<overflow='wrap'>(condition)
         return head
     }
-    reader_nodes[head].op = 1
+    reader_nodes[head].op_ext=node_with_op(reader_nodes[head].op_ext 1)
     if place {
         rd_add_flag(@reader_nodes head NF_MUT);
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
@@ -6466,8 +6466,8 @@ rd_dc_import=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsa
         if (text =? 0) {
             return 0
         }
-        value = rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[text].sval))
-        reader_nodes[n].aux2 = 1
+        value = rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[text].op_ext)))
+        reader_nodes[n].op_ext=node_with_aux2(reader_nodes[n].op_ext 1)
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
     }
     let alias:string=""
@@ -6477,7 +6477,7 @@ rd_dc_import=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsa
         }
         alias = rd_dn_payload(@reader_ctx rd_dn_take(@reader_ctx))
     }
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(value))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(value))))
     reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(strip_ext(reader_ctx.stores.host[0].file_name(value))))
     if (alias not=? "") {
         reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(alias))
@@ -6489,7 +6489,7 @@ rd_dc_import=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsa
         reader_nodes[n].aux = 2
         node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n imported);
     }
-    else if ((alias =? "") and (reader_nodes[n].aux2 =? 1)) {
+    else if ((alias =? "") and (node_aux2(reader_nodes[n].op_ext) =? 1)) {
         reader_nodes[n].aux = 3
     }
     let next:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
@@ -6782,8 +6782,8 @@ rd_dc_index=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>bool=
 # `xs[end]` in the index being read: its last, per axis (dw_expr's `$index_end`).
 rd_dc_index_end=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64):>int64=>$unsafe {
     let base:string="$index_end{reader_ctx.reader.dc_index_node}"
-    reader_nodes[reader_ctx.reader.dc_index_node].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(base))
-    let axis:int64=int64<overflow='wrap'>(reader_nodes[reader_ctx.reader.dc_index_node].aux2)
+    reader_nodes[reader_ctx.reader.dc_index_node].op_ext=node_with_sval(reader_nodes[reader_ctx.reader.dc_index_node].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(base))))
+    let axis:int64=int64<overflow='wrap'>(node_aux2(reader_nodes[reader_ctx.reader.dc_index_node].op_ext))
     let spelled:string=(if (axis =? 0) base else "{base}_{axis}")
     rd_comp_ident(@reader_nodes reader_ctx.stores.host[0].intern(spelled) pos)
 }
@@ -6821,7 +6821,7 @@ rd_dc_index_tag_mistake=(@reader_ctx:ParserContext tag:DewyLexeme clamp:bool):>b
 # `nonzero = int64 & ~0` at the top of a module names a refined type (dw_top_declarations), which
 # is left unread (dc_unread).
 rd_dc_inferred_refinement=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>bool=>$unsafe {
-    (((reader_ctx.reader.dc_top_level and (reader_nodes[n].kind =? 'binary')) and (reader_nodes[n].op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(63))))) and (reader_nodes[int64<overflow='wrap'>(reader_nodes[n].b)].kind =? 'not_'))
+    (((reader_ctx.reader.dc_top_level and (reader_nodes[n].kind =? 'binary')) and (node_op(reader_nodes[n].op_ext) =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(63))))) and (reader_nodes[int64<overflow='wrap'>(reader_nodes[n].b)].kind =? 'not_'))
 }
 
 rd_dc_inline_default=(@reader_ctx:ParserContext @reader_nodes:array<Node> field:DewyLexeme):>int64=>$unsafe {
@@ -7103,7 +7103,7 @@ rd_dc_lazy_body=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
     if (reader_ctx.tokens[reader_ctx.at].kind =? 'lazy_body') {
         let t:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
         let b:int64=node_mk(@reader_nodes 'block' rd_mkpos(reader_ctx.file t.start))
-        reader_nodes[b].aux2 = DC_LAZY_SPAN
+        reader_nodes[b].op_ext=node_with_aux2(reader_nodes[b].op_ext DC_LAZY_SPAN)
         reader_nodes[b].ival = t.start
         reader_ctx.reader.dc_lazy_span_end[b] = t.stop
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
@@ -7125,7 +7125,7 @@ rd_dc_lazy_body=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
         }
         if (depth =? 0) {
             let b:int64=node_mk(@reader_nodes 'block' rd_mkpos(reader_ctx.file reader_ctx.tokens[start].start))
-            reader_nodes[b].aux2 = DC_LAZY_BODY
+            reader_nodes[b].op_ext=node_with_aux2(reader_nodes[b].op_ext DC_LAZY_BODY)
             reader_nodes[b].ival = start
             reader_ctx.at = (int64<overflow='wrap'>(at) + 1)
             if reader_ctx.reader.dc_lazy_on {
@@ -7319,7 +7319,7 @@ rd_dc_literal_methods=(@reader_ctx:ParserContext @reader_nodes:array<Node> entri
             if (captures.length >? 0) {
                 let listed:int64=node_mk(@reader_nodes 'block' pos)
                 node_set_list(@reader_nodes @reader_ctx.stores.lists[0] listed captures);
-                reader_nodes[fn_].d = int32<overflow='wrap'>(listed)
+                reader_nodes[fn_].op_ext=node_with_d(reader_nodes[fn_].op_ext (int32<overflow='wrap'>(listed)))
             }
             node_set_list2(@reader_nodes @reader_ctx.stores.lists[0] fn_ [object_type]);
             rd_add_flag(@reader_nodes fn_ NF_GENERIC);
@@ -7343,7 +7343,7 @@ rd_dc_literal_node=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64)
         return (reader_nodes[n].aux =? 0)
     }
     if (k =? 'call') {
-        return (reader_nodes[n].aux2 =? (-1))
+        return (node_aux2(reader_nodes[n].op_ext) =? (-1))
     }
     if (k not=? 'array') {
         return false
@@ -7490,8 +7490,8 @@ rd_dc_long_real=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyL
         return 0
     }
     let n:int64=node_mk(@reader_nodes 'float_lit' pos)
-    reader_nodes[n].fval = value
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(number))
+    reader_nodes[n].op_ext=node_with_fval(reader_nodes[n].op_ext value)
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(number))))
     rd_add_flag(@reader_nodes n NF_LITERAL);
     n
 }
@@ -7684,7 +7684,7 @@ rd_dc_membership=(@reader_nodes:array<Node> n:int64 top:bool=true):>bool=>$unsaf
     if (k =? 'not_') {
         return rd_dc_membership(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a) false)
     }
-    if ((top or (k not=? 'binary')) or (reader_nodes[n].op not=? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12))))) {
+    if ((top or (k not=? 'binary')) or (node_op(reader_nodes[n].op_ext) not=? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12))))) {
         return false
     }
     let r:int64=int64<overflow='wrap'>(reader_nodes[n].b)
@@ -7724,7 +7724,7 @@ rd_dc_metatag_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:De
             let text:string="{rd_dn_payload(@reader_ctx token)}.{rd_dn_payload(@reader_ctx member)}"
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
             let literal:int64=node_mk(@reader_nodes 'str_lit' pos)
-            reader_nodes[literal].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))
+            reader_nodes[literal].op_ext=node_with_sval(reader_nodes[literal].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))))
             let callee:int64=node_mk(@reader_nodes 'ident' pos)
             reader_nodes[callee].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("__setting_read"))
             let call:int64=node_mk(@reader_nodes 'call' pos)
@@ -7896,7 +7896,7 @@ rd_dc_wait_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyL
     let name:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)]
     let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 5)]
     let n:int64=node_mk(@reader_nodes 'tname' rd_mkpos(reader_ctx.file token.start))
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("@{rd_dn_payload(@reader_ctx name)}"))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("@{rd_dn_payload(@reader_ctx name)}"))))
     if member.symbol =? 'langle' {
         reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("<>"))
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 5)
@@ -7911,7 +7911,7 @@ rd_dc_module_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:Dew
     let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)]
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 3)
     let n:int64=node_mk(@reader_nodes 'tname' rd_mkpos(reader_ctx.file token.start))
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx token)))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx token)))))
     reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx member)))
     rd_dc_type_arguments(@reader_ctx @reader_nodes n 0)
 }
@@ -7985,7 +7985,7 @@ rd_dc_new_axes=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>bo
             return rd_dc_axes_end(@reader_ctx mark false)
         }
         entries = (int64<overflow='wrap'>(entries) + 1)
-        reader_nodes[n].aux2 = int32<overflow='wrap'>(args.length)
+        reader_nodes[n].op_ext=node_with_aux2(reader_nodes[n].op_ext (int32<overflow='wrap'>(args.length)))
         let pos:int64=rd_mkpos(reader_ctx.file token.start)
         let new_first:bool=((token.kind =? 'identifier') and (int64<overflow='wrap'>(token.name) =? reader_ctx.reader.dn_new_id))
         if (new_first or (token.symbol =? 'range')) {
@@ -8140,7 +8140,7 @@ rd_dc_no_body=(@reader_ctx:ParserContext @reader_nodes:array<Node> keyword:DewyL
     if (next =? 'colon') {
         return 0
     }
-    let braced:bool=(((((keyword.symbol =? 'kw_loop') and (reader_nodes[head].op =? 4)) and (reader_nodes[int64<overflow='wrap'>(reader_nodes[head].a)].kind =? 'block')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol =? 'rbrace')) and (reader_ctx.tokens[rd_dc_open_brace(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) - 1))].start =? rd_pos_off(reader_nodes[int64<overflow='wrap'>(reader_nodes[head].a)].pos)))
+    let braced:bool=(((((keyword.symbol =? 'kw_loop') and (node_op(reader_nodes[head].op_ext) =? 4)) and (reader_nodes[int64<overflow='wrap'>(reader_nodes[head].a)].kind =? 'block')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol =? 'rbrace')) and (reader_ctx.tokens[rd_dc_open_brace(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) - 1))].start =? rd_pos_off(reader_nodes[int64<overflow='wrap'>(reader_nodes[head].a)].pos)))
     if braced {
         reader_ctx.stores.host[0].dn_error(reader_ctx.tokens[reader_ctx.at].start "expected a body after this loop's condition: a loop is `loop condition body`, so a loop that runs until `break` or `return` is `loop true \{ ... }`");
     }
@@ -8349,7 +8349,7 @@ rd_dc_overloads=(@reader_nodes:array<Node> n:int64):>bool=>$unsafe {
     if (reader_nodes[n].kind =? 'lambda') {
         return true
     }
-    (((reader_nodes[n].kind =? 'binary') and (reader_nodes[n].op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(63))))) and (rd_dc_overloads(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a)) or rd_dc_overloads(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].b))))
+    (((reader_nodes[n].kind =? 'binary') and (node_op(reader_nodes[n].op_ext) =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(63))))) and (rd_dc_overloads(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a)) or rd_dc_overloads(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].b))))
 }
 
 # `:>(int64 int64)`: several result values, an array type marked with ival -(their number), its
@@ -8490,7 +8490,7 @@ rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
     let pending_handles:array<string>=[]
     loop item in items {
         # Settings prefixes (setting_scopes.dewy, aux2 1788) run on the block's task.
-        if reader_nodes[item].aux2 =? 1788 {statements.push(item);continue}
+        if node_aux2(reader_nodes[item].op_ext) =? 1788 {statements.push(item);continue}
         # (an item reading a task item's binding starts once that item's value is taken)
         if pending.length >? 0 {
             let used:array<int64>=[]
@@ -8522,7 +8522,7 @@ rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
             # (its scope's end drops a value never taken and frees the slot: __item_discard; aux2
             # 17, it only waits for the item's own task)
             let release:int64=node_mk(@reader_nodes 'defer_' ipos)
-            reader_nodes[release].aux2 = 17
+            reader_nodes[release].op_ext=node_with_aux2(reader_nodes[release].op_ext 17)
             let discard:int64=node_mk(@reader_nodes 'exprstmt' ipos)
             reader_nodes[discard].a = int32<overflow='wrap'>(rd_bc_call(@reader_ctx @reader_nodes "__item_discard" [rd_bc_ident(@reader_ctx @reader_nodes name ipos) rd_bc_ident(@reader_ctx @reader_nodes handle ipos)] ipos))
             reader_nodes[release].a = int32<overflow='wrap'>(discard)
@@ -8608,7 +8608,7 @@ rd_dc_parallel_names=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int6
     rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].a) @names);
     rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].b) @names);
     rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].c) @names);
-    rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].d) @names);
+    rd_dc_parallel_names(@reader_ctx @reader_nodes int64(node_d(reader_nodes[n].op_ext)) @names);
     loop child in node_kids(@reader_nodes @reader_ctx.stores.lists[0] n) {rd_dc_parallel_names(@reader_ctx @reader_nodes child @names);}
     loop child in node_kids2(@reader_nodes @reader_ctx.stores.lists[0] n) {rd_dc_parallel_names(@reader_ctx @reader_nodes child @names);}
 }
@@ -8637,10 +8637,10 @@ rd_dc_parallel_detached=(@reader_ctx:ParserContext @reader_nodes:array<Node> ite
     let k:NK=reader_nodes[item].kind
     if k =? 'vardecl' or k =? 'const_' or k =? 'fn_' or k =? 'defer_' or k =? 'when_' {return false}
     # (`f();`: a discarded value, the only update a detached item may be)
-    if k =? 'assign' and (reader_nodes[item].op not=? 47 or reader_nodes[int64(reader_nodes[item].a)].kind not=? 'hole') {return false}
+    if k =? 'assign' and (node_op(reader_nodes[item].op_ext) not=? 47 or reader_nodes[int64(reader_nodes[item].a)].kind not=? 'hole') {return false}
     if k =? 'exprstmt' {
         let value:int64=int64(reader_nodes[item].a)
-        if value =? 0 or (reader_nodes[value].kind =? 'call' and reader_nodes[value].aux2 =? 17) {return false}
+        if value =? 0 or (reader_nodes[value].kind =? 'call' and node_aux2(reader_nodes[value].op_ext) =? 17) {return false}
     }
     if not rd_dc_parallel_exits(@reader_ctx @reader_nodes item 0) {return false}
     let declared:array<int64>=[]
@@ -8669,7 +8669,7 @@ rd_dc_parallel_writes_own=(@reader_ctx:ParserContext @reader_nodes:array<Node> n
     if k =? 'lambda' or k =? 'fn_' {return true}
     # (`( ... )` declares into the item's enclosing block, `parallel ( ... )` among them)
     if k =? 'propagate' or (k =? 'block' and rd_has_flag(@reader_nodes n NF_UNSCOPED)) {return false}
-    if k =? 'call' and reader_nodes[n].aux2 =? 17 {return false}
+    if k =? 'call' and node_aux2(reader_nodes[n].op_ext) =? 17 {return false}
     let target:int64=0
     if k =? 'assign' and reader_nodes[int64(reader_nodes[n].a)].kind not=? 'hole' {target = int64(reader_nodes[n].a)}
     if rd_has_flag(@reader_nodes n NF_AT) {target = n}
@@ -8819,7 +8819,7 @@ rd_dc_pattern=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$uns
                 return 0
             }
             let text:int64=rd_dn_string(@reader_ctx @reader_nodes quote)
-            if ((text =? 0) or ((rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[text].sval)) as array<uint8>).length not=? 1)) {
+            if ((text =? 0) or ((rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[text].op_ext))) as array<uint8>).length not=? 1)) {
                 return 0
             }
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
@@ -8827,7 +8827,7 @@ rd_dc_pattern=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$uns
                 return 0
             }
             let p:int64=node_mk(@reader_nodes 'plit' pos)
-            reader_nodes[p].a = int32<overflow='wrap'>(rd_bc_int(@reader_nodes int64<overflow='wrap'>((rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[text].sval)) as array<uint8>)[0]) pos))
+            reader_nodes[p].a = int32<overflow='wrap'>(rd_bc_int(@reader_nodes int64<overflow='wrap'>((rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[text].op_ext))) as array<uint8>)[0]) pos))
             return p
         }
         # `<Busy>`, `<int64|string>`, `<'e'|'w'>`, `<(int64:>int64)>`: a type (dw_pattern's `<>`)
@@ -9000,16 +9000,16 @@ rd_dc_plain_operand=(@reader_nodes:array<Node> n:int64):>bool=>$unsafe {
         return true
     }
     if (k =? 'int_lit') {
-        return (reader_nodes[n].aux2 =? 0)
+        return (node_aux2(reader_nodes[n].op_ext) =? 0)
     }
     # (an exact integer literal)
     if (k =? 'call') {
-        return (reader_nodes[n].aux2 =? (-1))
+        return (node_aux2(reader_nodes[n].op_ext) =? (-1))
     }
     # (`b.day - e.day`: sums, differences and products of plain operands read the same twice,
     # and a comparison takes them exactly, where a temporary would store them)
     if (k =? 'binary') {
-        let op:int64=int64<overflow='wrap'>(reader_nodes[n].op)
+        let op:int64=int64<overflow='wrap'>(node_op(reader_nodes[n].op_ext))
         if (((op =? 58) or (op =? 59)) or (op =? 60)) {
             return (rd_dc_plain_operand(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a)) and rd_dc_plain_operand(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].b)))
         }
@@ -9810,7 +9810,7 @@ rd_dc_ref_ranges=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>
         rd_dc_ref_ranges(@reader_ctx @reader_nodes int64<overflow='wrap'>(reader_nodes[n].a));
         rd_dc_ref_ranges(@reader_ctx @reader_nodes int64<overflow='wrap'>(reader_nodes[n].b));
     }
-    else if ((k =? 'binary') and (reader_nodes[n].op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12))))) {
+    else if ((k =? 'binary') and (node_op(reader_nodes[n].op_ext) =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12))))) {
         let range:int64?=reader_ctx.reader.dc_member_ranges.get(int64<overflow='wrap'>(reader_nodes[n].b))
         if range isnt? none {
             reader_nodes[n].b = int32<overflow='wrap'>(range)
@@ -10049,7 +10049,7 @@ rd_dc_route_text=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>
         if (((source as array<uint8>)[before] =? b'(') or ((source as array<uint8>)[before] =? b'@')) {
             return ""
         }
-        if (((reader_nodes[entry].kind =? 'int_lit') and (reader_nodes[entry].aux2 =? 0)) and rd_is_digit((source as array<uint8>)[written])) {
+        if (((reader_nodes[entry].kind =? 'int_lit') and (node_aux2(reader_nodes[entry].op_ext) =? 0)) and rd_is_digit((source as array<uint8>)[written])) {
             indices.push(rd_dc_word_at(@reader_ctx written));
         }
         else {
@@ -10415,7 +10415,7 @@ rd_dc_lazy=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64 label:
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         let flow:int64=rd_dc_flow(@reader_ctx @reader_nodes)
         if (flow not=? 0) {
-            reader_nodes[flow].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(tag_name))
+            reader_nodes[flow].op_ext=node_with_sval(reader_nodes[flow].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(tag_name))))
             body = node_mk(@reader_nodes 'block' reader_nodes[flow].pos)
             node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body [rd_dc_flow_stmt(@reader_nodes flow)]);
         }
@@ -10437,7 +10437,7 @@ rd_dc_lazy=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64 label:
     let n:int64=node_mk(@reader_nodes 'lazy_' pos)
     reader_nodes[n].a = int32<overflow='wrap'>(body)
     if (label not=? 0) {
-        reader_nodes[n].sval = int32<overflow='wrap'>(label)
+        reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(label)))
     }
     n
 }
@@ -10783,7 +10783,7 @@ rd_dc_target_compare=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int6
     if (reader_nodes[n].kind not=? 'binary') {
         return (-1)
     }
-    let op:int32=reader_nodes[n].op
+    let op:int32=node_op(reader_nodes[n].op_ext)
     if (op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(69)))) {
         let left:int64=int64<overflow='wrap'>(reader_nodes[n].a)
         let right:int64=int64<overflow='wrap'>(reader_nodes[n].b)
@@ -10883,7 +10883,7 @@ rd_dc_target_fold=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):
     if (k =? 'not_') {
         let fold:int64=(-1)
         # (`a not =? b`: an inverted comparison; `not c`, but not `~c`)
-        if (reader_nodes[n].op =? 0) {
+        if (node_op(reader_nodes[n].op_ext) =? 0) {
             fold = rd_dc_target_compare(@reader_ctx @reader_nodes int64<overflow='wrap'>(reader_nodes[n].a))
         }
         else {
@@ -10936,7 +10936,7 @@ rd_dc_target_list=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>
         if (rd_dc_target_literal(@reader_ctx @reader_nodes literal 0 false) =? "") {
             # (syntax_target_literal's mistake, should nothing else read it)
             if (reader_ctx.reader.dc_target_problem =? (-2)) {
-                rd_dc_hint(@reader_ctx reader_nodes[literal].pos rd_dc_target_text(@reader_ctx rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[literal].sval)) 0));
+                rd_dc_hint(@reader_ctx reader_nodes[literal].pos rd_dc_target_text(@reader_ctx rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[literal].op_ext))) 0));
             }
             return 0
         }
@@ -10951,7 +10951,7 @@ rd_dc_target_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int6
     if ((((reader_nodes[n].kind not=? 'str_lit') or (rd_nkids(@reader_nodes n) >? 0)) or (rd_dc_target_of(@reader_ctx @reader_nodes n) >=? 0)) or rd_has_flag(@reader_nodes n NF_SPREAD)) {
         return ""
     }
-    let name:string=rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[n].sval))
+    let name:string=rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[n].op_ext)))
     let known:bool=false
     if (field =? 3) {
         known = ((name =? "release") or (name =? "debug"))
@@ -10988,7 +10988,7 @@ rd_dc_target_member=(@reader_ctx:ParserContext @reader_nodes:array<Node> left:in
 }
 
 rd_dc_target_note=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 field:int64 member:int64):>void=>$unsafe {
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern((if (field =? 0) reader_ctx.stores.host[0].dw_target_name() else reader_ctx.stores.host[0].dw_target_field_value(field))))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern((if (field =? 0) reader_ctx.stores.host[0].dw_target_name() else reader_ctx.stores.host[0].dw_target_field_value(field))))))
     reader_ctx.reader.dc_targets_made = (int64<overflow='wrap'>(reader_ctx.reader.dc_targets_made) + 1)
     reader_ctx.reader.dc_target_fields[n] = field
     reader_ctx.reader.dc_target_pos[n] = reader_nodes[n].pos
@@ -11388,7 +11388,7 @@ rd_dc_type_arguments=(@reader_ctx:ParserContext @reader_nodes:array<Node> n0:int
                 if (reader_nodes[tested].kind =? 'not_') {
                     tested = int64<overflow='wrap'>(reader_nodes[tested].a)
                 }
-                if (not ((reader_nodes[predicate].kind =? 'and_') or ((reader_nodes[tested].kind =? 'binary') and (rd_dc_comparison(int64<overflow='wrap'>(reader_nodes[tested].op)) or (reader_nodes[tested].op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12)))))))) {
+                if (not ((reader_nodes[predicate].kind =? 'and_') or ((reader_nodes[tested].kind =? 'binary') and (rd_dc_comparison(int64<overflow='wrap'>(node_op(reader_nodes[tested].op_ext))) or (node_op(reader_nodes[tested].op_ext) =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(12)))))))) {
                     return 0
                 }
                 constraint = predicate
@@ -11739,7 +11739,7 @@ rd_dc_type_member=(@reader_ctx:ParserContext @reader_nodes:array<Node> @texts:ar
             return (-1)
         }
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-        let text:string=rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[literal].sval))
+        let text:string=rd_name_of(@reader_ctx int64<overflow='wrap'>(node_sval(reader_nodes[literal].op_ext)))
         if (not (text in? texts)) {
             texts.push(text);
         }
@@ -11775,7 +11775,7 @@ rd_dc_type_named=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$
     # (`heart.<Tick>`: the type a wait gave, selected without a member, decisions.md batch 7)
     if ((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'dot') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'langle')) and (not reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].space) {
         let selector:int64=node_mk(@reader_nodes 'tname' rd_mkpos(reader_ctx.file token.start))
-        reader_nodes[selector].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx token)))
+        reader_nodes[selector].op_ext=node_with_sval(reader_nodes[selector].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx token)))))
         reader_nodes[selector].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("<>"))
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
         return rd_dc_type_arguments(@reader_ctx @reader_nodes selector 0)
@@ -11875,7 +11875,7 @@ rd_dc_type_power=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 po
         return 0
     }
     let q:int64=node_mk(@reader_nodes 'tquantity' pos)
-    reader_nodes[q].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(65)))
+    reader_nodes[q].op_ext=node_with_op(reader_nodes[q].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(65)))))
     reader_nodes[q].a = int32<overflow='wrap'>(n)
     reader_nodes[q].b = int32<overflow='wrap'>(exponent)
     q
@@ -12007,7 +12007,7 @@ rd_dc_type_term_from=(@reader_ctx:ParserContext @reader_nodes:array<Node> first:
             return 0
         }
         let q:int64=node_mk(@reader_nodes 'tquantity' pos)
-        reader_nodes[q].op = int32<overflow='wrap'>(int64<overflow='wrap'>(op))
+        reader_nodes[q].op_ext=node_with_op(reader_nodes[q].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(op))))
         reader_nodes[q].a = int32<overflow='wrap'>(n)
         reader_nodes[q].b = int32<overflow='wrap'>(right)
         n = q
@@ -12081,7 +12081,7 @@ rd_dc_unpacking_assignment=(@reader_ctx:ParserContext @reader_nodes:array<Node> 
     let pattern:int64=node_mk(@reader_nodes 'tuple' pos)
     node_set_list(@reader_nodes @reader_ctx.stores.lists[0] pattern binders);
     let n:int64=node_mk(@reader_nodes 'assign' pos)
-    reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))
+    reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(47)))))
     reader_nodes[n].a = int32<overflow='wrap'>(pattern)
     reader_nodes[n].b = int32<overflow='wrap'>(right)
     rd_dc_accept_semi(@reader_ctx (not reader_ctx.reader.dc_unbraced));
@@ -12566,7 +12566,7 @@ rd_dc_word_not=(@reader_ctx:ParserContext @reader_nodes:array<Node> op:DewyToken
         return 0
     }
     let n:int64=node_mk(@reader_nodes 'not_' rd_mkpos(reader_ctx.file word.start))
-    reader_nodes[n].op = int32<overflow='wrap'>(int64<overflow='wrap'>(int64(58)))
+    reader_nodes[n].op_ext=node_with_op(reader_nodes[n].op_ext (int32<overflow='wrap'>(int64<overflow='wrap'>(int64(58)))))
     reader_nodes[n].a = int32<overflow='wrap'>(inner)
     n
 }
@@ -12839,7 +12839,7 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
             reader_ctx.at += 1
             let statement=rd_dc_statement(@reader_ctx @reader_nodes)
             if statement =? 0 {return 0}
-            reader_nodes[statement].sval=int32(reader_ctx.stores.host[0].intern(name))
+            reader_nodes[statement].op_ext=node_with_sval(reader_nodes[statement].op_ext (int32(reader_ctx.stores.host[0].intern(name))))
             return statement
         }
     }
@@ -13105,7 +13105,7 @@ rd_dn_string=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexe
         }
         let part:int64=node_mk(@reader_nodes 'pair' rd_mkpos(reader_ctx.file first))
         reader_nodes[part].a = int32<overflow='wrap'>(expression)
-        reader_nodes[part].sval = int32((-1))
+        reader_nodes[part].op_ext=node_with_sval(reader_nodes[part].op_ext (int32((-1))))
         chunks.push(part);
         i = (int64<overflow='wrap'>(i) + 1)
         chunk_start = i
@@ -13132,7 +13132,7 @@ rd_dn_take=(@reader_ctx:ParserContext):>DewyLexeme=>$unsafe {
 # the reference parser or compact nodes for the value parser.
 rd_dn_text=(@reader_ctx:ParserContext @reader_nodes:array<Node> text:string offset:int64):>int64=>$unsafe {
     let n:int64=node_mk(@reader_nodes 'str_lit' rd_mkpos(reader_ctx.file offset))
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))))
     n
 }
 
@@ -13210,7 +13210,7 @@ rd_dw_const_number=(@reader_nodes:array<Node> n:int64):>bool=>$unsafe {
 
 rd_dw_text=(@reader_ctx:ParserContext @reader_nodes:array<Node> text:string pos:int64):>int64=>$unsafe {
     let n:int64=node_mk(@reader_nodes 'str_lit' pos)
-    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))
+    reader_nodes[n].op_ext=node_with_sval(reader_nodes[n].op_ext (int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))))
     n
 }
 
@@ -13328,7 +13328,7 @@ rd_dc_sequenced_cell=(@reader_ctx:ParserContext @reader_nodes:array<Node> value:
     reader_nodes[last].a=int32(result)
     statements.push(last)
     let block=rd_bc_block(@reader_ctx @reader_nodes statements pos)
-    reader_nodes[block].aux2=if after {-21} else {-20}
+    reader_nodes[block].op_ext=node_with_aux2(reader_nodes[block].op_ext (if after {-21} else {-20}))
     rd_add_flag(@reader_nodes block NF_COMPREHENSION);
     if spread {rd_add_flag(@reader_nodes block NF_SPREAD);}
     block
@@ -13365,7 +13365,7 @@ rd_dc_array_without_empty=(@reader_ctx:ParserContext @reader_nodes:array<Node> n
     reader_nodes[last].a=int32(result)
     effects.push(last)
     let block=rd_bc_block(@reader_ctx @reader_nodes effects pos)
-    reader_nodes[block].aux2=-17
+    reader_nodes[block].op_ext=node_with_aux2(reader_nodes[block].op_ext (-17))
     rd_add_flag(@reader_nodes block NF_COMPREHENSION);
     block
 }
@@ -13402,7 +13402,7 @@ rd_dc_discarded_entries=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:i
             }
             let statement=node_mk(@reader_nodes if drop {'assign'} else {'vardecl'} reader_nodes[operand].pos)
             if drop {
-                reader_nodes[statement].op=47
+                reader_nodes[statement].op_ext=node_with_op(reader_nodes[statement].op_ext 47)
                 reader_nodes[statement].a=int32(node_mk(@reader_nodes 'hole' reader_nodes[operand].pos))
             } else {
                 let name=reader_ctx.stores.host[0].intern("$dewy_entry_{reader_nodes.length}")
@@ -13431,7 +13431,7 @@ rd_dc_discarded_entries=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:i
     statements.push(last)
     let block=rd_bc_block(@reader_ctx @reader_nodes statements pos)
     # literal_snapshots.dewy gives staged values their receiving field/key/value context.
-    reader_nodes[block].aux2=-17
+    reader_nodes[block].op_ext=node_with_aux2(reader_nodes[block].op_ext (-17))
     rd_add_flag(@reader_nodes block NF_COMPREHENSION);
     block
 }

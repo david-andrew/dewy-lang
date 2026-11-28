@@ -68,7 +68,7 @@ main = ():
     prepare()
     # Dropped values: kinds that change nothing, void and never, `_ =` (discarding).
     run(stmt(typed(.ident, T_INT)))
-    b = typed(.binary, T_BOOL, typed(.ident, T_INT)); nodes[b].op = 69
+    b = typed(.binary, T_BOOL, typed(.ident, T_INT)); nodes[b].op_ext = node_with_op(nodes[b].op_ext, i32(69))
     run(stmt(b))
     kinds: NK[] = [.and_, .or_, .not_, .bool_lit, .int_lit, .float_lit, .none_lit, .unary, .call]
     loop k in kinds: run(stmt(typed(k, T_INT)))
@@ -101,8 +101,8 @@ main = ():
     run(stmt(typed(.ident, T_INT)))
     run(stmt(typed(.ident, T_VOID)))
     run(stmt(typed(.ident, T_NEVER)))
-    sp = typed(.call, T_VOID); nodes[sp].aux2 = 17; run(stmt(sp))
-    sp = typed(.call, T_INT); nodes[sp].aux2 = 17; run(stmt(sp))
+    sp = typed(.call, T_VOID); nodes[sp].op_ext = node_with_aux2(nodes[sp].op_ext, i32(17)); run(stmt(sp))
+    sp = typed(.call, T_INT); nodes[sp].op_ext = node_with_aux2(nodes[sp].op_ext, i32(17)); run(stmt(sp))
     es_dropping = true
     run(stmt(typed(.ident, T_INT)))
     es_dropping = false
@@ -112,7 +112,7 @@ main = ():
     es_rewrite = true
     run(stmt(typed(.ident, T_STR)))
     es_dropping = true
-    sp = typed(.call, T_INT); nodes[sp].aux2 = 17; run(stmt(sp))
+    sp = typed(.call, T_INT); nodes[sp].op_ext = node_with_aux2(nodes[sp].op_ext, i32(17)); run(stmt(sp))
     print(events)
     print("ok")
 '''
@@ -125,7 +125,7 @@ def test_checker_exprstmts_twins(compiler, tmp_path, release):  # noqa: F811
 
 
 @pytest.mark.parametrize('case,code', [
-    ('sinks.push(Sink(mode = 4)); sp = typed(.call, T_INT); nodes[sp].aux2 = 17; run(stmt(sp))', 1),
+    pytest.param('sinks.push(Sink(mode = 4)); sp = typed(.call, T_INT); nodes[sp].op_ext = node_with_aux2(nodes[sp].op_ext, i32(17)); run(stmt(sp))', 1, id='sinks.push(Sink(mode = 4)); sp = typed(.call, T_INT); nodes[sp].aux2 = 17; run(stmt(sp))-1'),
     ('run(stmt(typed(.ident, int(tb_mk_fn([T_INT], T_INT, 0, 0, 0, false)))))', 2),
     ('run(stmt(typed(.field, int(tb_mk_cfn([T_INT], T_INT)))))', 2),
 ])

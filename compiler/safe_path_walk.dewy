@@ -21,6 +21,7 @@ from p"source_queries.dewy" import (line_col)
 from p"warn_if.jo" import (WI_PATH wi_decls)
 from p"ownership.jo" import ownership_decls
 from p"errors.jo" import nominal_parent
+from p"node_store.dewy" import (node_aux2 node_d node_op node_sval)
 
 PathWalkWord:type=int64<overflow='wrap'>
 let ut_record_scanned:dict<int64 bool>=[]
@@ -485,7 +486,7 @@ ut_acc=(n:PathWalkWord):>void=>$unsafe {
         ut_joined(pieces n)
         return
     }
-    if k =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32(58) and prune(t) =? T_STR {
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 and node_op(nodes.ptr[n].op_ext) =? int32(58) and prune(t) =? T_STR {
         # (`"{base}/" + name`: the pieces, as an interpolation's)
         let pieces:array<int64>=[]
         ut_pieces(n @pieces)
@@ -578,7 +579,7 @@ ut_acc_block=(b:PathWalkWord):>void=>$unsafe {
 }
 # (the pieces of a string sum, left to right)
 ut_pieces=(n:PathWalkWord @out:array<int64>):>void=>$unsafe {
-    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32(58) and prune(PathWalkWord(nodes.ptr[n].type)) =? T_STR {
+    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and node_op(nodes.ptr[n].op_ext) =? int32(58) and prune(PathWalkWord(nodes.ptr[n].type)) =? T_STR {
         ut_pieces(PathWalkWord(nodes.ptr[n].a) @out)
         ut_pieces(PathWalkWord(nodes.ptr[n].b) @out)
         return
@@ -610,7 +611,7 @@ ut_joined=(pieces:array<int64> n:PathWalkWord):>void=>$unsafe {
     loop part in pieces {
         if nodes.ptr[part].kind =? 'str_lit' and nodes.ptr[part].aux =? 0 {
             if based {continue}
-            let s=name_of(PathWalkWord(nodes.ptr[part].sval))
+            let s=name_of(PathWalkWord(node_sval(nodes.ptr[part].op_ext)))
             if (s as array<uint8>).length =? 0 {continue}
             let at=find_byte(s b'/')
             let back=find_byte(s b'\\')
@@ -855,7 +856,7 @@ ut_safe_text=(n0:PathWalkWord):>bool=>$unsafe {
     let has_dyn=false
     loop part in kids(n) {
         if nodes.ptr[part].kind =? 'str_lit' and nodes.ptr[part].aux =? 0 {
-            let s=name_of(PathWalkWord(nodes.ptr[part].sval))
+            let s=name_of(PathWalkWord(node_sval(nodes.ptr[part].op_ext)))
             if find_byte(s b'/') >=? 0 or find_byte(s b'\\') >=? 0 {
                 # (a separator ends the component: what follows it starts the next)
                 if has_path and has_dyn {return false}
@@ -888,7 +889,7 @@ ut_text_class=(n0:PathWalkWord):>int64=>$unsafe {
     let k=nodes.ptr[n].kind
     if k =? 'str_lit' {
         if nodes.ptr[n].aux =? 0 {
-            let s=name_of(PathWalkWord(nodes.ptr[n].sval))
+            let s=name_of(PathWalkWord(node_sval(nodes.ptr[n].op_ext)))
             return UT_HARD | (if ut_comp_text(s) {UT_COMP} else {0})
         }
         let hard=true
@@ -897,7 +898,7 @@ ut_text_class=(n0:PathWalkWord):>int64=>$unsafe {
         let text=""
         loop part in kids(n) {
             if nodes.ptr[part].kind =? 'str_lit' and nodes.ptr[part].aux =? 0 {
-                let s=name_of(PathWalkWord(nodes.ptr[part].sval))
+                let s=name_of(PathWalkWord(node_sval(nodes.ptr[part].op_ext)))
                 text="{text}{s}"
                 if find_byte(s b'/') >=? 0 or find_byte(s b'\\') >=? 0 or find_byte(s 0) >=? 0 {comp=false}
                 continue
@@ -1038,7 +1039,7 @@ ut_visit=(n:PathWalkWord):>void=>$unsafe {
         }
         <'conv'> => {
             let value=PathWalkWord(nodes.ptr[n].a)
-            if nodes.ptr[n].aux =? int32(int64(CV.refinement)) and ut_safe_contract(PathWalkWord(nodes.ptr[n].aux2)) {
+            if nodes.ptr[n].aux =? int32(int64(CV.refinement)) and ut_safe_contract(PathWalkWord(node_aux2(nodes.ptr[n].op_ext))) {
                 if value not=? 0 {ut_visit(value)}
                 # (a fallback that leaves, as `?? return none` or `?? continue`, stores nothing)
                 if ut_first and not pos_in_lib(nodes.ptr[n].pos) and not ut_safe(value) and not ut_exits(ut_strip(value)) {ut_contract_failures.push(value)}
@@ -1063,7 +1064,7 @@ ut_visit=(n:PathWalkWord):>void=>$unsafe {
                 let m=if v_text {ut_m} else {0}
                 if o not=? 0 or m not=? 0 {ut_flow(id v)}
                 if not ut_first {return}
-                if ut_safe_used and ut_names_safe(PathWalkWord(nodes.ptr[n].a)) and nodes.ptr[n].aux2 not=? 1 and ut_safe_contract(lt) {
+                if ut_safe_used and ut_names_safe(PathWalkWord(nodes.ptr[n].a)) and node_aux2(nodes.ptr[n].op_ext) not=? 1 and ut_safe_contract(lt) {
                     ut_ls[id] |= UT_L_DECLARED
                     if not ut_safe(v) {ut_unproven(v "`{name_of(PathWalkWord(nodes.ptr[n].name))}` is declared a SafePath")}
                 }
@@ -1191,7 +1192,7 @@ ut_visit=(n:PathWalkWord):>void=>$unsafe {
         let c=PathWalkWord(nodes.ptr[n].c)
         if c not=? 0 {ut_visit(c)}
         if k not=? 'partial' {
-            let d=PathWalkWord(nodes.ptr[n].d)
+            let d=PathWalkWord(node_d(nodes.ptr[n].op_ext))
             if d not=? 0 {ut_visit(d)}
         }
     }

@@ -18,7 +18,7 @@ from p"facts_value_queries.dewy" import (fact_bound fact_truth)
 from p"facts_conditions.dewy" import (fact_implication_reads fact_implied fact_imply)
 from p"facts_forgets.dewy" import (fact_forget)
 from p"isolation_ops.dewy" import (isolation_children)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_op)
 from p"proofs.jo" import (ResultEvidence proof_active proof_calls proof_decls proof_pending proof_predicates result_active result_boolean_masks result_contracts result_syntax)
 from p"refine.jo" import (ref_predicates refine_entry)
 from p"refine_transfers.dewy" import (ref_value)
@@ -57,7 +57,7 @@ proof_term=(n:ProofWord depth:ProofWord=0):>void=>$unsafe {
         return
     }
     if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 {
-        let op=cx_token_values.ptr[ProofWord(nodes.ptr[n].op)]
+        let op=cx_token_values.ptr[ProofWord(node_op(nodes.ptr[n].op_ext))]
         if k =? 'binary' and not fact_comparison(op) and op not=? 'plus' and op not=? 'minus' and op not=? 'star' {
             fatal(nodes.ptr[n].pos "proof arguments and conditions require pure fact terms")
         }
@@ -84,7 +84,7 @@ proof_walk=(n:ProofWord body:bool statement:bool=false):>void=>$unsafe {
             proof_walk(ProofWord(nodes.ptr[n].a) true true)
             return
         }
-        if k =? 'vardecl' and nodes.ptr[n].aux2 =? 1 {
+        if k =? 'vardecl' and node_aux2(nodes.ptr[n].op_ext) =? 1 {
             proof_term(ProofWord(nodes.ptr[n].b))
             return
         }
@@ -165,7 +165,7 @@ proof_call=(n:ProofWord @s:FactState):>void=>$unsafe {
         let value=arg
         # Only the call boundary's own contract is discharged below. An
         # explicit refined cast inside the operand still owes a static check.
-        if nodes.ptr[value].kind =? 'conv' and nodes.ptr[value].aux =? int32(int64(CV.refinement)) and type_eq(ProofWord(nodes.ptr[value].aux2) fns.ptr[f].ptypes[i]) {value=ProofWord(nodes.ptr[value].a)}
+        if nodes.ptr[value].kind =? 'conv' and nodes.ptr[value].aux =? int32(int64(CV.refinement)) and type_eq(ProofWord(node_aux2(nodes.ptr[value].op_ext)) fns.ptr[f].ptypes[i]) {value=ProofWord(nodes.ptr[value].a)}
         values.push(fact_capture(value @s))
     }
     # Even in ordinary code unknown obligations cannot get a runtime fallback.

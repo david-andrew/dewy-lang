@@ -6,6 +6,7 @@ from p"checker_decl_slots.dewy" import (decl_info)
 from p"checker_signature.dewy" import (fn_sig)
 from p"error_ops.dewy" import (family_annotation value_members)
 from p"types.jo" import (prune structs type_eq types)
+from p"node_store.dewy" import (node_mod)
 
 MethodReceiverWord:type=int64<overflow='wrap'>
 
@@ -23,7 +24,7 @@ method_decl_for=(decl:MethodReceiverWord rt:MethodReceiverWord):>bool=>{
 module_of_type=(t0:MethodReceiverWord):>MethodReceiverWord=>$unsafe {
     let t=prune(t0)
     let k=types.ptr[t].kind
-    if k =? 'struct_' or k =? 'enum_' {return MethodReceiverWord(nodes.ptr[MethodReceiverWord(structs.ptr[MethodReceiverWord(types.ptr[t].st)].decl)].mod)}
+    if k =? 'struct_' or k =? 'enum_' {return MethodReceiverWord(node_mod(nodes.ptr[MethodReceiverWord(structs.ptr[MethodReceiverWord(types.ptr[t].st)].decl)].op_ext))}
     -1
 }
 

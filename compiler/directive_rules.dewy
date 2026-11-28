@@ -17,6 +17,7 @@ from p"panic_inventory.dewy" import (effect_panic_note)
 from p"proofs.jo" import (proof_active proof_decls)
 from p"util.jo" import (err_notes pos_file pos_in_lib)
 from p"source_warnings.dewy" import (warn)
+from p"node_store.dewy" import (node_sval node_with_sval)
 
 DirRuleWord:type=int64<overflow='wrap'>
 dir_find_scan=(setting:DirRuleWord p:DirRuleWord skip:DirRuleWord):>int64=>{
@@ -90,12 +91,12 @@ dir_panics_demanded=():>bool=>{
 dir_apply_rows=(first:DirRuleWord):>void=>$unsafe {
     if not dir_rows_any {return}
     loop f in [first..nodes.length) {
-        if nodes.ptr[f].kind not=? 'fn_' or nodes.ptr[f].sval not=? 0 {continue}
+        if nodes.ptr[f].kind not=? 'fn_' or node_sval(nodes.ptr[f].op_ext) not=? 0 {continue}
         let body=DirRuleWord(nodes.ptr[f].b)
         let p=if body not=? 0 {nodes.ptr[body].pos} else {nodes.ptr[f].pos}
         let i=dir_find(dir_name_row p)
         if i <? 0 or dir_scopes[i].value <=? 0 {continue}
-        nodes.ptr[f].sval=int32(dir_scopes[i].value)
+        nodes.ptr[f].op_ext=node_with_sval(nodes.ptr[f].op_ext (int32(dir_scopes[i].value)))
         dir_row_scopes[f]=i
         effects_active=true
         loop entry in effect_syntax[dir_scopes[i].value] {

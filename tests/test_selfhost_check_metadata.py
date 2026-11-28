@@ -33,13 +33,13 @@ main = ():
     globals = [Global(init=i32(init))]; syms = [Sym()]
     s = new_sym(int(nodes[a].name), .const_, 0, 0); push_scope_sym(int(nodes[a].name), s)
     print("size-const:{fixed_size_arg(tn)}")
-    nodes[a].sval = 1; print("size-string:{fixed_size_arg(tn)}"); nodes[a].sval = 0
+    nodes[a].op_ext = node_with_sval(nodes[a].op_ext, i32(1)); print("size-string:{fixed_size_arg(tn)}"); nodes[a].op_ext = node_with_sval(nodes[a].op_ext, i32(0))
     set_list(a, [init]); print("size-nested:{fixed_size_arg(tn)}"); set_list(a, [])
     nodes[a].kind = .ident; print("size-value:{fixed_size_arg(tn)}")
     decl = mk(.fn_, 0); nodes[decl].name = i32(intern("render"))
     attrs = mk(.block, 0); nodes[decl].c = i32(attrs)
     attr = mk(.call, 0); nodes[attr].name = i32(intern("no_web"))
-    msg = mk(.str_lit, 0); nodes[msg].sval = i32(intern("has no browser effect")); nodes[attr].a = i32(msg)
+    msg = mk(.str_lit, 0); nodes[msg].op_ext = node_with_sval(nodes[msg].op_ext, i32(i32(intern("has no browser effect")))); nodes[attr].a = i32(msg)
     set_list(attrs, [attr]); no_web_check(decl, 0)
     no_web_check(decl, mkpos(0, 1)); no_web_check(decl, mkpos(0, 1))
     print("done")

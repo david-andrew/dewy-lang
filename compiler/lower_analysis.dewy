@@ -23,6 +23,7 @@ from p"effect_lattice.dewy" import (place_base)
 from p"place_routes.dewy" import (place_path)
 from p"lower_helpers.dewy" import (value_helper_calls)
 from p"effect_control.dewy" import (effects_demand_late)
+from p"node_store.dewy" import (node_d node_list2 node_nlist2 node_op)
 # Mutation and alias queries; shared state has one owner in lower.jo.
 LAWord:type=int64<overflow='wrap'>
 shares_mut_root=(a:LAWord args:array<int64> mutmask:LAWord callee:LAWord=-2):>bool=>$unsafe {
@@ -327,7 +328,7 @@ mentions_var=(n:LAWord r:LAWord):>bool=>$unsafe {
     let child_b:LAWord=LAWord(nodes.ptr[n].b)
     # (kid_c and kid_d, with the kind in hand)
     let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
-    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(node_d(nodes.ptr[n].op_ext))}
     if mentions_var(child_a r) {return true}
     if mentions_var(child_b r) {return true}
     if mentions_var(child_c r) {return true}
@@ -361,7 +362,7 @@ has_call=(n:LAWord):>bool=>$unsafe {
     let child_b:LAWord=LAWord(nodes.ptr[n].b)
     # (kid_c and kid_d, with the kind in hand)
     let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
-    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(node_d(nodes.ptr[n].op_ext))}
     if has_call(child_a) {return true}
     if has_call(child_b) {return true}
     if has_call(child_c) {return true}
@@ -398,7 +399,7 @@ index_stable=(n:LAWord rhs:LAWord):>bool=>$unsafe {
     if k =? 'int_lit' {return true}
     if k =? 'ident' {return nodes.ptr[n].aux =? int32(1) and mut_plain_root(n) and not may_write_root(rhs n)}
     if k not=? 'binary' or not is_int(ntype(n)) or prune(ntype(n)) =? T_MATH_INT or int_policy(ntype(n)) not=? 0 {return false}
-    let op=cx_token_values.ptr[LAWord(nodes.ptr[n].op)]
+    let op=cx_token_values.ptr[LAWord(node_op(nodes.ptr[n].op_ext))]
     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'amp' and op not=? 'pipe' and op not=? 'caret' and op not=? 'kw_xor' {return false}
     return index_stable(LAWord(nodes.ptr[n].a) rhs) and index_stable(LAWord(nodes.ptr[n].b) rhs)
 }
@@ -438,7 +439,7 @@ mentions_local=(n:LAWord l:LAWord):>bool=>$unsafe {
         let child_c=LAWord(nodes.ptr[n].c)
         if child_c >? 0 and mentions_local(child_c l) {return true}
         if k not=? 'partial' {
-            let child_d=LAWord(nodes.ptr[n].d)
+            let child_d=LAWord(node_d(nodes.ptr[n].op_ext))
             if child_d >? 0 and mentions_local(child_d l) {return true}
         }
     }
@@ -449,9 +450,9 @@ mentions_local=(n:LAWord l:LAWord):>bool=>$unsafe {
             if mentions_local(LAWord(lists.ptr[l0 + i]) l) {return true}
         }
     }
-    let nk2=LAWord(nodes.ptr[n].nlist2)
+    let nk2=LAWord(node_nlist2(nodes.ptr[n].op_ext))
     if nk2 >? 0 {
-        let l2=LAWord(nodes.ptr[n].list2)
+        let l2=LAWord(node_list2(nodes.ptr[n].op_ext))
         loop i in [0..nk2) {
             if mentions_local(LAWord(lists.ptr[l2 + i]) l) {return true}
         }
@@ -537,7 +538,7 @@ mwr_walk=(n:LAWord rn:LAWord place:LAWord glob:bool mutparam:bool rsym:LAWord):>
         let child_c=LAWord(nodes.ptr[n].c)
         if child_c >? 0 and mwr_walk(child_c rn place glob mutparam rsym) {return true}
         if k not=? 'partial' {
-            let child_d=LAWord(nodes.ptr[n].d)
+            let child_d=LAWord(node_d(nodes.ptr[n].op_ext))
             if child_d >? 0 and mwr_walk(child_d rn place glob mutparam rsym) {return true}
         }
     }
@@ -549,9 +550,9 @@ mwr_walk=(n:LAWord rn:LAWord place:LAWord glob:bool mutparam:bool rsym:LAWord):>
             if ci >? 0 and mwr_walk(ci rn place glob mutparam rsym) {return true}
         }
     }
-    let nk2=LAWord(nodes.ptr[n].nlist2)
+    let nk2=LAWord(node_nlist2(nodes.ptr[n].op_ext))
     if nk2 >? 0 {
-        let l2=LAWord(nodes.ptr[n].list2)
+        let l2=LAWord(node_list2(nodes.ptr[n].op_ext))
         loop i in [0..nk2) {
             let ci=LAWord(lists.ptr[l2 + i])
             if ci >? 0 and mwr_walk(ci rn place glob mutparam rsym) {return true}
@@ -602,7 +603,7 @@ calls_leave=(n:LAWord rn:LAWord written:bool):>bool=>$unsafe {
     let child_b:LAWord=LAWord(nodes.ptr[n].b)
     # (kid_c and kid_d, with the kind in hand)
     let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
-    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(node_d(nodes.ptr[n].op_ext))}
     if not calls_leave(child_a rn written) {return false}
     if not calls_leave(child_b rn written) {return false}
     if not calls_leave(child_c rn written) {return false}
@@ -734,7 +735,7 @@ fw_scan=(n:LAWord @w:FnWrites):>void=>$unsafe {
     let c=kid_c(n)
     let d=kid_d(n)
     let n1=LAWord(nodes[n].nlist)
-    let n2=LAWord(nodes[n].nlist2)
+    let n2=LAWord(node_nlist2(nodes[n].op_ext))
     if a >? 0 {fw_scan(a @w);}
     if b >? 0 {fw_scan(b @w);}
     if c >? 0 {fw_scan(c @w);}
@@ -914,7 +915,7 @@ lm_change_at=(n:LAWord key:LAWord):>LAWord=>$unsafe {
     if r =? 0 {r=lm_change_at(LAWord(nodes.ptr[n].b) key)}
     if r =? 0 and k not=? 'for_' {
         r=lm_change_at(LAWord(nodes.ptr[n].c) key)
-        if r =? 0 and k not=? 'partial' {r=lm_change_at(LAWord(nodes.ptr[n].d) key)}
+        if r =? 0 and k not=? 'partial' {r=lm_change_at(LAWord(node_d(nodes.ptr[n].op_ext)) key)}
     }
     loop i in [0..nkids(n)) {
         if r =? 0 {r=lm_change_at(kid(n i) key)}
@@ -982,7 +983,7 @@ mwh_walk=(n:LAWord allow_calls:bool):>bool=>$unsafe {
         let child_c=LAWord(nodes.ptr[n].c)
         if child_c >? 0 and mwh_walk(child_c allow_calls) {return true}
         if k not=? 'partial' {
-            let child_d=LAWord(nodes.ptr[n].d)
+            let child_d=LAWord(node_d(nodes.ptr[n].op_ext))
             if child_d >? 0 and mwh_walk(child_d allow_calls) {return true}
         }
     }
@@ -994,9 +995,9 @@ mwh_walk=(n:LAWord allow_calls:bool):>bool=>$unsafe {
             if ci >? 0 and mwh_walk(ci allow_calls) {return true}
         }
     }
-    let nk2=LAWord(nodes.ptr[n].nlist2)
+    let nk2=LAWord(node_nlist2(nodes.ptr[n].op_ext))
     if nk2 >? 0 {
-        let l2=LAWord(nodes.ptr[n].list2)
+        let l2=LAWord(node_list2(nodes.ptr[n].op_ext))
         loop i in [0..nk2) {
             let ci=LAWord(lists.ptr[l2 + i])
             if ci >? 0 and mwh_walk(ci allow_calls) {return true}

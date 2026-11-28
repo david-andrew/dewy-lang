@@ -17,6 +17,7 @@ from p"types.jo" import (T_VOID fields has_var is_union prune struct_targ struct
 from p"util.jo" import (files intern name_of pos_file)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_mod)
 
 TypeMemberWord:type=int64<overflow='wrap'>
 type_member_type=(t0:TypeMemberWord):>int64=>{
@@ -126,7 +127,7 @@ handle_outcomes=(t0:TypeMemberWord):>int64=>$unsafe {
     let si=TypeMemberWord(types.ptr[t].st)
     let decl=TypeMemberWord(structs.ptr[si].decl)
     if decl =? 0 or nodes.ptr[decl].name =? 0 or not files[pos_file(nodes.ptr[decl].pos)].is_dewy {return 0}
-    let m=TypeMemberWord(nodes.ptr[decl].mod)
+    let m=TypeMemberWord(node_mod(nodes.ptr[decl].op_ext))
     let found:TypeMemberWord=0
     loop op in ["receive" "next"] {
         if found not=? 0 {break}
@@ -141,7 +142,7 @@ handle_outcomes=(t0:TypeMemberWord):>int64=>$unsafe {
     }
     if found =? 0 {return 0}
     let saved=cx
-    ctxs.push(FnCtx(int32(new_inst(FK_INIT m "outcomes")) (-1) int32(T_VOID) false 0 nodes.ptr[decl].mod int32(check_scopes.names.length)))
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT m "outcomes")) (-1) int32(T_VOID) false 0 node_mod(nodes.ptr[decl].op_ext) int32(check_scopes.names.length)))
     cx=ctxs.length - 1
     let mark=scope_mark()
     loop j in [0..min(nkids2(found) TypeMemberWord(structs.ptr[si].ntargs))) {

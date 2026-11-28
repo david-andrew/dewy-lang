@@ -50,8 +50,8 @@ build_body = () -> int:
     loop_body = node(.block, 0, 0, 0, [typed(.assign, w, alias_ident()), node(.break_)])
     f = node(.for_, typed(.ident, v)); nodes[f].b = i32(loop_body); nodes[f].c = i32(typed(.ident, v))
     wh = node(.while_, typed(.bool_lit, T_BOOL)); nodes[wh].b = i32(node(.block, 0, 0, 0, [node(.continue_)]))
-    d = typed(.vardecl, v, inner); nodes[d].d = i32(global_ident(3))
-    nodes[d].list2 = nodes[node(.block, 0, 0, 0, [typed(.ident, v)])].list; nodes[d].nlist2 = 1
+    d = typed(.vardecl, v, inner); nodes[d].op_ext = node_with_d(nodes[d].op_ext, i32(i32(global_ident(3))))
+    nodes[d].op_ext = node_with_list2(nodes[d].op_ext, i32(nodes[node(.block, 0, 0, 0, [typed(.ident, v)])].list)); nodes[d].op_ext = node_with_nlist2(nodes[d].op_ext, i32(1))
     node(.block, 0, 0, 0, [d, lam, f, wh, node(.return_, global_ident(1)), node(.fn_, typed(.ident, v))])
 '''
 

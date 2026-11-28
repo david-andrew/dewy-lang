@@ -3,7 +3,7 @@ $runtime_checks
 # Resolve only requested syntax. O(visited syntax + emitted atoms), apart from
 # demanded binder/name lookup and semantic host work; preserve depth/atom limits.
 # Borrow headers across reentrant checking/evaluation; never retain elements.
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_op)
 from p"checker_tokens.dewy" import Tok
 from p"checker_types.dewy" import TypeInfo
 from p"checker_state.dewy" import RefineBindings
@@ -60,10 +60,10 @@ ref_resolve_term=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string>
         return host.value_term(n)
     }
     if k =? 'int_lit' {return RefTerm(kind=1 value=nodes[n].ival unsigned=(nodes[n].flags & 2097152) not=? 0)}
-    if k =? 'binary' and (int64(nodes[n].op) =? REF_RESOLVE_PLUS or int64(nodes[n].op) =? REF_RESOLVE_MINUS) {
+    if k =? 'binary' and (int64(node_op(nodes[n].op_ext)) =? REF_RESOLVE_PLUS or int64(node_op(nodes[n].op_ext)) =? REF_RESOLVE_MINUS) {
         let left=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[n].a) binder)
         let right=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[n].b) binder)
-        let minus=int64(nodes[n].op) =? REF_RESOLVE_MINUS
+        let minus=int64(node_op(nodes[n].op_ext)) =? REF_RESOLVE_MINUS
         let base=ref_query_prune(@types bindings.base_type)
         if left.unsigned or right.unsigned or (types[base].kind =? 'int_' and not types[base].sign) {
             host.fatal(nodes[n].pos "a refinement offset needs a signed integer representation")
@@ -109,7 +109,7 @@ ref_resolve_atoms=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string
     if nodes[n].kind =? 'not_' {
         let inner=int64(nodes[n].a)
         if nodes[inner].kind =? 'binary' {
-            let op=ref_resolve_op(nodes[inner].op)
+            let op=ref_resolve_op(node_op(nodes[inner].op_ext))
             if op not=? 'eof' {
                 let left=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[inner].a) binder)
                 let right=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[inner].b) binder)
@@ -119,10 +119,10 @@ ref_resolve_atoms=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string
         }
     }
     if nodes[n].kind not=? 'binary' {host.fatal(nodes[n].pos "unsupported refinement predicate; expected an integer comparison")}
-    let op=ref_resolve_op(nodes[n].op)
+    let op=ref_resolve_op(node_op(nodes[n].op_ext))
     let a=int64(nodes[n].a)
     let b=int64(nodes[n].b)
-    if int64(nodes[n].op) =? REF_RESOLVE_KW_IN and nodes[b].kind =? 'range' {
+    if int64(node_op(nodes[n].op_ext)) =? REF_RESOLVE_KW_IN and nodes[b].kind =? 'range' {
         let lo=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[b].a) binder)
         let hi=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[b].b) binder)
         if lo.kind not=? 1 or hi.kind not=? 1 {host.fatal(nodes[b].pos "refinement range needs literal bounds")}
@@ -133,7 +133,7 @@ ref_resolve_atoms=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string
     }
     if op =? 'eof' {host.fatal(nodes[n].pos "unsupported refinement predicate; expected an integer comparison")}
     if nodes[a].kind =? 'binary' {
-        let earlier=ref_resolve_op(nodes[a].op)
+        let earlier=ref_resolve_op(node_op(nodes[a].op_ext))
         if earlier not=? 'eof' {
             if not ((earlier =? 'lt' or earlier =? 'le') and (op =? 'lt' or op =? 'le') or (earlier =? 'gt' or earlier =? 'ge') and (op =? 'gt' or op =? 'ge')) {
                 host.fatal(nodes[n].pos "refinement comparison chain must have one direction")

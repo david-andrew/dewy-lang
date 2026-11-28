@@ -3,7 +3,7 @@ $runtime_checks
 
 from p"lower_primitives.dewy" import (e_gaddr global_addr_off rt rt_global)
 from p"lower_closures.dewy" import (env_layout)
-from p"node_store.dewy" import (NK)
+from p"node_store.dewy" import (NK node_aux2)
 from p"checker_state.dewy" import (SK)
 from p"partition.jo" import (partition_mode)
 from p"exact_reset_loop.jo" import (exr_fast exr_locals)
@@ -212,7 +212,7 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
     let body:LFnWord=LFnWord(fns.ptr[f].body)
     loop i in [0..nkids(body)) {
         let s=kid(body i)
-        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if nodes.ptr[s].kind not=? 'vardecl' or node_aux2(nodes.ptr[s].op_ext) not=? 1 {break}
         if nkids(s) >? 0 or has_flag(s NF_GLOBAL) {continue}
         let l:LFnWord=LFnWord(nodes.ptr[s].sym)
         if l <? 0 {continue}

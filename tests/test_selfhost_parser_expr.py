@@ -42,7 +42,7 @@ main = ():
         print("case:{text}:root:{root}:end:{int(pk())}:nodes:{nodes.len()}")
         loop i in [1..nodes.len()):
             n = nodes[i]
-            print("node:{i}:{int(n.kind)}:{n.op}:{n.a}:{n.b}:{n.c}:{n.name}:{n.ival}:{n.flags}:{n.aux}:{n.aux2}:{n.nlist}")
+            print("node:{i}:{int(n.kind)}:{node_op(n.op_ext)}:{n.a}:{n.b}:{n.c}:{n.name}:{n.ival}:{n.flags}:{n.aux}:{node_aux2(n.op_ext)}:{n.nlist}")
 '''
 
 

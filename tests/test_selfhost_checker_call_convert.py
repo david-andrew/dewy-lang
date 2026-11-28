@@ -24,7 +24,7 @@ is_fn_type = (t: int) -> bool: tkind(t) == .fn_
 bundled_bigint_type = (t: int) -> bool: false
 word_rational_source = (a: int, t: int) -> bool: false
 decimal_literal_tree = (a: int) -> bool: nodes[a].kind == .float_lit
-oversized_literal = (a: int) -> bool: nodes[a].aux2 == 101
+oversized_literal = (a: int) -> bool: node_aux2(nodes[a].op_ext) == 101
 dewy_set_literal = (a: int) -> bool: false
 is_dewy_set_type = (t: int) -> bool: false
 variant_enum = (t: int, name: int) -> int: t
@@ -39,7 +39,7 @@ is_map_type = (t: int) -> bool: tkind(t) == .struct_ and types[t].bits == 91
 dewy_positional_fits = (a: int, t: int) -> bool: true
 dewy_record_target = (t: int) -> int: 0
 dewy_record_spread_entries = (n: int, expected: int, ss: mut int[], capture: bool) -> int[]: kids(n)
-charlike = (a: int) -> bool: nodes[a].aux2 == 102
+charlike = (a: int) -> bool: node_aux2(nodes[a].op_ext) == 102
 union_target = (a: int, from: int, t: int) -> int: 0
 call_string_cost = (a: int, p: int, sp: int, bs: mut int[]) -> int: 2
 call_refined_literal_cost = (a: int, p: int) -> int: 0
@@ -94,7 +94,7 @@ JO['sibling_types.jo'] = 'sibling_array_source = (a: int, from: int, elem: int) 
 JO['partition.jo'] = 'partition_active = false\npartition_slice = (a: int) -> bool: true\n'
 JO['expr.jo'] += r'''
 call_argument_error = (kind: int, a: int, pt: int): print("argument-error:{kind}"); exit(34)
-written_at = (a: int) -> bool: nodes[a].aux2 == 103
+written_at = (a: int) -> bool: node_aux2(nodes[a].op_ext) == 103
 check_place = (a: int, mutating: bool): events.push("place:{a}:{mutating}")
 coerce = (a: int, pt: int) -> int: events.push("coerce:{a}:{pt}"); nodes[a].type = i32(pt); pt
 path_narrows = 0
@@ -220,7 +220,7 @@ def test_checker_call_convert_error(compiler, tmp_path):  # noqa: F811
 
 @pytest.mark.parametrize('setup,kind', [
     ('arg_finish_rest(x, T_INT, true)', 2),
-    ('nodes[x].flags |= 1; nodes[x].aux2 = 103; arg_finish_rest(x, T_INT, false)', 3),
+    pytest.param('nodes[x].flags |= 1; nodes[x].op_ext = node_with_aux2(nodes[x].op_ext, i32(103)); arg_finish_rest(x, T_INT, false)', 3, id='nodes[x].flags |= 1; nodes[x].aux2 = 103; arg_finish_rest(x, T_INT, false)-3'),
     ('nodes[x].flags |= 129; arg_finish_rest(x, T_FLOAT, true)', 4),
 ])
 def test_checker_call_argument_errors(compiler, tmp_path, setup, kind):  # noqa: F811

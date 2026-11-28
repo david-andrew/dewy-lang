@@ -40,7 +40,7 @@ from p"host_binds.jo" import (ref_resolve_host ref_fields_host ref_projection_ho
 from p"lower_group.dewy" import (gen_expr)
 from p"lower_storage.dewy" import (arr_len release endc iff)
 from p"math_ops.dewy" import (math_call math_word)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_aux2 node_op node_sval node_with_aux2 node_with_op)
 from p"refine.jo" import (RefArrayCall ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_spans refine_bindings refine_owners refine_requests str_sets total_literals ref_pair_hints ref_nd_receivers ref_pair_after ref_self_direct ref_self_shrinks ref_holder_elems refine_arg_target refine_active ref_narrowing ref_sib_sums str_set_types)
 from p"refine_transfers.dewy" import (ref_assume ref_value)
 from p"refine_metadata.dewy" import (is_total_dict ref_dependent_ancestor ref_interval ref_place_alias refine_storage representation_type str_set_of ref_safe_path_ancestor ref_dependent_record ref_storage_contract ref_repr_match ref_has_formals mk_refined ref_intern)
@@ -77,7 +77,7 @@ total_literal_check=(n:RefineRareWord t:RefineRareWord):>void=>$unsafe {
     let given:array<string>=[]
     loop pair in kids(n) {
         let key=kid_lit(RefineRareWord(nodes.ptr[pair].a))
-        if nodes.ptr[key].kind =? 'str_lit' {given.push("'{name_of(RefineRareWord(nodes.ptr[key].sval))}'")} else if nodes.ptr[key].kind =? 'int_lit' {given.push("{nodes.ptr[key].ival}")}
+        if nodes.ptr[key].kind =? 'str_lit' {given.push("'{name_of(RefineRareWord(node_sval(nodes.ptr[key].op_ext)))}'")} else if nodes.ptr[key].kind =? 'int_lit' {given.push("{nodes.ptr[key].ival}")}
         else if nodes.ptr[key].kind =? 'unary' and nodes.ptr[kid_lit(RefineRareWord(nodes.ptr[key].a))].kind =? 'int_lit' {given.push("{-nodes.ptr[kid_lit(RefineRareWord(nodes.ptr[key].a))].ival}")} else {fatal(nodes.ptr[RefineRareWord(nodes.ptr[pair].a)].pos "a totaldict literal's keys are literals, so every key is seen to be there")}
     }
     let missing:array<string>=[]
@@ -114,7 +114,7 @@ total_const=(n:RefineRareWord t:RefineRareWord):>bool=>$unsafe {
     let given:array<string>=[]
     loop pair in kids(init) {
         let key=kid_lit(RefineRareWord(nodes.ptr[pair].a))
-        if nodes.ptr[key].kind =? 'str_lit' {given.push("'{name_of(RefineRareWord(nodes.ptr[key].sval))}'")} else if nodes.ptr[key].kind =? 'dotname' and str_set_of(ntype(key)) not=? 0 {given.push("'{str_sets[str_set_of(ntype(key))][RefineRareWord(nodes.ptr[key].aux)]}'")}
+        if nodes.ptr[key].kind =? 'str_lit' {given.push("'{name_of(RefineRareWord(node_sval(nodes.ptr[key].op_ext)))}'")} else if nodes.ptr[key].kind =? 'dotname' and str_set_of(ntype(key)) not=? 0 {given.push("'{str_sets[str_set_of(ntype(key))][RefineRareWord(nodes.ptr[key].aux)]}'")}
         else if nodes.ptr[key].kind =? 'int_lit' {given.push("{nodes.ptr[key].ival}")}
     }
     loop key in keys {
@@ -244,7 +244,7 @@ str_set_coerce=(n:RefineRareWord t:RefineRareWord proven:bool=false):>int64=>$un
     if source =? id {return n}
     let e=kid_lit(n)
     if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].aux not=? 1 {
-        let text=name_of(RefineRareWord(nodes.ptr[e].sval))
+        let text=name_of(RefineRareWord(node_sval(nodes.ptr[e].op_ext)))
         let k=str_sets[id].index_of(text) ?? (-1)
         if k <? 0 {fatal(pos "'{text}' is not one of {str_set_text(id)}")}
         let moved=str_set_const(id k pos)
@@ -318,7 +318,7 @@ str_set_read=(n:RefineRareWord a:RefineRareWord t:RefineRareWord expected:Refine
     loop k >=? 0 {
         let same=bc_bin('eq' bc_ident(held pos) bc_str(str_sets[id][k] pos) pos)
         out=str_set_choice(same str_set_const(id k pos) out pos)
-        nodes.ptr[out].aux2=(-8)
+        nodes.ptr[out].op_ext=node_with_aux2(nodes.ptr[out].op_ext (-8))
         k -= 1
     }
     let moved=bc_block([bc_let(held a pos) bc_stmt(out pos)] pos)
@@ -349,7 +349,7 @@ str_set_text_of=(n:RefineRareWord):>void=>$unsafe {
     let c=mk('conv' pos)
     nodes.ptr[c].a=int32(inner)
     nodes.ptr[c].aux=int32(int64(CV.set_text))
-    nodes.ptr[c].aux2=int32(id)
+    nodes.ptr[c].op_ext=node_with_aux2(nodes.ptr[c].op_ext (int32(id)))
     nodes.ptr[c].type=int32(T_STR)
     add_flag(c NF_CHECKED)
     nodes.ptr[n]=nodes.ptr[c]
@@ -730,7 +730,7 @@ ref_self_value=(value:RefineRareWord t:RefineRareWord grown:RefineRareWord place
     let stored=ref_self_grown(t grown)
     if representation_type(ntype(value)) =? RefineRareWord(types.ptr[stored].elem) {
         wrap_conv(value CV.refinement RefineRareWord(types.ptr[stored].elem))
-        nodes.ptr[value].aux2=int32(stored)
+        nodes.ptr[value].op_ext=node_with_aux2(nodes.ptr[value].op_ext (int32(stored)))
         let owner=if cx >=? 0 {RefineRareWord(ctxs[cx].inst)} else {0}
         refine_requests.push(FactRequest(value owner))
         refine_owners[owner]=true
@@ -763,7 +763,7 @@ ref_self_store=(statement:RefineRareWord element:RefineRareWord):>int64=>$unsafe
     # (the value is checked before the selector runs: a selector must leave the array alone)
     if not ref_simple_selector(RefineRareWord(nodes.ptr[lhs].b)) {fatal(nodes.ptr[lhs].pos ref_selector_message)}
     let result=statement
-    if nodes.ptr[statement].op =? int32(47) {
+    if node_op(nodes.ptr[statement].op_ext) =? int32(47) {
         assign_value(statement representation_type(element) 1);
         nodes.ptr[statement].b=int32(refine_coerce(RefineRareWord(nodes.ptr[statement].b) element))
     }
@@ -859,7 +859,7 @@ ref_field_store=(statement:int64 target:int64):>int64=>$unsafe {
     let path=index_update_path(parent)
     # A compound read captures selectors before evaluating the RHS. A plain
     # store evaluates its RHS first, exactly as gen_assign does. (47: the frozen Tok.assign)
-    let compound=nodes.ptr[statement].op not=? int32(47)
+    let compound=node_op(nodes.ptr[statement].op_ext) not=? int32(47)
     if compound {
         let j=RefineRareWord(path.length) - 1
         loop j >=? 0 {
@@ -912,7 +912,7 @@ ref_field_store=(statement:int64 target:int64):>int64=>$unsafe {
     let store=mk('assign' pos)
     nodes.ptr[store].a=int32(parent)
     nodes.ptr[store].b=int32(ctor)
-    nodes.ptr[store].op=int32(47)
+    nodes.ptr[store].op_ext=node_with_op(nodes.ptr[store].op_ext (int32(47)))
     store=check_assign(store)
     before.push(store)
     bc_block(before pos)
@@ -1259,12 +1259,12 @@ refine_coerce=(n:int64 target:int64):>int64=>$unsafe {
         if prune(ntype(n)) =? t {return n}
         coerce(n RefineRareWord(types.ptr[t].elem));
         wrap_conv(n CV.refinement RefineRareWord(types.ptr[t].elem))
-        nodes.ptr[n].aux2=int32(t)
+        nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32(t)))
         nodes.ptr[n].ival=1
         return n
     }
     coerce(n RefineRareWord(types.ptr[t].elem));
-    if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) and nodes.ptr[n].aux2 =? int32(t) {return n}
+    if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) and node_aux2(nodes.ptr[n].op_ext) =? int32(t) {return n}
     let owner=if cx >=? 0 {RefineRareWord(ctxs.ptr[cx].inst)} else {0}
     # A contract on formals is checked against the arguments of a call to its
     # function, or against the entry of the function itself. Elsewhere (a
@@ -1272,7 +1272,7 @@ refine_coerce=(n:int64 target:int64):>int64=>$unsafe {
     # value keeps its base type, and the type's contract is not assumed for it.
     if ref_has_formals(t) and t not=? refine_arg_target and not ref_signature_has(owner t) and not ref_generator_yield(owner t) {return n}
     wrap_conv(n CV.refinement RefineRareWord(types.ptr[t].elem))
-    nodes.ptr[n].aux2=int32(t)
+    nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext (int32(t)))
     if dewy_at(nodes.ptr[n].pos) {int_domain_conversion(n t)}
     refine_requests.push(FactRequest(n owner))
     refine_owners[owner]=true

@@ -58,6 +58,7 @@ from p"util.jo" import (err_notes files intern name_of pos_file pos_in_lib pos_o
 from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_aux2 node_op node_sval node_with_op)
 
 AssignHookWord:type=int64<overflow='wrap'>
 # A function body's sink: an inferred result may be a pack, a written one is one value,
@@ -158,7 +159,7 @@ block_direct=(s:int64):>void=>{
 block_final=(b:int64 i:int64 expected:int64 sink_mode:int64):>int64=>$unsafe {
     let s=kid(b i)
     # A trailing spawn is a statement even in a value-producing helper body.
-    if not value_capable(s) or nodes.ptr[s].kind =? 'exprstmt' and nodes.ptr[AssignHookWord(nodes.ptr[s].a)].kind =? 'call' and nodes.ptr[AssignHookWord(nodes.ptr[s].a)].aux2 =? 17 {return -1}
+    if not value_capable(s) or nodes.ptr[s].kind =? 'exprstmt' and nodes.ptr[AssignHookWord(nodes.ptr[s].a)].kind =? 'call' and node_aux2(nodes.ptr[AssignHookWord(nodes.ptr[s].a)].op_ext) =? 17 {return -1}
     let collecting=sink_mode =? SINK_BODY or sink_mode =? SINK_ARM or sink_mode =? SINK_BIND
     let counted=sink_mode =? SINK_BODY or sink_mode =? SINK_BIND
     if nodes.ptr[s].kind =? 'if_' or nodes.ptr[s].kind =? 'iflet' {
@@ -305,7 +306,7 @@ assign_element=(s:int64):>int64=>{
 }
 assign_index=(s:int64 bt:int64 code:int64):>int64=>$unsafe {
     let lhs=AssignHookWord(nodes.ptr[s].a)
-    let op=AssignHookWord(nodes.ptr[s].op)
+    let op=AssignHookWord(node_op(nodes.ptr[s].op_ext))
     if code =? 6 {return tuple_slot_write(s bt)}
     if code =? 1 {
         dewy_index_ranges(lhs bt)
@@ -386,7 +387,7 @@ assign_index=(s:int64 bt:int64 code:int64):>int64=>$unsafe {
                 loop x in ixs {cl.push(clone(x))}
                 set_list(get cl)
             }
-            if nodes.ptr[s].sval not=? 0 or has_flag(s NF_BROADCAST) {
+            if node_sval(nodes.ptr[s].op_ext) not=? 0 or has_flag(s NF_BROADCAST) {
                 let gt=check_expr(get 0)
                 get=last_checked
                 add_flag(get NF_CHECKED)
@@ -460,7 +461,7 @@ assign_write=(s:int64 rt:int64 lt:int64 code:int64):>int64=>$unsafe {
 # float given to an integer (other: its type)
 assign_update=(s:int64 lt:int64 other:int64 code:int64):>int64=>$unsafe {
     let lhs=AssignHookWord(nodes.ptr[s].a)
-    let op=AssignHookWord(nodes.ptr[s].op)
+    let op=AssignHookWord(node_op(nodes.ptr[s].op_ext))
     if code =? 1 {
         # The checked replacement reads and writes one selected element.
         # Capture selectors before the old-value read, including scalar names
@@ -480,7 +481,7 @@ assign_update=(s:int64 lt:int64 other:int64 code:int64):>int64=>$unsafe {
         add_flag(rd NF_CHECKED)
         let value=compound_checked(s rd AssignHookWord(nodes.ptr[s].b) representation_type(lt))
         nodes.ptr[s].b=int32(coerce(value lt))
-        nodes.ptr[s].op=int32(47)
+        nodes.ptr[s].op_ext=node_with_op(nodes.ptr[s].op_ext (int32(47)))
         if before.length >? 0 {return bc_block([before... copy_checked(s)] nodes.ptr[s].pos)}
         return s
     }
@@ -534,7 +535,7 @@ assign_update=(s:int64 lt:int64 other:int64 code:int64):>int64=>$unsafe {
         let rd=copy_place(lhs)
         add_flag(rd NF_CHECKED)
         nodes.ptr[s].b=int32(compound_checked(s rd AssignHookWord(nodes.ptr[s].b) lt))
-        nodes.ptr[s].op=int32(47)
+        nodes.ptr[s].op_ext=node_with_op(nodes.ptr[s].op_ext (int32(47)))
         if pre.length =? 0 {return s}
         # (the statement, moved, after the index's variables)
         let c=nodes.length
@@ -545,8 +546,8 @@ assign_update=(s:int64 lt:int64 other:int64 code:int64):>int64=>$unsafe {
     }
     if code =? 6 {
         let rb=AssignHookWord(nodes.ptr[s].b)
-        if (name_of(AssignHookWord(nodes.ptr[rb].sval)) as array<uint8>).length =? 1 and not pos_in_lib(nodes.ptr[s].pos) {
-            let ch=name_of(AssignHookWord(nodes.ptr[rb].sval))
+        if (name_of(AssignHookWord(node_sval(nodes.ptr[rb].op_ext))) as array<uint8>).length =? 1 and not pos_in_lib(nodes.ptr[s].pos) {
+            let ch=name_of(AssignHookWord(node_sval(nodes.ptr[rb].op_ext)))
             warn(nodes.ptr[rb].pos "\"{ch}\" here is the character code of {ch}, not the number: write {ch} without quotes for the number")
         }
         return 0

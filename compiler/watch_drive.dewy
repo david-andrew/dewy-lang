@@ -25,6 +25,7 @@ from p"util.jo" import (more_errors name_of)
 from p"watch.jo" import (WATCH_DATA_RESERVE w32_dir_count w32_line w_added w_args w_cache w_changed w_dirs w_enter w_errors w_ext w_failed_path w_from w_kept w_out w_patch w_pid w_r w_ready w_reset w_stdin_done w_to w_watched w_wds w_write_err watch_first wm_files wm_game wm_loop wm_top)
 from p"watch_ops.dewy" import (w32_files_changed w32_note_file w32_sources_in w_base w_dir w_i64 w_log watch_read_failed_inputs watch_read_result watch_write_result wm_clear wm_files_collect wp_end wp_put)
 from p"watch_sys.jo" import (ws_test_signals)
+from p"node_store.dewy" import (node_fval node_sval)
 
 DriveWord:type=int64<overflow='wrap'>
 watch_main=(path:string args:array<string>):>void=>{
@@ -422,13 +423,13 @@ wc_default=(f:DriveWord np:DriveWord):>void=>$unsafe {
     let off=DriveWord(fields.ptr[f].offset)
     let tk=types.ptr[t].kind
     let v=0.0
-    if k =? 'int_lit' {v=float64(nodes.ptr[d].ival)} else if k =? 'float_lit' {v=nodes.ptr[d].fval}
+    if k =? 'int_lit' {v=float64(nodes.ptr[d].ival)} else if k =? 'float_lit' {v=node_fval(nodes.ptr[d].op_ext)}
     else if k =? 'bool_lit' and tk =? 'bool_' {
         e_store(np off e_iconst(nodes.ptr[d].ival) 1);
         return
     }
     else if k =? 'str_lit' and tk =? 'str_' {
-        e_store(np off e_daddr(str_data(name_of(DriveWord(nodes.ptr[d].sval)))) 8);
+        e_store(np off e_daddr(str_data(name_of(DriveWord(node_sval(nodes.ptr[d].op_ext))))) 8);
         return
     }
     else {return}

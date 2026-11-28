@@ -67,7 +67,7 @@ main = ():
     # Conversions check an unchecked operand again, with a fixed-width hint when marked.
     c = node(.conv, operand(T_INT)); nodes[c].type = i32(T_I32)
     run(c)
-    c = node(.conv, operand(T_INT)); nodes[c].type = i32(T_I32); nodes[c].aux2 = 1
+    c = node(.conv, operand(T_INT)); nodes[c].type = i32(T_I32); nodes[c].op_ext = node_with_aux2(nodes[c].op_ext, i32(1))
     replacement = operand(T_I32); xp_replacement = replacement
     run(c)
     assert(nodes[c].a == i32(replacement))

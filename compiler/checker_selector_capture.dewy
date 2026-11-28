@@ -9,6 +9,7 @@ from p"checks_builders.dewy" import (bc_block bc_ident bc_let)
 from p"checks_thin.dewy" import (check_stmt)
 from p"expr.jo" import (bc_count)
 from p"util.jo" import (intern)
+from p"node_store.dewy" import (node_op)
 
 SelectorCaptureWord:type=int64<overflow='wrap'>
 SelectorCaptureI32:type=int32<overflow='wrap'>
@@ -28,7 +29,7 @@ index_update_path=(n:SelectorCaptureWord):>array<int64>=>{
 # can run code is evaluated exactly once, from the root outward (left to
 # right), before both: `d[f()]["x"] += 1` calls f once. O(path).
 compound_selector_capture=(s:SelectorCaptureWord):>SelectorCaptureWord=>{
-    if nodes[s].op =? 47 or has_flag(s NF_BROADCAST) or has_flag(s NF_INDEX_CAPTURED) {return 0}
+    if node_op(nodes[s].op_ext) =? 47 or has_flag(s NF_BROADCAST) or has_flag(s NF_INDEX_CAPTURED) {return 0}
     let lhs=SelectorCaptureWord(nodes[s].a)
     if nodes[lhs].kind not=? 'index' and nodes[lhs].kind not=? 'field' {return 0}
     let pos=nodes[s].pos

@@ -28,8 +28,8 @@ dump = (label: str, decls: int[]):
         n = nodes[i]
         text = ""
         if n.kind == .str_lit or n.kind == .pair:
-            if n.sval > 0: text = show(name_of(int(n.sval)))
-        print("node:{i}:{int(n.kind)}:{n.op}:{n.a}:{n.b}:{n.c}:{n.name}:{n.sval}:{n.ival}:{n.flags}:{n.aux}:{n.aux2}:{n.list}:{n.nlist}:{text}")
+            if node_sval(n.op_ext) > 0: text = show(name_of(int(node_sval(n.op_ext))))
+        print("node:{i}:{int(n.kind)}:{node_op(n.op_ext)}:{n.a}:{n.b}:{n.c}:{n.name}:{node_sval(n.op_ext)}:{n.ival}:{n.flags}:{n.aux}:{node_aux2(n.op_ext)}:{n.list}:{n.nlist}:{text}")
 main = ():
     init_keywords()
     loop text in [

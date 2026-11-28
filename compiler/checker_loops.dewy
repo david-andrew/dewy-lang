@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"scope_joins.dewy" import (scope_join_begin scope_join_end)
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_op node_sval)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"checker_state.dewy" import (FnCtx CheckerScope)
 from p"type_inference.dewy" import tu_prune
@@ -75,7 +75,7 @@ xb_depth=():>XBWord=>$unsafe {XBWord(xb_contexts[0].ptr[xb_context[0]].loop_dept
 xb_enter=(s:XBWord):>void=>$unsafe {
     let c=xb_context[0]
     xb_contexts[0][c].loop_depth=int32<overflow='wrap'>(xb_depth() + 1)
-    let label=XBWord(xb_nodes[0].ptr[s].sval)
+    let label=XBWord(node_sval(xb_nodes[0].ptr[s].op_ext))
     if label =? 0 {return}
     loop i in [0..xb_labels[0].length) {
         if xb_labels[0].ptr[i].context =? c and xb_labels[0].ptr[i].name =? label {xb_host[0].error(s 0 5)}
@@ -83,13 +83,13 @@ xb_enter=(s:XBWord):>void=>$unsafe {
     xb_labels[0].push(LoopLabel[context=c name=label depth=xb_depth()])
 }
 xb_leave=(s:XBWord):>void=>$unsafe {
-    if xb_nodes[0].ptr[s].sval not=? 0 {xb_labels[0].pop();}
+    if node_sval(xb_nodes[0].ptr[s].op_ext) not=? 0 {xb_labels[0].pop();}
     let c=xb_context[0]
     xb_contexts[0][c].loop_depth=int32<overflow='wrap'>(xb_depth() - 1)
 }
 # A test compared with none (frozen Tok.eq 69, Tok.ne 70; the differential checks them).
 xb_none_test=(c:XBWord):>bool=>$unsafe {
-    let op=xb_nodes[0].ptr[c].op
+    let op=node_op(xb_nodes[0].ptr[c].op_ext)
     xb_nodes[0].ptr[c].kind =? 'binary' and (op =? 69 or op =? 70) and xb_nodes[0].ptr[XBWord(xb_nodes[0].ptr[c].b)].kind =? 'none_lit'
 }
 # `loop cond` and `loop let x = v` (aux 1).

@@ -15,6 +15,7 @@ from p"ownership_types.dewy" import (ownership_callable_cap ownership_type)
 from p"poly_ops.dewy" import (poly_env_layout)
 from p"ir_builders.dewy" import (e_call1 e_load)
 from p"math_ops.dewy" import (math_prepare_capture)
+from p"node_store.dewy" import (node_aux2 node_d)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LClWord:type=int64<overflow='wrap'>
 env_layout=(f:LClWord):>void=>$unsafe {
@@ -93,7 +94,7 @@ stack_closure_uses=(n:LClWord called:bool=false):>void=>$unsafe {
     stack_closure_uses(LClWord(nodes.ptr[n].b));
     if k not=? 'for_' {
         stack_closure_uses(LClWord(nodes.ptr[n].c));
-        if k not=? 'partial' {stack_closure_uses(LClWord(nodes.ptr[n].d));}
+        if k not=? 'partial' {stack_closure_uses(LClWord(node_d(nodes.ptr[n].op_ext)));}
     }
     loop i in [0..nkids(n)) {
         let arg=kid(n i)
@@ -143,7 +144,7 @@ spawn_body=(f:LClWord):>bool=>$unsafe {
     let d:LClWord=LClWord(fns.ptr[f].decl)
     # (the conversion to the task's callable type wraps the literal in place)
     loop d not=? 0 and nodes.ptr[d].kind =? 'conv' {d=LClWord(nodes.ptr[d].a)}
-    return d not=? 0 and nodes.ptr[d].kind =? 'lambda' and nodes.ptr[d].aux2 =? 17
+    return d not=? 0 and nodes.ptr[d].kind =? 'lambda' and node_aux2(nodes.ptr[d].op_ext) =? 17
 }
 spawn_owned_capture=(f:LClWord l:LClWord):>bool=>$unsafe {
     let flags:LClWord=LClWord(locals.ptr[l].flags)

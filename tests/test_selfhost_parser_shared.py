@@ -66,7 +66,7 @@ dump = (label: str):
     print("case:{label}:nodes:{nodes.len()}:lists:{lists}")
     loop i in [1..nodes.len()):
         n = nodes[i]
-        print("node:{i}:{int(n.kind)}:{n.op}:{n.a}:{n.b}:{n.c}:{n.name}:{n.sval}:{n.ival}:{n.flags}:{n.aux}:{n.aux2}:{n.list}:{n.nlist}")
+        print("node:{i}:{int(n.kind)}:{node_op(n.op_ext)}:{n.a}:{n.b}:{n.c}:{n.name}:{node_sval(n.op_ext)}:{n.ival}:{n.flags}:{n.aux}:{node_aux2(n.op_ext)}:{n.list}:{n.nlist}")
 main = ():
     init_keywords()
     mistakes = [MISTAKES]

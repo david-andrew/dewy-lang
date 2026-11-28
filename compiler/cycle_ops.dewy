@@ -11,6 +11,7 @@ from p"prelude.jo" import (dp_loaded)
 from p"util.jo" import (files name_of pos_file)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"node_store.dewy" import (node_nlist2)
 
 CycleWord:type=int64<overflow='wrap'>
 # (a Dewy module initializes after the Dewy prelude's loaded modules, as in
@@ -210,7 +211,7 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
         if mask =? 0 {continue}
         if mask <? 0 {mask=1 | 2 | 16}
         let k1:CycleWord=if mask & 16 not=? 0 {CycleWord(nodes[n].nlist)} else {0}
-        let k2:CycleWord=if mask & 32 not=? 0 {CycleWord(nodes[n].nlist2)} else {0}
+        let k2:CycleWord=if mask & 32 not=? 0 {CycleWord(node_nlist2(nodes[n].op_ext))} else {0}
         if sp + k1 + k2 + 3 >? scap {
             scap=(sp + k1 + k2 + 3) * 2
             cyc_wstack.resize(scap)

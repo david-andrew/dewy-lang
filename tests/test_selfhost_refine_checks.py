@@ -30,7 +30,7 @@ use 'expr.jo'
 new_type = (info: TypeInfo) -> int:
     id = types.len(); types.push(info); id
 check_node = (t: int) -> int:
-    n = nodes.len(); nodes.push(Node(kind=.conv, aux=i32(int(CV.refinement)), aux2=i32(t))); n
+    n = nodes.len(); nodes.push(Node(kind=.conv, aux=i32(int(CV.refinement)), op_ext=node_with_aux2(u32(0), i32(i32(t))))); n
 main = ():
     init_types()
     fact_terms = [FactTerm()]
@@ -47,7 +47,7 @@ main = ():
     n = check_node(inferred)
     ref_fact_holder = 77
     ref_check(n, inside, [], s)
-    assert(ref_fact_holder == 77 and nodes[n].aux2 == i32(scalar) and nodes[n].ival == 1)
+    assert(ref_fact_holder == 77 and node_aux2(nodes[n].op_ext) == i32(scalar) and nodes[n].ival == 1)
     assert(fact_validated.has(n) and fact_bound(s, inside).lo == 0)
     # Unknown under runtime checks: erased metadata 0, the contract is assumed afterwards.
     wide = fact_new(s, FactBound(-10, 10), FactTerm(type=T_INT))
@@ -64,12 +64,12 @@ main = ():
     other = fact_new(s, FactBound(-10, 10), FactTerm(type=T_INT))
     n = check_node(inferred)
     ref_check_held(n, other, [], s)
-    assert(fact_bound(s, other).hi == 5 and nodes[n].aux2 == i32(inferred) and not fact_validated.has(n))
+    assert(fact_bound(s, other).hi == 5 and node_aux2(nodes[n].op_ext) == i32(inferred) and not fact_validated.has(n))
     fact_speculating = 0
     dead = FactState(live=false)
     n = check_node(inferred)
     ref_check_held(n, other, [], dead)
-    assert(nodes[n].aux2 == i32(scalar) and not fact_validated.has(n))
+    assert(node_aux2(nodes[n].op_ext) == i32(scalar) and not fact_validated.has(n))
     # Established and domain-proven checks hold without a comparison.
     n = check_node(scalar)
     ref_self_active = true; ref_self_established[n] = true

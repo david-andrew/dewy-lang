@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import (Node node_mk node_set_list node_clone)
+from p"node_store.dewy" import (Node node_clone node_mk node_set_list node_with_op)
 from p"source_types.dewy" import SrcFile
 # `x in a..b` owns its rewrite into bound tests: in Dewy each of the needle and the
 # endpoints is evaluated once, in written order, before either bound is tested (no
@@ -44,7 +44,7 @@ checker_in_range_bind=(input:ptr<CheckerInRangeInput>):>XYWord=>$unsafe {
 # A comparison (frozen Tok ordinals: lt 71, le 72, ge 74).
 xy_bin=(op:int32 a:XYWord b:XYWord pos:int64):>XYWord=>$unsafe {
     let n=node_mk(@xy_nodes[0] 'binary' pos)
-    xy_nodes[0][n].op=op
+    xy_nodes[0][n].op_ext=node_with_op(xy_nodes[0][n].op_ext op)
     xy_nodes[0][n].a=int32<overflow='wrap'>(a)
     xy_nodes[0][n].b=int32<overflow='wrap'>(b)
     n

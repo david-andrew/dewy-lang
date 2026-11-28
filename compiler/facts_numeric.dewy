@@ -32,6 +32,7 @@ from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_U64 is_int prune structs type
 from p"word_overflow.dewy" import (math_word_overflow)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 from p"witness_ops.dewy" import (wit_divisor)
+from p"node_store.dewy" import (node_op node_sval)
 
 NumericWord:type=int64<overflow='wrap'>
 # A square, `x*x` of one captured value: never negative, and at least the
@@ -475,7 +476,7 @@ fact_divmod_sum_bound=(s:FactState a:NumericWord b:NumericWord):>NumericWord=>$u
 fact_divmod_kind=(n:NumericWord):>NumericWord=>$unsafe {
     if nodes.ptr[n].kind =? 'call' {return fact_floor_call(n)}
     if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 {
-        let op=cx_token(nodes.ptr[n].op)
+        let op=cx_token(node_op(nodes.ptr[n].op_ext))
         if op =? 'slash' {return 1}
         if op =? 'percent' {return 2}
     }
@@ -492,7 +493,7 @@ fact_quotient_divisor=(s:FactState q:NumericWord):>NumericWord=>$unsafe {
     if k.lo not=? k.hi or k.wide {return 0}
     let o=t.origin
     let kind:NumericWord=0
-    if nodes.ptr[o].kind =? 'binary' and nodes.ptr[o].op =? int32(61) {
+    if nodes.ptr[o].kind =? 'binary' and node_op(nodes.ptr[o].op_ext) =? int32(61) {
         # (truncating division rounds a negative dividend up)
         if not files[pos_file(nodes.ptr[o].pos)].is_dewy and fact_bound(s t.a).lo <? 0 {return 0}
         kind=1
@@ -688,7 +689,7 @@ fact_mod_call=(n:NumericWord):>bool=>$unsafe {
     if files[pos_file(nodes.ptr[NumericWord(fns.ptr[NumericWord(nodes.ptr[n].sym)].decl)].pos)].path not=? "{lib_dir}/prelude/numbers.dewy" {return false}
     let k=kid(n 2)
     if nodes.ptr[k].kind =? 'dotname' {return name_of(NumericWord(nodes.ptr[k].name)) =? "floor"}
-    nodes.ptr[k].kind =? 'str_lit' and nodes.ptr[k].aux =? 0 and nodes.ptr[k].sval >=? 0 and name_of(NumericWord(nodes.ptr[k].sval)) =? "floor"
+    nodes.ptr[k].kind =? 'str_lit' and nodes.ptr[k].aux =? 0 and node_sval(nodes.ptr[k].op_ext) >=? 0 and name_of(NumericWord(node_sval(nodes.ptr[k].op_ext))) =? "floor"
 }
 fact_extremum_call=(n:NumericWord):>bool=>{
     nkids(n) =? 2 and fact_scalar(ntype(n)) and is_int(ntype(n)) and fact_type(ntype(n)) not=? T_U64 and (fact_prelude_call(n "min") or fact_prelude_call(n "max"))
@@ -890,7 +891,7 @@ fact_power_rational=(n:NumericWord):>bool=>$unsafe {
 fact_shift_obliged=(n:NumericWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
     if nodes.ptr[n].aux not=? 0 or (k not=? 'binary' and k not=? 'assign') {return false}
-    let op_code=if k =? 'assign' {compound_op(NumericWord(nodes.ptr[n].op))} else {NumericWord(nodes.ptr[n].op)}
+    let op_code=if k =? 'assign' {compound_op(NumericWord(node_op(nodes.ptr[n].op_ext)))} else {NumericWord(node_op(nodes.ptr[n].op_ext))}
     let op=cx_token(op_code)
     if (op not=? 'shl' and op not=? 'shr') or prune(ntype(NumericWord(nodes.ptr[n].a))) not=? T_MATH_INT {return false}
     let count=prune(ntype(NumericWord(nodes.ptr[n].b)))

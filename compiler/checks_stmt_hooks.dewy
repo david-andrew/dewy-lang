@@ -62,7 +62,7 @@ from p"icount_ops.dewy" import (ic_fn ic_restore)
 from p"ide.jo" import (ide_hint_fns ide_on ide_skip)
 from p"ide_index.dewy" import (ide_indexed never_cascade)
 from p"member_admit.dewy" import (member_scope)
-from p"node_store.dewy" import (NK Node)
+from p"node_store.dewy" import (NK Node node_aux2 node_sval node_with_op node_with_sval)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"pcheck.jo" import (pc_missing)
 from p"pcheck_drive.dewy" import (pc_restore)
@@ -101,7 +101,7 @@ stmt_terminates=(s:int64):>bool=>$unsafe {
                     if nodes.ptr[kid(arm j)].kind =? 'pwild' {wild=true}
                 }
             }
-            return all and (wild or nodes.ptr[e].aux2 not=? 0)
+            return all and (wild or node_aux2(nodes.ptr[e].op_ext) not=? 0)
         }
         if nodes.ptr[e].kind =? 'if_' {return nodes.ptr[e].c not=? 0 and stmt_terminates(StmtHookWord(nodes.ptr[e].b)) and stmt_terminates(StmtHookWord(nodes.ptr[e].c))}
         return false
@@ -316,7 +316,7 @@ for_date_range_value=(s:int64 it:int64 t0:int64):>bool=>$unsafe {
     add_flag(range NF_INCLUSIVE)
     let loop_=mk('for_' pos)
     nodes.ptr[loop_].a=int32(range)
-    nodes.ptr[loop_].sval=nodes.ptr[s].sval
+    nodes.ptr[loop_].op_ext=node_with_sval(nodes.ptr[loop_].op_ext (node_sval(nodes.ptr[s].op_ext)))
     let ordinal="{tag}_ordinal"
     set_list(loop_ [bc_ident(ordinal pos)])
     ensure_bundled_import("time/civil.dewy" "$date_civil" pos)
@@ -495,7 +495,7 @@ loop_error=(n:int64 t:int64 code:int64):>void=>$unsafe {
         fatal(pos "'{w}' outside of a loop")
     }
     if code =? 4 {fatal(pos "unknown loop label '${name_of(StmtHookWord(nodes.ptr[n].name))}'")}
-    fatal(pos "duplicate active loop label '${name_of(StmtHookWord(nodes.ptr[n].sval))}'")
+    fatal(pos "duplicate active loop label '${name_of(StmtHookWord(node_sval(nodes.ptr[n].op_ext)))}'")
 }
 statement_check=(s:int64):>void=>{
     check_stmt(s)
@@ -512,7 +512,7 @@ exprstmt_express=(s:int64 t:int64 pack:bool):>void=>{
 }
 exprstmt_unused_value=(code:int64 op:int64 a:int64 pos:int64 t:int64):>void=>{
     let kinds:array<NK>=['nil' 'binary' 'and_' 'or_' 'not_' 'bool_lit' 'int_lit' 'float_lit' 'ident' 'none_lit']
-    unused_value(Node(kind=kinds[code] op=int32(op) a=int32(a) pos=pos) t)
+    unused_value(Node(kind=kinds[code] op_ext=node_with_op(uint32(0) int32(op)) a=int32(a) pos=pos) t)
 }
 exprstmt_error=(e:int64):>void=>$unsafe {
     let nm=name_of(StmtHookWord(nodes.ptr[e].name))

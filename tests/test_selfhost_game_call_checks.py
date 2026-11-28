@@ -25,7 +25,7 @@ main = ():
     files = [SrcFile(path="game.jo", src=" 45 ), 6.0)")]
     nodes = [Node()]
     a = mk(.int_lit, mkpos(0, 1)); nodes[a].ival = 45; add_flag(a, NF_LITERAL)
-    b = mk(.float_lit, mkpos(0, 7)); nodes[b].fval = 6.0; add_flag(b, NF_LITERAL)
+    b = mk(.float_lit, mkpos(0, 7)); nodes[b].op_ext = node_with_fval(nodes[b].op_ext, 6.0); add_flag(b, NF_LITERAL)
     print(written_int(a), written_int(b))
     param = mk(.param, 0); nodes[param].name = i32(intern("angle"))
     decl = mk(.fn_, 0); nodes[decl].name = i32(intern("rotation_y")); set_list(decl, [param])

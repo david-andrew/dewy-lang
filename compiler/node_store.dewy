@@ -48,33 +48,140 @@ NK:type='nil' |
     'matrix' | 'trecord' | 'propagate' | 'unit_lit' | 'tquantity' | 'reflect_scope' | 'record_loop' | 'trefined' |
     'typeapply' | 'pshape' | 'pseq' | 'parallel_region' | 'new_axis' | 'lazy_' | 'yield_'
 
+NodeExt:type=[
+    d:int32=0
+    list2:int32=0
+    nlist2:int32=0
+    sval:int32=0
+    aux2:int32=0
+    mod:int32=0
+    fval:float64=0.0
+]
+
 Node:type=[
     kind:NK='nil'
-    op:int32=0
     flags:int32=0
     pos:int64=0
+    ival:int64=0
     a:int32=0
     b:int32=0
     c:int32=0
-    d:int32=0
     list:int32=0
     nlist:int32=0
-    list2:int32=0
-    nlist2:int32=0
     name:int32=0
-    sval:int32=0
-    ival:int64=0
-    fval:float64=0.0
     type:int32=0
     sym:int32=0
     aux:int32=0
-    aux2:int32=0      # vardecl: 1 for a synthesized Dewy value-parameter binding
-    mod:int32=0
+    op_ext:uint32=0
 ]
 
 NodeWord:type=int64<overflow='wrap'>
 # (the flag clone clears: ast.jo's NF_CHECKED)
 const NODE_CHECKED:int64=128
+
+# Immutable cold-field pool; slot 0 is the all-zero sentinel so reads are branchless.
+let node_exts:array<NodeExt>=[NodeExt()]
+let node_exts_p:ptr<NodeExt>=$unsafe node_exts.ptr
+node_ext_reset=():>void=>$unsafe {
+    let ep=node_exts.ptr
+    let eh=(ep as ptr<int64>) - 3
+    if eh[0] =? 1 {
+        eh[1]=1
+        node_exts_p=ep
+    } else {
+        node_exts=[NodeExt()]
+        node_exts_p=node_exts.ptr
+    }
+}
+node_ext_grow_impl=(cur:NodeWord):>void=>$unsafe {
+    let nc:NodeWord=if cur <? 256 {256} else {cur * 2}
+    node_exts.reserve(int64(nc))
+    node_exts_p=node_exts.ptr
+}
+let node_ext_grow_hook:<(cur:NodeWord):>void>=@node_ext_grow_impl
+node_ext_alloc=(src:NodeWord):>NodeWord=>$unsafe {
+    let ep=node_exts_p
+    let eh=(ep as ptr<int64>) - 3
+    let idx=NodeWord(eh[1])
+    if eh[0] not=? 1 or idx >=? NodeWord(eh[2]) {
+        node_ext_grow_hook(idx)
+        ep=node_exts_p
+        eh=(ep as ptr<int64>) - 3
+        idx=NodeWord(eh[1])
+    }
+    eh[1]=int64(idx + 1)
+    mem_copy(ep + idx ep + src size_of<NodeExt>)
+    idx
+}
+
+node_op=(oe:uint32):>int32=>int32<overflow='wrap'>(oe & uint32(255))
+node_d=(oe:uint32):>int32=>$unsafe node_exts_p[NodeWord(oe >> uint32(8))].d
+node_list2=(oe:uint32):>int32=>$unsafe node_exts_p[NodeWord(oe >> uint32(8))].list2
+node_nlist2=(oe:uint32):>int32=>$unsafe node_exts_p[NodeWord(oe >> uint32(8))].nlist2
+node_sval=(oe:uint32):>int32=>$unsafe node_exts_p[NodeWord(oe >> uint32(8))].sval
+node_aux2=(oe:uint32):>int32=>$unsafe node_exts_p[NodeWord(oe >> uint32(8))].aux2
+node_mod=(oe:uint32):>int32=>$unsafe node_exts_p[NodeWord(oe >> uint32(8))].mod
+node_fval=(oe:uint32):>float64=>$unsafe node_exts_p[NodeWord(oe >> uint32(8))].fval
+
+node_with_op=(oe:uint32 v:int32):>uint32=>(oe & uint32<overflow='wrap'>(0xFFFFFF00)) | (uint32<overflow='wrap'>(v) & uint32(255))
+node_with_d=(oe:uint32 v:int32):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    if node_exts_p[e].d =? v {return oe}
+    let ne=node_ext_alloc(e)
+    node_exts_p[ne].d=v
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
+node_with_list2=(oe:uint32 v:int32):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    if node_exts_p[e].list2 =? v {return oe}
+    let ne=node_ext_alloc(e)
+    node_exts_p[ne].list2=v
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
+node_with_nlist2=(oe:uint32 v:int32):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    if node_exts_p[e].nlist2 =? v {return oe}
+    let ne=node_ext_alloc(e)
+    node_exts_p[ne].nlist2=v
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
+node_with_list2_pair=(oe:uint32 start:int32 count:int32):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    let cur=node_exts_p + e
+    if cur[0].list2 =? start and cur[0].nlist2 =? count {return oe}
+    let ne=node_ext_alloc(e)
+    let dst=node_exts_p + ne
+    dst[0].list2=start
+    dst[0].nlist2=count
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
+node_with_sval=(oe:uint32 v:int32):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    if node_exts_p[e].sval =? v {return oe}
+    let ne=node_ext_alloc(e)
+    node_exts_p[ne].sval=v
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
+node_with_aux2=(oe:uint32 v:int32):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    if node_exts_p[e].aux2 =? v {return oe}
+    let ne=node_ext_alloc(e)
+    node_exts_p[ne].aux2=v
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
+node_with_mod=(oe:uint32 v:int32):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    if node_exts_p[e].mod =? v {return oe}
+    let ne=node_ext_alloc(e)
+    node_exts_p[ne].mod=v
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
+node_with_fval=(oe:uint32 v:float64):>uint32=>$unsafe {
+    let e=NodeWord(oe >> uint32(8))
+    let ne=node_ext_alloc(e)
+    node_exts_p[ne].fval=v
+    (oe & uint32(255)) | (uint32<overflow='wrap'>(ne) << uint32(8))
+}
 
 # A new node of kind at pos, every other field zero
 # Does an unchecked call's type wait for the parameter it meets (0 no, 1 only its result gives a
@@ -217,9 +324,8 @@ node_set_list2=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=
         let i:NodeWord=0
         loop i <? count {dst[i]=int32<overflow='wrap'>(src[i]); i+=1}
     }
-    let nd=store.ptr + NodeWord(n)
-    nd[0].list2=int32<overflow='wrap'>(start)
-    nd[0].nlist2=int32<overflow='wrap'>(count)
+    let oe=node_with_list2_pair(store.ptr[NodeWord(n)].op_ext int32<overflow='wrap'>(start) int32<overflow='wrap'>(count))
+    store.ptr[NodeWord(n)].op_ext=oe
 }
 
 node_append_raw=(@lists:array<int32> src:ptr<int64> count0:int64):>int64=>$unsafe {
@@ -296,7 +402,10 @@ node_run_of=(@lists:array<int32> start0:int64 count0:int64):>array<int64>=>$unsa
 }
 
 node_kids=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>$unsafe {node_run_of(@lists int64(store.ptr[NodeWord(n)].list) int64(store.ptr[NodeWord(n)].nlist))}
-node_kids2=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>$unsafe {node_run_of(@lists int64(store.ptr[NodeWord(n)].list2) int64(store.ptr[NodeWord(n)].nlist2))}
+node_kids2=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>$unsafe {
+    let e=NodeWord(store.ptr[NodeWord(n)].op_ext >> uint32(8))
+    node_run_of(@lists int64(node_exts_p[e].list2) int64(node_exts_p[e].nlist2))
+}
 
 # A deep copy of a subtree (generic functions are instantiated so): the copy's own fields
 # first, unchecked, then its children's copies, in order
@@ -324,16 +433,21 @@ node_clone=(@store:array<Node> @lists:array<int32> n0:int64):>int64=>$unsafe {
     let na=NodeWord(dst[0].a)
     let nb=NodeWord(dst[0].b)
     let nc=NodeWord(dst[0].c)
-    let nd_=NodeWord(dst[0].d)
+    let ext=NodeWord(dst[0].op_ext >> uint32(8))
+    let nd_:NodeWord=if ext =? 0 {0} else {NodeWord(node_exts_p[ext].d)}
     let nl1=NodeWord(dst[0].nlist)
-    let nl2=NodeWord(dst[0].nlist2)
+    let nl2:NodeWord=if ext =? 0 {0} else {NodeWord(node_exts_p[ext].nlist2)}
     if (na | nb | nc | nd_ | nl1 | nl2) =? 0 {return int64(c)}
     let l1=NodeWord(dst[0].list)
-    let l2=NodeWord(dst[0].list2)
+    let l2:NodeWord=if nl2 =? 0 {0} else {NodeWord(node_exts_p[ext].list2)}
     if na not=? 0 {let ra=int32<overflow='wrap'>(node_clone(@store @lists int64(na))); store.ptr[c].a=ra}
     if nb not=? 0 {let rb=int32<overflow='wrap'>(node_clone(@store @lists int64(nb))); store.ptr[c].b=rb}
     if nc not=? 0 {let rc=int32<overflow='wrap'>(node_clone(@store @lists int64(nc))); store.ptr[c].c=rc}
-    if nd_ not=? 0 {let rd=int32<overflow='wrap'>(node_clone(@store @lists int64(nd_))); store.ptr[c].d=rd}
+    if nd_ not=? 0 {
+        let rd=int32<overflow='wrap'>(node_clone(@store @lists int64(nd_)))
+        let oe2=node_with_d(store.ptr[c].op_ext rd)
+        store.ptr[c].op_ext=oe2
+    }
     if nl1 >? 0 {
         if nl1 =? 1 {
             let c0=int32<overflow='wrap'>(node_clone(@store @lists int64(lists.ptr[l1])))
@@ -390,9 +504,8 @@ node_clone=(@store:array<Node> @lists:array<int32> n0:int64):>int64=>$unsafe {
         let count=NodeWord(node_clone_buf.length) - base
         let start=node_append_raw(@lists node_clone_buf.ptr + base int64(count))
         __set_len(node_clone_buf int64(base))
-        let dstc=store.ptr + c
-        dstc[0].list2=int32<overflow='wrap'>(start)
-        dstc[0].nlist2=int32<overflow='wrap'>(count)
+        let oe3=node_with_list2_pair(store.ptr[c].op_ext int32<overflow='wrap'>(start) int32<overflow='wrap'>(count))
+        store.ptr[c].op_ext=oe3
     }
     int64(c)
 }

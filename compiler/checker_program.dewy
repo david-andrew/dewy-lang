@@ -65,6 +65,7 @@ from p"effect_control.dewy" import (effects_finalize effects_reset)
 from p"concurrency_types.dewy" import (concurrency_claims_finalize)
 from p"concurrency_tasks.dewy" import (concurrency_finalize)
 from p"refine_rare.dewy" import (refine_reset)
+from p"node_store.dewy" import (node_mod)
 # Program-level checking owns phase order; services may grow all compiler arenas.
 PGWord:type=int64<overflow='wrap'>
 check_program=(main_path:string):>void=>$unsafe {
@@ -230,7 +231,7 @@ check_program=(main_path:string):>void=>$unsafe {
         if syms.ptr[s].kind =? 'fns' {draw_fn=get_fn_inst(PGWord(syms.ptr[s].decl) [] 0)}
     }
     loop d in export_decls {
-        if not modules.ptr[PGWord(nodes.ptr[d].mod)].is_prelude {export_fns.push(get_fn_inst(d [] nodes.ptr[d].pos))}
+        if not modules.ptr[PGWord(node_mod(nodes.ptr[d].op_ext))].is_prelude {export_fns.push(get_fn_inst(d [] nodes.ptr[d].pos))}
     }
     if ide_on {ide_force=ide_find_file(ide_doc)}
     let settings_pending:array<int64>=[]
@@ -280,13 +281,13 @@ check_program=(main_path:string):>void=>$unsafe {
         if runtime_ffi_demand() {continue}
         let used:dict<int64 bool>=dict<int64 bool>()
         loop fi in [1..fns.length) {
-            if fns.ptr[fi].state =? 2 and fns.ptr[fi].decl not=? 0 {used[PGWord(nodes.ptr[PGWord(fns.ptr[fi].decl)].mod)] = true}
+            if fns.ptr[fi].state =? 2 and fns.ptr[fi].decl not=? 0 {used[PGWord(node_mod(nodes.ptr[PGWord(fns.ptr[fi].decl)].op_ext))] = true}
         }
         let more=false
         exp_added.resize(export_decls.length)
         loop ei in [0..export_decls.length) and d in export_decls {
-            if exp_added.ptr[ei] or not modules.ptr[PGWord(nodes.ptr[d].mod)].is_prelude {continue}
-            if used.get(PGWord(nodes.ptr[d].mod)) not=? none {
+            if exp_added.ptr[ei] or not modules.ptr[PGWord(node_mod(nodes.ptr[d].op_ext))].is_prelude {continue}
+            if used.get(PGWord(node_mod(nodes.ptr[d].op_ext))) not=? none {
                 exp_added.ptr[ei] = true
                 export_fns.push(get_fn_inst(d [] nodes.ptr[d].pos))
                 more=true

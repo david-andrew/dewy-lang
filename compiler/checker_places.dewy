@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"collection_cancellation.dewy" import (collection_array)
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_aux2)
 from p"checker_state.dewy" import Local
 from p"type_constructors.dewy" import tb_mk_ptr
 # Address-of, parallel regions and checker-made conversions and function references.
@@ -64,7 +64,7 @@ xp_check=(n:XPWord expected:XPWord):>XPWord=>$unsafe {
         if ca not=? 0 and XPWord(xp_nodes[0].ptr[ca].flags) & 128 =? 0 {
             let hint:XPWord=0
             # A fixed-width .min/.max literal keeps its type.
-            if xp_nodes[0].ptr[n].aux2 =? 1 {hint=XPWord(xp_nodes[0].ptr[n].type)}
+            if node_aux2(xp_nodes[0].ptr[n].op_ext) =? 1 {hint=XPWord(xp_nodes[0].ptr[n].type)}
             xp_host[0].check(ca hint);
             xp_nodes[0][n].a=int32<overflow='wrap'>(xp_last[0])
         }

@@ -73,10 +73,10 @@ names: {str: int} = {}
 name_texts: str[] = [""]
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
-nkids2 = (n: int) -> int: int(nodes[n].nlist2)
+nkids2 = (n: int) -> int: int(node_nlist2(nodes[n].op_ext))
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 kid_c = (n: int) -> int: int(nodes[n].c)
-kid_d = (n: int) -> int: int(nodes[n].d)
+kid_d = (n: int) -> int: int(node_d(nodes[n].op_ext))
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 set_list = (n: int, items: int[]): node_set_list(mut nodes, mut lists, n, items)
 intern = (s: str) -> int:
@@ -156,7 +156,7 @@ syntax = (label: str, n: int, value: bool):
 show_copy = (n: int, depth: int, tree: int):
     if n == 0: return
     x2 = nodes[n]
-    print("{depth} {n - tree} k={x2.kind == .str_lit} sval={x2.sval} name={x2.name} aux={x2.aux} sym={x2.sym} kids={x2.nlist}")
+    print("{depth} {n - tree} k={x2.kind == .str_lit} sval={node_sval(x2.op_ext)} name={x2.name} aux={x2.aux} sym={x2.sym} kids={x2.nlist}")
     show_copy(int(x2.a), depth + 1, tree); show_copy(int(x2.b), depth + 1, tree); show_copy(int(x2.c), depth + 1, tree)
     loop i in [0..nkids(n)): show_copy(kid(n, i), depth + 1, tree)
 main = ():
@@ -178,7 +178,7 @@ main = ():
     y = ident(91, 8)
     pair = named(.binary, x, y)
     list = with_kids(.block, 0, [y, ident(92, 8)])
-    four = fresh(.block, 1); nodes[four].c = i32(pair); nodes[four].d = i32(y)
+    four = fresh(.block, 1); nodes[four].c = i32(pair); nodes[four].op_ext = node_with_d(nodes[four].op_ext, i32(i32(y)))
     memo: {int: bool} = {}
     loop n in [0, x, y, pair, list, four, pair]: print("{member_dependencies(n, name, mut memo)} {memo.len()}")
     print("{member_dependent(pair, template([pair]))} {member_dependent(y, template([pair]))}")
@@ -248,15 +248,15 @@ main = ():
     conditional = named(.if_, y, with_kids(.block, 0, [named(.exprstmt, y, 0)]))
     syntax("if", conditional, false)
     syntax("if dep", named(.if_, x, with_kids(.block, 0, [])), false)
-    assign_index = named(.assign, named(.index, y, y), y); nodes[assign_index].op = i32(int(Tok.assign))
-    assign_plus = named(.assign, named(.index, y, y), y); nodes[assign_plus].op = i32(int(Tok.pluseq))
-    assign_var = named(.assign, y, y); nodes[assign_var].op = i32(int(Tok.assign))
+    assign_index = named(.assign, named(.index, y, y), y); nodes[assign_index].op_ext = node_with_op(nodes[assign_index].op_ext, i32(i32(int(Tok.assign))))
+    assign_plus = named(.assign, named(.index, y, y), y); nodes[assign_plus].op_ext = node_with_op(nodes[assign_plus].op_ext, i32(i32(int(Tok.pluseq))))
+    assign_var = named(.assign, y, y); nodes[assign_var].op_ext = node_with_op(nodes[assign_var].op_ext, i32(i32(int(Tok.assign))))
     syntax("assign", assign_index, false); syntax("assign op", assign_plus, false); syntax("assign var", assign_var, false)
     loop k in [NK.block, NK.array, NK.and_, NK.or_, NK.not_, NK.int_lit, NK.str_lit, NK.bool_lit, NK.lambda, NK.match_]: syntax("kind", fresh(k, 1), true)
     tail_stmt = with_kids(.block, 0, [named(.exprstmt, y, 0), named(.exprstmt, call_named("bytes", [y]), 0)])
     syntax("block tail value", tail_stmt, true)
     syntax("block tail not", tail_stmt, false)
-    extra2 = fresh(.block, 1); nodes[extra2].nlist2 = 1
+    extra2 = fresh(.block, 1); nodes[extra2].op_ext = node_with_nlist2(nodes[extra2].op_ext, i32(1))
     syntax("list2", extra2, true)
     fails = fresh(.block, 1); nodes[fails].a = i32(fresh(.lambda, 2))
     syntax("child a", fails, true)
@@ -264,12 +264,12 @@ main = ():
     syntax("child b", fails, true)
     nodes[fails].b = 0; nodes[fails].c = i32(fresh(.lambda, 2))
     syntax("child c", fails, true)
-    nodes[fails].c = 0; nodes[fails].d = i32(fresh(.lambda, 2))
+    nodes[fails].c = 0; nodes[fails].op_ext = node_with_d(nodes[fails].op_ext, i32(i32(fresh(.lambda, 2))))
     syntax("child d", fails, true)
     # Preparing a loop: every refusal, then a template.
     scope_of = (nm: int, text: str) -> int:
         s = fresh(.block, 5)
-        sv = fresh(.str_lit, 5); nodes[sv].sval = i32(intern(text))
+        sv = fresh(.str_lit, 5); nodes[sv].op_ext = node_with_sval(nodes[sv].op_ext, i32(i32(intern(text))))
         nodes[s].a = i32(sv); nodes[s].name = i32(nm)
         s
     show_prepare = ():
@@ -409,7 +409,7 @@ main = ():
     t.positions[88] = true
     member_words[101] = {"a": 5, "b": 6}
     lit_s = fresh(.str_lit, 88)
-    lit_other = fresh(.str_lit, 89); nodes[lit_other].sval = 3
+    lit_other = fresh(.str_lit, 89); nodes[lit_other].op_ext = node_with_sval(nodes[lit_other].op_ext, i32(3))
     dot = typed(.dotname, 88, 201)
     dot_other = typed(.dotname, 89, 201); nodes[dot_other].name = 44; nodes[dot_other].aux = 99
     l_old = local_of(T_INT, 0); l_unmapped = local_of(T_INT, 0)
@@ -467,7 +467,7 @@ hook = ():
 new_scope = (text: str, body: int, index: int) -> int:
     s = fresh(.block, 5)
     v = fresh(.str_lit, 5)
-    nodes[v].sval = i32(intern(text))
+    nodes[v].op_ext = node_with_sval(nodes[v].op_ext, i32(i32(intern(text))))
     nodes[s].a = i32(v); nodes[s].b = i32(body)
     member_scopes[s] = index
     s
@@ -535,7 +535,7 @@ main = ():
     second = new_scope("b", 0, index)
     print(member_scope(second))
     copy_body = int(nodes[second].b)
-    print("{copy_body >= before_nodes} {nkids(copy_body)} {name_of(int(nodes[kid(copy_body, 0)].sval))} {nodes[kid(copy_body, 1)].sym != i32(rl)} {copy_writes.len()} {fact_divisors.get(kid(copy_body, 1)) ?? -1}")
+    print("{copy_body >= before_nodes} {nkids(copy_body)} {name_of(int(node_sval(nodes[kid(copy_body, 0)].op_ext)))} {nodes[kid(copy_body, 1)].sym != i32(rl)} {copy_writes.len()} {fact_divisors.get(kid(copy_body, 1)) ?? -1}")
     print("{fact_requests.len()} {refine_requests.len()} {fns[3].locals.len()} {member_scope_locals[second].len()} {member_scope_locals[first_scope].len()}")
     print(fact_requests[fact_requests.len() - 1].owner)
     print(locals[member_scope_locals[second][0]].name)

@@ -31,7 +31,7 @@ from p"ide_text.dewy" import (ide_complete_variants)
 from p"ide_index.dewy" import (ide_variant_ref)
 from p"ide_ops.dewy" import (ide_fn_ref)
 from p"lower_storage.dewy" import (V)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_with_sval)
 from p"refine_metadata.dewy" import (refine_storage ref_storage_contract)
 from p"refine_rare.dewy" import (str_set_coerce refine_coerce)
 from p"secret_checks.dewy" import (secret_hint)
@@ -94,7 +94,7 @@ cast_text=(n:int64 a:int64 expected:int64):>int64=>$unsafe {
     nodes.ptr[text].aux=1
     let part=mk('pair' nodes.ptr[n].pos)
     nodes.ptr[part].a=int32(a)
-    nodes.ptr[part].sval=-1
+    nodes.ptr[part].op_ext=node_with_sval(nodes.ptr[part].op_ext (-1))
     set_list(text [part])
     nodes.ptr[n]=nodes.ptr[text]
     check_expr(n expected)

@@ -9,7 +9,7 @@ from p"checks_builders.dewy" import (bc_field bc_ident bc_int)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"expr.jo" import (decimal_cached_type rational_constants rational_shown word_rational_cached_type)
 from p"facts.jo" import (fact_divisors)
-from p"node_store.dewy" import (Node)
+from p"node_store.dewy" import (Node node_sval)
 from p"rational_types.dewy" import (bundled_rational_type)
 from p"types.jo" import (T_MATH_INT is_int prune telem)
 from p"unit_ops.dewy" import (quantity_gcd)
@@ -103,7 +103,7 @@ rational_constant=(numerator:RationalWord denominator:RationalWord pos:RationalW
 }
 exact_decimal=(n:RationalWord):>RationalWord=>{
     let pos=nodes[n].pos
-    let text=lower(name_of(RationalWord(nodes[n].sval)))
+    let text=lower(name_of(RationalWord(node_sval(nodes[n].op_ext))))
     let exponent:RationalWord=0
     let parts=split(text "e")
     if parts.length =? 2 {

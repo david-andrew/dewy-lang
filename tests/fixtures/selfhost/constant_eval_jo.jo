@@ -38,7 +38,7 @@ binding = (e: int) -> int:
 host = ConstantHost(checked, binding, fail)
 run = (e: int) -> CVal: constant_eval(nodes, names, files, host, e)
 node = (kind: NK, value: int = 0, a: int = 0, b: int = 0, op: Tok = .eof, pos: int = 700) -> int:
-    nodes.push(Node(kind=kind, ival=value, a=i32(a), b=i32(b), op=i32(int(op)), pos=pos))
+    nodes.push(Node(kind=kind, ival=value, a=i32(a), b=i32(b), op_ext=node_with_op(u32(0), i32(int(op))), pos=pos))
     nodes.len()-1
 show = (e: int):
     v = run(e)
@@ -51,7 +51,7 @@ main = ():
     two = node(.int_lit, 2)
     three = node(.int_lit, 3)
     text = node(.str_lit)
-    nodes[text].sval=2
+    nodes[text].op_ext=node_with_sval(nodes[text].op_ext, i32(2))
     if mode == 1:
         missing = node(.ident)
         nodes[missing].name=1
@@ -70,7 +70,7 @@ main = ():
     show(node(.binary, a=text, b=text, op=.eq))
     show(node(.binary, a=text, b=zero, op=.ne))
     other = node(.str_lit)
-    nodes[other].sval=3
+    nodes[other].op_ext=node_with_sval(nodes[other].op_ext, i32(3))
     show(node(.binary, a=text, b=other, op=.eq))
     # An invalid right operand must never be visited by a short-circuit expression.
     bad = node(.array)

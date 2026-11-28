@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node node_fval node_op node_with_fval)
 from p"checker_types.dewy" import TypeInfo
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -59,7 +59,7 @@ xu_quantity_literal=(e0:XUWord):>bool=>$unsafe {
         if k =? 'unary' {e=XUWord(xu_nodes[0].ptr[e].a)}
         else {
             # Frozen Tok.star ordinal; the differential checks against checker_tokens.
-            if k not=? 'binary' or xu_nodes[0].ptr[e].op not=? 60 {return false}
+            if k not=? 'binary' or node_op(xu_nodes[0].ptr[e].op_ext) not=? 60 {return false}
             let x=xu_nodes[0].ptr[XUWord(xu_nodes[0].ptr[e].a)].kind
             return (x =? 'int_lit' or x =? 'float_lit') and xu_nodes[0].ptr[XUWord(xu_nodes[0].ptr[e].b)].kind =? 'ident'
         }
@@ -81,7 +81,7 @@ xu_check=(n:XUWord expected:XUWord ex:XUWord):>CheckerUnaryResult=>$unsafe {
     if ak =? 'secret' {return [type=xu_host[0].secret(n) bypass=true]}
     if ak =? 'quantity' {return [type=xu_host[0].quantity(n expected q_lit) bypass=true]}
     # Frozen Tok ordinals (plus 58, minus 59, tilde 66); the differential checks them.
-    let op=xu_nodes[0].ptr[n].op
+    let op=node_op(xu_nodes[0].ptr[n].op_ext)
     let numeric=ak =? 'int_' or ak =? 'float_' or ak =? 'vec'
     if op =? 59 {
         if ak =? 'struct_' or ak =? 'tuple' or (ak =? 'enum_' and not xu_host[0].simple_enum(at)) {
@@ -112,7 +112,7 @@ xu_check=(n:XUWord expected:XUWord ex:XUWord):>CheckerUnaryResult=>$unsafe {
                 return [type=XUWord(xu_nodes[0].ptr[n].type) bypass=true]
             }
             if lk =? 'float_lit' {
-                xu_nodes[0][n]=Node[kind='float_lit' pos=xu_nodes[0].ptr[n].pos fval=-xu_nodes[0].ptr[a].fval flags=384 type=xu_nodes[0].ptr[a].type]
+                xu_nodes[0][n]=Node[kind='float_lit' pos=xu_nodes[0].ptr[n].pos op_ext=node_with_fval(uint32(0) (-node_fval(xu_nodes[0].ptr[a].op_ext))) flags=384 type=xu_nodes[0].ptr[a].type]
                 xu_last[0]=n
                 return [type=XUWord(xu_nodes[0].ptr[n].type) bypass=true]
             }

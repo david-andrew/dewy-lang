@@ -28,7 +28,7 @@ main = ():
     assert(ast_kid(tree, 0) == first and ast_kid(tree, 1) == second and ast_kid2(tree, 0) == second)
     assert(ast_kids(tree) == [first, second] and ast_kids2(tree) == [second])
     nodes[tree].c = i32(first)
-    nodes[tree].d = i32(second)
+    nodes[tree].op_ext = node_with_d(nodes[tree].op_ext, i32(i32(second)))
     assert(ast_kid_c(tree) == first and ast_kid_d(tree) == second)
     nodes[tree].kind = .for_
     assert(ast_kid_c(tree) == 0 and ast_kid_d(tree) == 0)

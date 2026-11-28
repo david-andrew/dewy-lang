@@ -23,10 +23,11 @@ from p"lower_storage.dewy" import (is_shared opt_has vc)
 from p"ownership_types.dewy" import (ownership_type)
 from p"lower_ptr_reads.dewy" import (pr_exposed ptr_reads)
 from p"ir_builders.dewy" import (e_addi e_iconst emit vreg)
+from p"node_store.dewy" import (node_aux2 node_d node_list2 node_nlist2 node_op node_with_aux2)
 # View, uniqueness and collection-bound queries; state stays in lower.jo.
 LVWord:type=int64<overflow='wrap'>
 param_view_decl=(s:LVWord l:LVWord):>bool=>$unsafe {
-    if (dbg_on and (not copies_on or not copy_strict(s))) or nodes.ptr[s].aux2 not=? 1 {return false}
+    if (dbg_on and (not copies_on or not copy_strict(s))) or node_aux2(nodes.ptr[s].op_ext) not=? 1 {return false}
     if copies_on and copy_bindings.has(l) {return false}
     let fl:LVWord=LVWord(locals.ptr[l].flags)
     if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) not=? 0 or is_shared(l) {return false}
@@ -173,7 +174,7 @@ hv_scan=(n:LVWord):>void=>$unsafe {
             # param_view_decl already proved this synthetic Dewy binding is
             # the borrowed parameter itself. It is a root, not a candidate
             # local whose LF_PARAM flag would disqualify every walk from it.
-            if nodes[n].aux2 not=? 1 or LVWord(locals.ptr[l].flags) & LF_PARAM =? 0 {hv_give(l LVWord(nodes[n].b));}
+            if node_aux2(nodes[n].op_ext) not=? 1 or LVWord(locals.ptr[l].flags) & LF_PARAM =? 0 {hv_give(l LVWord(nodes[n].b));}
         }
     }
     else if k =? 'iflet' or k =? 'match_' or (k =? 'while_' and nodes[n].aux =? 1) {hv_give(LVWord(nodes[n].sym) LVWord(nodes[n].a));}
@@ -182,7 +183,7 @@ hv_scan=(n:LVWord):>void=>$unsafe {
         if nodes[n].aux =? 1 {
             loop i in [0..nkids(a)) {hv_spoil(kid(a i));}
         }
-        else if nodes[n].aux =? 0 and nodes[n].op =? int32<overflow='wrap'>(47) and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) and LVWord(locals.ptr[LVWord(nodes.ptr[a].sym)].flags) & LF_ALIAS =? 0 {hv_give(LVWord(nodes.ptr[a].sym) LVWord(nodes[n].b));}
+        else if nodes[n].aux =? 0 and node_op(nodes[n].op_ext) =? int32<overflow='wrap'>(47) and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) and LVWord(locals.ptr[LVWord(nodes.ptr[a].sym)].flags) & LF_ALIAS =? 0 {hv_give(LVWord(nodes.ptr[a].sym) LVWord(nodes[n].b));}
         else {hv_spoil(a);}
     }
     else if k =? 'intrinsic' and nkids(n) >? 0 {
@@ -199,7 +200,7 @@ hv_scan=(n:LVWord):>void=>$unsafe {
         let cc:LVWord=LVWord(nodes.ptr[n].c)
         if cc >? 0 {hv_scan(cc);}
         if k not=? 'partial' {
-            let cd:LVWord=LVWord(nodes.ptr[n].d)
+            let cd:LVWord=LVWord(node_d(nodes.ptr[n].op_ext))
             if cd >? 0 {hv_scan(cd);}
         }
     }
@@ -266,7 +267,7 @@ bounded_open_for=(s:LVWord):>int64=>$unsafe {
     let condition:LVWord=LVWord(nodes.ptr[guard].a)
     if nodes.ptr[condition].kind not=? 'not_' {return 0}
     condition=LVWord(nodes.ptr[condition].a)
-    if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].aux not=? 0 or nodes.ptr[condition].op not=? int32<overflow='wrap'>(71) {return 0}
+    if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].aux not=? 0 or node_op(nodes.ptr[condition].op_ext) not=? int32<overflow='wrap'>(71) {return 0}
     let index=word_integer_value(LVWord(nodes.ptr[condition].a))
     if nodes.ptr[index].kind not=? 'ident' or nodes.ptr[index].aux not=? int32<overflow='wrap'>(1) or LVWord(nodes.ptr[index].sym) not=? l {return 0}
     let stop=word_integer_value(LVWord(nodes.ptr[condition].b))
@@ -347,7 +348,7 @@ reserve_comprehension=(b:LVWord):>void=>$unsafe {
     let recv=kid(push 0)
     if nodes.ptr[recv].kind not=? 'ident' or nodes.ptr[recv].sym not=? nodes.ptr[decl].sym or not comprehension_value(kid(push 1)) {return}
     # aux2 is unused by range/array loops; d already owns the array snapshot.
-    nodes.ptr[loop_].aux2 = nodes.ptr[decl].sym;
+    nodes.ptr[loop_].op_ext=node_with_aux2(nodes.ptr[loop_].op_ext (nodes.ptr[decl].sym));
     add_flag(loop_ NF_COMPREHENSION);
     add_flag(push NF_INBOUNDS);
     # Plain elements need no partial-initialization cleanup. With an unchanged
@@ -500,14 +501,14 @@ ug_scan=(root:LVWord root_ctx:LVWord):>void=>$unsafe {
         }
         let sub_tag:LVWord=if ctx =? -1 {0} else {1}
         let nk:LVWord=LVWord(nd[0].nlist)
-        let nk2:LVWord=LVWord(nd[0].nlist2)
+        let nk2:LVWord=LVWord(node_nlist2(nd[0].op_ext))
         if sp + nk + nk2 + 4 >? scap {
             scap=(sp + nk + nk2 + 4) * 2
             ug_stack.resize(scap)
             st=ug_stack.ptr
         }
         if nk2 >? 0 {
-            let base2:LVWord=LVWord(nd[0].list2)
+            let base2:LVWord=LVWord(node_list2(nd[0].op_ext))
             let i:LVWord=nk2 - 1
             loop i >=? 0 {
                 let arg:LVWord=LVWord(lp[base2 + i])
@@ -530,7 +531,7 @@ ug_scan=(root:LVWord root_ctx:LVWord):>void=>$unsafe {
         }
         if k not=? 'for_' {
             if k not=? 'partial' {
-                let d:LVWord=LVWord(nd[0].d)
+                let d:LVWord=LVWord(node_d(nd[0].op_ext))
                 if d not=? 0 {st[sp]=int64((d << 2) | sub_tag); sp += 1}
             }
             let c:LVWord=LVWord(nd[0].c)
@@ -586,7 +587,7 @@ simple_cond=(e:LVWord):>bool=>$unsafe {
     if k =? 'not_' {return simple_cond(LVWord(nodes.ptr[e].a))}
     if k =? 'and_' or k =? 'or_' {return simple_cond(LVWord(nodes.ptr[e].a)) and simple_cond(LVWord(nodes.ptr[e].b))}
     if k =? 'binary' and nodes.ptr[e].aux =? 0 {
-        let op=cx_token_values.ptr[LVWord(nodes.ptr[e].op)]
+        let op=cx_token_values.ptr[LVWord(node_op(nodes.ptr[e].op_ext))]
         if not (op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge') {return false}
         loop x in [LVWord(nodes.ptr[e].a) LVWord(nodes.ptr[e].b)] {
             let xk=nodes.ptr[x].kind

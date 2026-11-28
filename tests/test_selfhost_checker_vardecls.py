@@ -174,9 +174,9 @@ main = ():
     run(decl(17, typed(.ident, T_INT)))
     dv_pending = []; dv_flow_next = 0; dv_flow_local = 0
     # Temperatures, decimals, growth, quaternions.
-    mul = node(.binary, lit(.int_lit, T_INT)); nodes[mul].op = 60; nodes[mul].b = i32(node(.ident)); nodes[int(nodes[mul].b)].name = 4; nodes[mul].type = i32(T_INT)
+    mul = node(.binary, lit(.int_lit, T_INT)); nodes[mul].op_ext = node_with_op(nodes[mul].op_ext, i32(60)); nodes[mul].b = i32(node(.ident)); nodes[int(nodes[mul].b)].name = 4; nodes[mul].type = i32(T_INT)
     run(decl(18, mul))
-    neg = node(.unary, mul); nodes[neg].op = 59; nodes[neg].type = i32(T_INT)
+    neg = node(.unary, mul); nodes[neg].op_ext = node_with_op(nodes[neg].op_ext, i32(59)); nodes[neg].type = i32(T_INT)
     run(decl(18, neg))
     dv_literal_type = rec
     run(decl(19, lit(.float_lit, rec)))
@@ -197,10 +197,10 @@ main = ():
     # Flags: constants, loop counts, value parameters; effects and the editor.
     run(decl(22, typed(.ident, T_INT), 0, 262144))
     run(decl(22, typed(.ident, T_INT), 0, 33554432))
-    vp = decl(22, typed(.ident, T_INT)); nodes[vp].aux2 = 1
+    vp = decl(22, typed(.ident, T_INT)); nodes[vp].op_ext = node_with_aux2(nodes[vp].op_ext, i32(1))
     run(vp)
     dv_refining = true
-    vp = decl(22, typed(.ident, T_INT)); nodes[vp].aux2 = 1
+    vp = decl(22, typed(.ident, T_INT)); nodes[vp].op_ext = node_with_aux2(nodes[vp].op_ext, i32(1))
     run(vp)
     dv_refining = false
     dv_effects = true; dv_ide = true
@@ -208,11 +208,11 @@ main = ():
     run(decl(23, typed(.ident, T_INT), typed(.tname, T_INT)))
     dv_effects = false; dv_ide = false
     # The forms other services declare, and those they pass back.
-    spawn = typed(.call, T_INT); nodes[spawn].aux2 = 17
+    spawn = typed(.call, T_INT); nodes[spawn].op_ext = node_with_aux2(nodes[spawn].op_ext, i32(17))
     run(decl(24, spawn))
     run(decl(24, typed(.ident, T_INT), 0, 131072))
     run(decl(24, typed(.ident, T_INT), 0, 8388608))
-    lent = typed(.call, T_INT); nodes[lent].aux2 = -11
+    lent = typed(.call, T_INT); nodes[lent].op_ext = node_with_aux2(nodes[lent].op_ext, i32(-11))
     run(decl(24, lent))
     dv_forms[4] = true
     run(decl(24, lent))
@@ -238,7 +238,7 @@ main = ():
         a = node(.ident); nodes[a].name = 26; nodes[a].pos = 7
         c = node(.ident); nodes[c].name = 27; nodes[c].pos = 9
         node_set_list(mut nodes, mut lists, pattern, [a, node(.hole), c])
-        if flags == 0: nodes[pattern].aux2 = 1
+        if flags == 0: nodes[pattern].op_ext = node_with_aux2(nodes[pattern].op_ext, i32(1))
         run(pattern)
         print("  {nodes[a].sym}:{locals[int(nodes[a].sym)].flags}:{locals[int(nodes[a].sym)].type}:{nodes[c].sym}:{locals[int(nodes[c].sym)].flags}:{locals[int(nodes[c].sym)].type}:{nodes[pattern].type}")
     dv_pattern_global = 1
