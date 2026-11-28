@@ -883,7 +883,8 @@ and `xs.last`, along with `xs.min_by(key)` and `xs.max_by(key)`, take an array
 with `length >? 0`, as do `min(xs)` and `max(xs)` of an array (of an N-D array `m`,
 `m.data.length >? 0`), a set's `s.pop()`
 and a heap's `h.pop()`, `h.peek()` and `h.peek_priority()`. The key functions retain their own effects.
-`sum(xs)` of fixed-width integer elements has their type and needs its exact sum to fit
+`sum(xs)` of fixed-width integer elements has their number type (an `array<Level>` of
+refined `int64`s sums to an `int64`) and needs its exact sum to fit
 it (checked at run time, `[9223372036854775807 1 -1]` sums to its first element; add
 `uint8` bytes into an `int` total to count past 255). The proof bounds every
 running sum from the elements' bounds times the length's (a literal's
@@ -3649,7 +3650,9 @@ $runtime_assert(saved[0] =? 1 and shifted[0] =? 2)
 ```
 
 A collection has one result per element or position, as a `loop` comprehension does, so
-`[parallel i in [0..n) f(i)]` has length `n` for a nonnegative `n`.
+`[parallel i in [0..n) f(i)]` has length `n` for a nonnegative `n`. A range's ends are
+`int64`s: an `int` end must be proven to fit, as any narrowing is, and the source's
+other obligations (an index, a divisor) are checked as anywhere else.
 
 An ordinary binding is read-only. A mutable `@x` binding owns one
 array element for the body, including its managed fields. Saved copies keep their original values. Other captured variables and
