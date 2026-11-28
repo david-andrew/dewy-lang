@@ -1,0 +1,8 @@
+# modes: native
+# Writing through a parenthesized pointer expression: name it first.
+main = ():>void => $unsafe {
+    let xs:array<int32> = [1 2]
+    let p = xs.ptr
+    (p + 1)[0] = 5
+    printl(xs)
+}

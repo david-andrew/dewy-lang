@@ -12086,7 +12086,31 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     rd_dc_as_precedence(@reader_ctx at);
     rd_dc_line_habit(@reader_ctx at);
     rd_dc_place_type(@reader_ctx at);
+    rd_dc_grouped_place(@reader_ctx at);
     reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "could not parse the statement starting here; check the syntax near the underlined token");
+}
+
+# (`(p + 1)[0] = v`: an assignment into a parenthesized expression's element or field, in an
+# unread statement: what is assigned to starts with a name)
+rd_dc_grouped_place=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    if reader_ctx.tokens[at].symbol not=? 'lparen' {return}
+    let k:int64=at + 1
+    let depth:int64=1
+    loop depth >? 0 {
+        let t:DewyLexeme=reader_ctx.tokens[k]
+        if t.kind =? 'eof' or t.newline {return}
+        if t.symbol =? 'lparen' or t.symbol =? 'lbrack' {depth += 1}
+        else if t.symbol =? 'rparen' or t.symbol =? 'rbrack' {depth -= 1}
+        k += 1
+    }
+    let next:DewyLexeme=reader_ctx.tokens[k]
+    if next.newline or (next.symbol not=? 'lbrack' and next.symbol not=? 'dot') {return}
+    loop (reader_ctx.tokens[k].kind not=? 'eof') and (not reader_ctx.tokens[k].newline or k =? at) {
+        if reader_ctx.tokens[k].symbol =? 'assign' {
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "an assignment's target starts with a name: give the parenthesized value one first, as in `let q = p + 1` and then `q[0] = v`");
+        }
+        k += 1
+    }
 }
 
 # (`(g:@Graph)`: the `@` of a mutable parameter written on its type, in the line of an unread
