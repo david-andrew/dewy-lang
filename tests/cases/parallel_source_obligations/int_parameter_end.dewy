@@ -1,0 +1,7 @@
+# An `int` parameter holds any integer: a parallel range's int64 end must be proven to fit.
+count = (n:int):>int64 => {
+    let total = atomic(0)
+    parallel i in [0..n) { total.add(1); }
+    total.load
+}
+main = ():>void => printl(count(5))

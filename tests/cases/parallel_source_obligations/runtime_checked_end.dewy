@@ -1,0 +1,4 @@
+# Under `$runtime_checks` the conversion is checked where it runs.
+$runtime_checks
+doubles = (n:int):>array<int64> => [parallel i in [0..n) i * 2]
+main = ():>void => printl(doubles(4))

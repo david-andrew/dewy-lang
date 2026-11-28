@@ -969,10 +969,15 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
             }
             # (walked for what its callback's parameter takes, without its call's own
             # obligations: fact_slice_capture)
-            else if demand_static and fact_parallel_array(SlicePrepWord(nodes.ptr[n].a)) {
+            else if demand_static and nodes.ptr[SlicePrepWord(nodes.ptr[n].a)].kind =? 'call' and nkids(SlicePrepWord(nodes.ptr[n].a)) >? 0 {
                 fsp_push_act(n)
-                let source=kid(SlicePrepWord(nodes.ptr[n].a) 0)
-                if nodes.ptr[source].kind =? 'ident' {fsp_push_val(source)}
+                let call=SlicePrepWord(nodes.ptr[n].a)
+                let source=kid(call 0)
+                # (the source's own obligations, as anywhere: an `int` endpoint narrowed to
+                # the range's int64, an index; its value, captured by fact_slice_capture)
+                fsp_visit_child(source call)
+                fsp_push_val(source)
+                if not fact_parallel_array(call) {}
                 else if fact_parallel_range_source(source) {
                     # (a name read again for the positions, fact_parallel_range_bound; one
                     # converted first only when it is a local `let`, whose conversion then is proved)

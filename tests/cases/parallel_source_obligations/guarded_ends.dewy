@@ -1,0 +1,20 @@
+# Guards prove the conversion, the index and the divisor.
+count = (n:int):>int64 => {
+    if n <? 0 or n >? 1000 return 0
+    let total = atomic(0)
+    parallel i in [0..n) { total.add(1); }
+    total.load
+}
+row_sums = (rows:array<array<int64>> r:int64):>array<int64> => {
+    if r <? 0 or r >=? rows.length return []
+    [parallel x in rows[r] x // 2]
+}
+chunks = (a:int64 b:int64):>int64 => {
+    if b =? 0 return 0
+    [parallel i in [0..a // b) i].length
+}
+main = ():>void => {
+    printl(count(5))
+    printl(row_sums([[4 6] [3]] 0))
+    printl(chunks(6 2))
+}

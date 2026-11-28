@@ -487,10 +487,13 @@ fact_slice_capture=(n:ForkWord @s:FactState):>ForkWord=>$unsafe {
     # visits: a range's positions, or a named array's elements, read again here)
     if k =? 'parallel_region' {
         let call=ForkWord(nodes.ptr[n].a)
+        if nodes.ptr[call].kind not=? 'call' or nkids(call) =? 0 {return 0}
+        # (its source's own obligations first: a narrowed endpoint, an index)
+        let source=kid(call 0)
+        let value=fact_capture(source @s)
         if fact_parallel_array(call) {
-            let source=kid(call 0)
             if tkind(fact_type(ntype(source))) not=? 'array' {fact_parallel_record(call @s 0)}
-            else if nodes.ptr[source].kind =? 'ident' {fact_parallel_record(call @s fact_capture(source @s))}
+            else if nodes.ptr[source].kind =? 'ident' {fact_parallel_record(call @s value)}
         }
         return 0
     }
