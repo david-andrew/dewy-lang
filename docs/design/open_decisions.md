@@ -43,6 +43,7 @@
   - D47 Q1–Q3: `$time.monotonic = 'awake'`; readings that know their clock (`r.elapsed`, deadlines as timeouts); test clocks (`$time.clock = time.test_clock()`) that jump when everything waits.
   - D48 Q2–Q6: argparse subcommands, `env=` fallbacks, a `check=` rule across arguments, `Parsed<Spec>`, `separator=` for lists.
   - D49 Q3: bare literal arms (`"look" =>`), and a bare name hiding a value becomes an error.
+  - D50 Q1: `max(xs default=d)`, `min(xs default=d)` and `default=` on `min_by`/`max_by`.
 - **(c) Names only:**
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
@@ -2145,6 +2146,7 @@ Use these pattern type names and the field words below?
 #### Other details
 
 - Pattern kinds do not overlap: integer style selects an integer pattern, other number options a number pattern, fill/alignment/width alone a text pattern, and field words a date/time pattern. Number patterns use Python's mini-language.
+- A single-field duration pattern prints the whole count in that unit, its unit written after it, so a column of durations shares one unit: `fmt'second'(9min)` is `540s` beside `fmt'second'(390s)`'s `390s`. (Recommended; ladder 150's schedule printed `390s` above `9min`.)
 - Adjacent numeric fields joined by `- / . :` or `""` have two digits, except a duration's unpadded first field. `hour12` needs `am_pm`; `zone_short` writes but does not read; pattern holes must be counts.
 - `iso_basic` writes an instant with `Z`, a zoned time with its offset, a local time without an offset, and a date alone; readers accept each. An `Instant` pattern uses `$program.time_zone`, while plain interpolation stays ISO UTC.
 - Exact rounding stays half away from zero; float rounding stays half to even. `DatePattern(text)` and `NumberPattern(text)` support run-time patterns. TR35 letters, `x.format(…)` and `format(x spec)` are removed, following D19e.
@@ -2214,6 +2216,25 @@ Use `stack(rows)` and `Ragged`, including failure for an empty list? `stack_rows
 **Rec:** `stack` and `Ragged`.
 
 Dogfooded; names read cold. Full design, review and parser fixtures: `proposals/array-literals/round2.md`; the parser makes one forward scan per gap, skips comments and does not backtrack.
+
+---
+
+### D50. A default for `min`, `max`, `min_by` and `max_by` of an empty array
+
+#### Q1 (b). `default=` on the four reductions
+
+```dewy
+let width = max([loop r in rows r.name.length] default=0)
+let next_id = max([loop u in users u.id] default=0) + 1
+let oldest = files.min_by((f) => f.modified default=none) ?? return
+```
+
+Give `min(xs)`, `max(xs)`, `xs.min_by(key)` and `xs.max_by(key)` a `default=` argument, the value an empty `xs` gives? The result joins the element type with the default's (`default=none` gives `T?`, as `pop(default=none)` does), and a call with a default has no `length >? 0` obligation. Without one, nothing changes.
+
+- **Rec:** yes. Today an empty-safe maximum is `if xs.is_empty 0 else max(xs)`, which repeats the array, or `max([0 xs...])`, which is wrong for negative values. Python's `max(xs, default=0)` is the same word in the same place; `default` is already Dewy's name for this role (`d.pop(k default=v)`). **Reversible:** yes, an added parameter.
+- **Unblocks:** empty-safe widths, ids and latest-of lookups without a branch or a proof (ladder 149, 150).
+
+Dogfooded (10 programs, 49 of 50 marks at 5; the 4 is a key lambda and `default=` sharing one call). Programs and grades: [proposals/reductions/round1.md](proposals/reductions/round1.md).
 
 ---
 
