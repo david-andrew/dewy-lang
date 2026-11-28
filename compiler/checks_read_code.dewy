@@ -2,7 +2,8 @@ $runtime_checks
 from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"checked_expression_nodes.dewy" import (bc_assign bc_bin)
 
-from p"@lib/core/str.jo" import (starts_with)
+from p"@lib/core/str.jo" import (contains starts_with)
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"ast.jo" import (NF_MUT has_flag kid kid2 mk nkids nkids2 nodes set_list)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_builders.dewy" import (bc_block bc_bool bc_call bc_field bc_ident bc_if bc_int bc_let bc_stmt bc_str)
@@ -15,10 +16,60 @@ from p"ide_text.dewy" import (ide_param_text)
 from p"node_store.dewy" import (NK)
 from p"types.jo" import (T_F32 T_I32 T_MAT4 fields is_float is_int is_union prune structs tkind ts_params types union_members variants)
 from p"type_ops.dewy" import (dt fixed_len type_str)
-from p"util.jo" import (files name_of pos_file)
+from p"util.jo" import (files name_of pos_file pos_off)
 from p"diagnostic_exit.dewy" import (fatal)
 
 CodeWord:type=int64<overflow='wrap'>
+# A Dewy parameter's type as an error says it: as written when its contract has no spelling
+# of its own (`array<int64<(<? x.length)>>`, not `array<int64<refinement>><refinement>`).
+param_type_text=(d:CodeWord p:CodeWord t:CodeWord):>string=>$unsafe {
+    let shown=sig_dt(d t)
+    if not contains(shown "<refinement>") or p =? 0 or nodes.ptr[p].kind not=? 'param' or nodes.ptr[p].a =? 0 {return shown}
+    let written=written_type_text(CodeWord(nodes.ptr[p].a))
+    if written =? "" {shown} else {written}
+}
+# The source text of type syntax ty, to the end of its angle brackets (comparisons such as
+# `<?` inside a contract's parentheses are not brackets); "" when it cannot be read back.
+# O(its length).
+written_type_text=(ty0:CodeWord):>string=>$unsafe {
+    # (a contract or applied type starts where its base does)
+    let ty=ty0
+    loop (nodes.ptr[ty].kind =? 'trefined' or nodes.ptr[ty].kind =? 'typeapply') and nodes.ptr[ty].a not=? 0 {ty=CodeWord(nodes.ptr[ty].a)}
+    let pos=CodeWord(nodes.ptr[ty].pos)
+    let file=pos_file(pos)
+    if file <? 0 or file >=? files.length or not files[file].is_dewy {return ""}
+    let src=files[file].src as array<uint8>
+    let start=CodeWord(pos_off(pos))
+    if start <? 0 or start >=? src.length or not (src[start] >=? b'a' and src[start] <=? b'z' or src[start] >=? b'A' and src[start] <=? b'Z') {return ""}
+    let angles:CodeWord=0
+    let parens:CodeWord=0
+    let i=start
+    loop i <? src.length {
+        let c=src[i]
+        # (`<?`, `>=?`, `=>`: comparisons and arrows, not brackets)
+        let operator=(c =? b'<' or c =? b'>') and (i + 1 <? src.length and (src[i + 1] =? b'?' or src[i + 1] =? b'=') or i >? start and src[i - 1] =? b'=')
+        if operator {}
+        else if c =? b'(' or c =? b'[' {parens += 1}
+        else if c =? b')' or c =? b']' {
+            if parens =? 0 {break}
+            parens -= 1
+        }
+        else if parens =? 0 and c =? b'<' {angles += 1}
+        else if parens =? 0 and c =? b'>' {
+            if angles =? 0 {break}
+            angles -= 1
+            if angles =? 0 {
+                i += 1
+                break
+            }
+        }
+        else if parens =? 0 and angles =? 0 and (c =? b' ' or c =? b'\n' or c =? b'=' or c =? b',') {break}
+        else if c =? b'\n' {return ""}
+        i += 1
+    }
+    if angles not=? 0 or parens not=? 0 or i <=? start or i - start >? 200 {return ""}
+    __str_slice(files[file].src start i)
+}
 # (the ones a call with the wrong number of arguments could have meant: "; there are f(a: int),
 # f(a: int, b: int)")
 overloads_text=(decls:array<int64> err:string):>string=>$unsafe {
@@ -87,7 +138,7 @@ dewy_call_text_in=(d:CodeWord):>string=>$unsafe {
         let pn=name_of(CodeWord(nodes.ptr[p].name))
         if starts_with(pn "$parameter") {pn="_"}
         s="{s}{pn}"
-        if i <? sig.params.length and sig.params[i] not=? 0 {s="{s}:{dt(sig.params[i])}"}
+        if i <? sig.params.length and sig.params[i] not=? 0 {s="{s}:{param_type_text(d p sig.params[i])}"}
     }
     s="{s})"
     s

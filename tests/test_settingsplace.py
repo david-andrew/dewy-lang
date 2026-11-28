@@ -196,7 +196,7 @@ def test_function_core_cap_keeps_integer_contract(compiler, tmp_path, value, fou
     path.write_text(f'main=()=>{{\n$program.max_cores={value}\nprintl(42)\n}}\n')
     result = subprocess.run([compiler, 'check', path], capture_output=True, text=True, timeout=60)
     assert result.returncode != 0
-    assert f"argument 'cores' expects int<refinement>, found {found}" in result.stderr, result.stderr
+    assert f"argument 'cores' expects int<(>=? 1)>, found {found}" in result.stderr, result.stderr
 
 
 def test_guarded_mathematical_integer_core_count(compiler, tmp_path):

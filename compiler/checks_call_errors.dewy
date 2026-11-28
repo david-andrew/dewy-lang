@@ -27,7 +27,7 @@ from p"collection_checks.dewy" import (comprehension_binding)
 from p"expr_rare.dewy" import (union_dispatch)
 from p"expr_hints.dewy" import (array_elems_gap_text map_args_text refuted_literal_contract)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"checks_read_code.dewy" import (call_text overloads_text sig_dt)
+from p"checks_read_code.dewy" import (call_text overloads_text param_type_text sig_dt)
 from p"checks_compare_hints.dewy" import (dewy_operator_fn_text uncalled_hint variant_hint variant_hint_for)
 from p"ide.jo" import (IK_PARAM)
 from p"ide_decls.dewy" import (ide_dewy_alt)
@@ -49,7 +49,7 @@ rfc_arg_message=(d:CallErrorWord fi:CallErrorWord a:CallErrorWord ptx:CallErrorW
     let refuted=refuted_literal_contract(a ptx name_of(CallErrorWord(nodes.ptr[kid(d fi)].name)))
     if refuted not=? "" {last_err=refuted}
     else if nodes.ptr[a].type not=? 0 {
-        last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' expects {sig_dt(d ptx)}, found {dt(ntype(a))}{variant_hint(a ptx)}{array_elems_gap_text(ntype(a) ptx)}"
+        last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' expects {param_type_text(d kid(d fi) ptx)}, found {dt(ntype(a))}{variant_hint(a ptx)}{array_elems_gap_text(ntype(a) ptx)}"
         # (`sum_all(sizes)`, sizes an `array<int64>` where an `array<int>` is wanted)
         # (`counts[d]`-style calls with d from `t.in_zone(z).date`: the failure it may hold, for the program to answer)
         if dewy_at(nodes.ptr[a].pos) and is_union(ntype(a)) and not is_union(ptx) and tkind(ptx) not=? 'opt' {

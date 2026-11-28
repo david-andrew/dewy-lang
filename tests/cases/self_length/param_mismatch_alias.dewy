@@ -1,0 +1,5 @@
+# A refined parameter's alias keeps its name in a call's mismatch, and a contract written
+# inline is said as written.
+Small:type = int64<v => 0 <=? v and v <? 100>
+f = (x:Small y:int64<v => v >? 0>):>int64 => x
+main = () => printl(f(1 "two"))
