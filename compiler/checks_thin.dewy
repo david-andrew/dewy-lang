@@ -12,7 +12,7 @@ from p"expression_types.dewy" import (ntype)
 
 from p"@lib/core/os.jo" import (cwd exit)
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (NF_RDONLY has_flag kid kid2 nkids nkids2 nodes shadowable_decls)
+from p"ast.jo" import (NF_EXTERN NF_RDONLY has_flag kid kid2 nkids nkids2 nodes shadowable_decls)
 from p"check.jo" import (FK_INIT LF_UNNARROWED ctxs cx fns globals inst_counter lib_dir locals loop_copy_writes ml_struct ml_tick module_by_path module_ctx module_frames modules narrow_changes prelude refine_deferred runtime_insts syms values_hint_label)
 from p"checker_startup.dewy" import (load_std_file)
 from p"prelude.jo" import (dp_mods prelude_std_pending)
@@ -257,9 +257,11 @@ check_assign=(s:ThinWord):>int64=>{
     va_assign(s)
 }
 # a function another engine would call, which nothing here does: one warning, saying what is
-# called instead (not also that it is never called)
+# called instead (not also that it is never called). A `$extern` is C's function of that
+# name (`atexit`, `on_exit`), which the program calls itself.
 callback_warn=(gs:ThinWord msg:string):>void=>$unsafe {
     let d=ThinWord(syms.ptr[gs].decl)
+    if has_flag(d NF_EXTERN) {return}
     fn_used[d]=true
     warn(nodes.ptr[d].pos msg)
 }
