@@ -9,7 +9,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 | Measure | Now (2026-11-07) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 150/150 (+1 held on D40) | all |
+| Acceptance ladder, design surface | 153/153 (+1 held on D40) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,073 sites in 929 of 2,252 programs (11-21, `tools/compiler/census.py`), down from 3,600 on 10-26 | ordinary code proves without opt-ins |
 | Compile throughput, single thread, default build, every processed line | flagships 371.6k lines/s total, every flagship ≥ 300k (11-27, moonshot slices) | 200–250k on every flagship |
@@ -44,8 +44,9 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    proof. Default builds already inline known callbacks (checked 11-20). Next:
    dictionary helpers.
 5. **Decided surface still to build** ([decisions.md](docs/design/decisions.md)):
-   the rest of the time system; self-length refinements (D17); R-value units;
-   examples needing `$runtime_checks`, 21 of 29 as of 11-06, toward zero.
+   the rest of the time system; nested self-length lists (D17's common uses and
+   R-values work, 11-28); examples needing `$runtime_checks`, 2 of 32 as of 11-28
+   (physics handles: needs a way for a library to declare handle validity).
 6. **Generators (D45) are decided and being built** (Neon, `~/dev/tmp/generators-v1/brief.md`;
    undecided edges are compile errors). **In David's other design rounds, build nothing:** D4 parallel (`select`, cancel
    scopes, metatag placement, `tasks`), D10 safety tags, D11 game APIs, D21
