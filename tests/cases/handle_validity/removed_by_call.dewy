@@ -1,0 +1,15 @@
+# A call whose summary removes the handle refutes it afterwards.
+Thing:type=[hp:int64]
+World:type=[things:Pool<Thing>]
+Body:type=[h:Handle]
+contains=(w:World b:Body):>bool=>b.h in? w.things
+add=(@w:World hp:int64):>Body<(in? w)>=>Body[w.things.add(Thing[hp])]
+kill=(@w:World b:Body):>void=>{w.things.remove(b.h);}
+hp=(w:World b:Body<(in? w)>):>int64=>w.things[b.h].hp
+main=():>void=>{
+    let w=World[Pool<Thing>[]]
+    let a=w.add(3)
+    let b=w.add(4)
+    w.kill(b)
+    printl(w.hp(b))
+}

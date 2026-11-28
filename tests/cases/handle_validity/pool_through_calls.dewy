@@ -1,0 +1,12 @@
+# A handle from Pool's own `add` stays proven across a call that takes the pool
+# with `@` but only reads it or changes its items (round1 §1 row 7).
+Enemy:type=[hp:int64]
+count=(@pool:Pool<Enemy>):>int64=>pool.items.length
+hurt_all=(@pool:Pool<Enemy>):>void=>{loop i in [0..pool.items.length) {pool.items[i].hp -= 1}}
+main=():>void=>{
+    let pool:Pool<Enemy>=Pool<Enemy>[]
+    let h=pool.add(Enemy[5])
+    printl(count(@pool))
+    hurt_all(@pool)
+    printl(pool[h].hp)
+}

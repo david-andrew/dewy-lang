@@ -916,10 +916,23 @@ So does a loop over an array that ends each iteration with its element a key and
 removes none (no `break`), `loop name in [white black] { if name not in? d d[name] = 0 }`
 (Python's `setdefault` over a few names): after it, `d[white]` needs no guard.
 `pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
-`h = pool.add(x)` or a guard (`if pool.has(h)`) with nothing since that may have
+`h = pool.add(x)` or a guard (`if pool.has(h)`, or `if h in? pool`) with nothing since that may have
 removed `h`: stores, updates and loops that do not remove keep it, and so does
 `pool.remove(g)` when `g` and `h` both came from `add` on this pool, one while the
 other was in; `pool.get(h)` takes a missing handle as a value.
+Any container states handle validity the same way: `h in? c` means `c`'s
+`contains(c h)` (a pure function of the two values), and a membership
+refinement carries it. `b:Body<(in? w)>` on a parameter requires it of the caller
+and gives the callee `contains`'s body as facts; `:>Body<(in? w)>` on a result
+establishes it after the call (for a `@w`, in `w`'s final value). A call keeps the
+caller's memberships when its callee, read from its body, cannot remove them (it
+only adds, changes items, or writes other fields); a removal keeps every member
+provably different from the removed one (each `add` result is fresh), and anything
+else forgets. A `contains` whose body is one membership of its fields,
+`contains = (w:World b:Body):>bool => b.h in? w.bodies`, is that membership. An
+unproven one is an error naming the handle and the container; under `$runtime_checks`
+it is checked when it runs by calling `contains`, and a refuted one (`` `b` is no
+longer in `w` ``) stays an error.
 A stepped range's nonzero step is the caller's obligation too, as a divisor is,
 in a slice (`xs[a,b..]`, `m[a,b..c ..]`) and an open counter (`[a,b..]`) as in a loop.
 A literal can rule a failure out: a power with a literal exponent `>=? 0` and a

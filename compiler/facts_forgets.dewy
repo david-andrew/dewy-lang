@@ -29,6 +29,7 @@ from p"facts_projection_queries.dewy" import (fact_projection_find fact_projecti
 from p"facts_changes.dewy" import (fact_change_route)
 from p"facts_joins.dewy" import (fact_field_node fact_payload_node)
 from p"facts_pools.dewy" import (fact_pool_type)
+from p"facts_membership.dewy" import (mem_after_call mem_wanted)
 from p"facts_probes.dewy" import (fact_probe_note)
 from p"facts_summaries.dewy" import (fact_summary fact_summary_actual)
 from p"lower_analysis.dewy" import (checked_call_mutmask)
@@ -245,7 +246,13 @@ fact_path_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
             }
         }
     }
+    # (the arguments' values before the call, whose memberships its summary may keep: facts_membership)
+    let members_before:array<int64>=[]
+    if mem_wanted() and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and checked_call_mutmask(n) not=? 0 {
+        loop i in [0..nkids(n)) {members_before.push(fact_summary_actual(n i @s true))}
+    }
     fact_call_effects(n @s)
+    if members_before.length >? 0 {mem_after_call(n @s members_before)}
     if lengths.length =? 0 and shapes.length =? 0 and record_lengths.length =? 0 {return}
     # Only demand the callee's body summary when fact_call_effects actually
     # replaced or invalidated at least one tracked length or shape.

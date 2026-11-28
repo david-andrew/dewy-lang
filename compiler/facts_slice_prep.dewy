@@ -36,7 +36,7 @@ from p"facts_members.dewy" import (fact_member_admit)
 from p"facts_numeric.dewy" import (fact_abs_call fact_extremum_call fact_mod_call fact_power_call fact_rational_constructor fact_rational_divmod fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
 from p"facts_plans.dewy" import (fact_int_components fact_plan_current)
 from p"facts_pools.dewy" import (fact_pool_call)
-from p"facts_membership.dewy" import (mem_call)
+from p"facts_membership.dewy" import (mem_call mem_holder_call)
 from p"facts_pushes.dewy" import (fact_carried_type fact_push_receiver fact_row_array)
 from p"facts_ranges.dewy" import (fact_floor_call fact_open_range fact_range_call fact_range_first fact_stepped_loop)
 from p"facts_summaries.dewy" import (fact_constructor_body fact_constructor_type fact_record_arrays fact_summary_payload)
@@ -678,7 +678,7 @@ fsp_l1_call=(n:SlicePrepWord f:SlicePrepWord flags:SlicePrepWord @writers:FactSl
     if lib_sp {
         if fsp_lib_loop1(n nk l0 (flags & 15) @forks) {probe_only=true}
     } else if result_active or proof_active or fact_divisors.length >? 0 and fact_divisors.has(n) {fsp_push_val(n)}
-    else if demand_static and (has_nd_mut and nd_mutable_call(n) or mem_call(n)) {
+    else if demand_static and (has_nd_mut and nd_mutable_call(n) or mem_call(n) or checked_call_mutmask(n) not=? 0 and mem_holder_call(n)) {
         fsp_push_act(n)
         fsp_push_val(n)
         loop j in [SlicePrepWord(0)..nk) {fsp_push_val(SlicePrepWord(lists.ptr[l0 + j]))}

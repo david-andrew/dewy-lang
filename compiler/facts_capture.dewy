@@ -38,7 +38,7 @@ from p"facts_maps.dewy" import (fact_ensured_close fact_keys_copy fact_keys_elem
 from p"facts_members.dewy" import (fact_member_block fact_member_literal)
 from p"facts_numeric.dewy" import (fact_abs fact_abs_call fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
 from p"facts_pools.dewy" import (fact_pool_call fact_pool_capture)
-from p"facts_membership.dewy" import (mem_capture mem_contains_fn)
+from p"facts_membership.dewy" import (mem_capture mem_contains_fn mem_note mem_result_fresh mem_wanted)
 from p"facts_probes.dewy" import (fact_probe_divisor fact_probe_index fact_probe_record)
 from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first)
 from p"facts_pushes.dewy" import (fact_counted_lengths fact_counted_pushes fact_counted_sums fact_growing_lengths fact_growing_pushes fact_iterate fact_push_close fact_push_open fact_push_record fact_scaled_lengths fact_scaled_pushes)
@@ -1773,7 +1773,10 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
             return fact_fresh(@s ntype(n))
         }
         let pool=if fact_policy =? 'RequireStatic' or fact_query or fact_probe_on {fact_pool_call(n)} else {0}
-        if pool not=? 0 {return fact_pool_capture(n @s values pool)}
+        if pool not=? 0 {
+            mem_note()
+            return fact_pool_capture(n @s values pool)
+        }
         if (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and fact_map_insert_call(n) {
             let stored=fact_map_store(n @s values fact_map_receiver(@s n values[0]))
             if stored not=? 0 {return stored}
@@ -1951,6 +1954,7 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
             if i <? fns[f].params.length and CaptureWord(locals.ptr[fns[f].params[i]].flags) & LF_MUTPARAM not=? 0 {values[i]=fact_after_call(n kid(n i) @s)}
         }
         ref_assume(CaptureWord(fns.ptr[f].ret) result values @s)
+        if mem_wanted() {mem_result_fresh(n @s f result)}
         if refine_active and tkind(prune(CaptureWord(fns.ptr[f].ret))) =? 'generator' {fact_generator_call(@s result CaptureWord(fns.ptr[f].ret) entry)}
         ref_arm_publish(f result values @s)
         if result_active {result_publish(f result values @s)}

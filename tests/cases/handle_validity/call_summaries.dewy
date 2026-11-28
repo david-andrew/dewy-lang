@@ -1,0 +1,22 @@
+# Memberships survive calls that cannot remove them, by each callee's summary,
+# derived from its body: `add` and `hurt` keep every member, `kill(b)` keeps
+# every member but b (each `add` result is fresh, so `a` differs from `b`),
+# and a write to another field keeps the Pool's members.
+Thing:type=[hp:int64]
+World:type=[gravity:int64 things:Pool<Thing>]
+Body:type=[h:Handle]
+contains=(w:World b:Body):>bool=>b.h in? w.things
+add=(@w:World hp:int64):>Body<(in? w)>=>Body[w.things.add(Thing[hp])]
+kill=(@w:World b:Body):>void=>{w.things.remove(b.h);}
+hurt=(@w:World b:Body<(in? w)>):>void=>{w.things[b.h].hp -= 1}
+hp=(w:World b:Body<(in? w)>):>int64=>w.things[b.h].hp
+main=():>void=>{
+    let w=World[10 Pool<Thing>[]]
+    let a=w.add(3)
+    let b=w.add(4)
+    w.hurt(a)
+    w.kill(b)
+    w.gravity=2
+    printl(w.hp(a))
+    if b in? w {printl("b is still there")} else {printl("b is gone")}
+}

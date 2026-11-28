@@ -1,0 +1,14 @@
+# A call that may remove any member (here `retain` with a callback) forgets them all.
+Thing:type=[hp:int64]
+World:type=[things:Pool<Thing>]
+Body:type=[h:Handle]
+contains=(w:World b:Body):>bool=>b.h in? w.things
+add=(@w:World hp:int64):>Body<(in? w)>=>Body[w.things.add(Thing[hp])]
+cull=(@w:World):>void=>w.things.retain((t:Thing)=>t.hp >? 0)
+hp=(w:World b:Body<(in? w)>):>int64=>w.things[b.h].hp
+main=():>void=>{
+    let w=World[Pool<Thing>[]]
+    let a=w.add(3)
+    w.cull()
+    printl(w.hp(a))
+}

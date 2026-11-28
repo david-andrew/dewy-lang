@@ -1,0 +1,15 @@
+# Dogfood program 06's error: closing a descriptor twice is refuted at compile time.
+FakeFile:type=[at:int64]
+FileId:type=[h:Handle]
+Files:type=[open:Pool<FakeFile>]
+contains=(fs:Files f:FileId):>bool=>f.h in? fs.open
+open=(@fs:Files):>FileId<(in? fs)>=>FileId[fs.open.add(FakeFile[0])]
+close=(@fs:Files f:FileId<(in? fs)>):>void=>{fs.open.remove(f.h);}
+main=():>void=>{
+    let fs=Files[Pool<FakeFile>[]]
+    let src=fs.open()
+    let dst=fs.open()
+    fs.close(src)
+    fs.close(dst)
+    fs.close(src)
+}
