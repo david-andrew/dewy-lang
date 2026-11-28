@@ -34,7 +34,7 @@ from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_
 from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_array_extremum fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
 from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check fact_parallel_range_call fact_refinements_unreachable fact_scope_exit)
 from p"facts_loops.dewy" import (fact_generator_call fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
-from p"facts_maps.dewy" import (fact_map_value_refined fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_reflexive_key)
+from p"facts_maps.dewy" import (fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_map_value_refined fact_reflexive_key fact_snapshot_length)
 from p"facts_members.dewy" import (fact_member_block fact_member_literal)
 from p"facts_numeric.dewy" import (fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
 from p"facts_pools.dewy" import (fact_pool_call fact_pool_capture)
@@ -981,6 +981,7 @@ fc_loop=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     let growers:array<[int64 int64]>=[]
     let sums:array<[int64 FactBound]>=[]
     let scaled:array<[int64 int64 int64]>=[]
+    let entries:CaptureWord=0
     if indexed {
         pushes=fact_counted_pushes(n @s)
         growers=fact_growing_pushes(n @s pushes)
@@ -996,6 +997,11 @@ fc_loop=(n:CaptureWord @s:FactState):>int64=>$unsafe {
             if not b.wide {trips=max(0 min(trips b.hi))}
         }
         sums=fact_counted_sums(n s trips)
+    }
+    # (a dictionary's loop runs once per entry of its snapshot: fact_snapshot_count)
+    else if mapped {
+        pushes=fact_counted_pushes(n @s)
+        if pushes.length >? 0 {entries=fact_snapshot_length(@s base fact_type(ntype(CaptureWord(nodes.ptr[n].a))))}
     }
     # (positions the body keeps below a length: fact_loop_bounds)
     let demands=fact_loop_bound_entry(fact_loop_bound_demands(n) @s)
@@ -1022,7 +1028,7 @@ fc_loop=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     fact_growing_lengths(@s growers)
     if pushes.length >? 0 or scaled.length >? 0 {
         let t=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
-        let count=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s base (-1) false T_INT)}
+        let count=if mapped {entries} else if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s base (-1) false T_INT)}
         fact_counted_lengths(n @s pushes count)
         fact_scaled_lengths(n @s scaled count)
     }

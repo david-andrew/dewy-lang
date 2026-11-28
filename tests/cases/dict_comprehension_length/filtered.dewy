@@ -1,0 +1,6 @@
+# A filter may keep none of the entries.
+largest = (d:dict<string int64>):>int64 => {
+    if d.is_empty return 0
+    [loop [k v] in d if v >? 5 v].max
+}
+printl(largest(["a"->1]))

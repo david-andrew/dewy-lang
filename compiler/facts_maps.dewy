@@ -20,6 +20,7 @@ from p"facts_forgets.dewy" import (fact_dewy_local fact_forget fact_path_call_ef
 from p"facts_routes.dewy" import (fact_constant_global fact_receiver_route fact_route_values fact_store_route)
 from p"facts_changes.dewy" import (fact_change_route fact_changes)
 from p"facts_elements.dewy" import (fact_inventory fact_inventory_bound)
+from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_joins.dewy" import (fact_field_node fact_grown_root fact_map_grew)
 from p"facts_members.dewy" import (fact_member_literal)
 from p"facts_probes.dewy" import (fact_probe_record)
@@ -529,15 +530,43 @@ fact_map_snapshot=(n:MapWord @s:FactState map:MapWord):>MapWord=>$unsafe {
         fact_path_call_effects(n @s)
         return fact_fresh(@s ntype(n))
     }
-    if map =? 0 or fact_projection_find(s map FACT_MAP_DENSE false) <? 0 {return fact_fresh(@s ntype(n))}
+    if map =? 0 {return fact_fresh(@s ntype(n))}
     let t=fact_type(ntype(n))
     let value=fact_fresh(@s t)
-    loop i in [0..2) {
-        let f=fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields) + i]
-        let part=fact_project(@s map int64(f.name) false int64(f.type))
-        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value int64(f.name) false part))}
+    if fact_projection_find(s map FACT_MAP_DENSE false) >=? 0 {
+        loop i in [0..2) {
+            let f=fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields) + i]
+            let part=fact_project(@s map int64(f.name) false int64(f.type))
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value int64(f.name) false part))}
+        }
     }
+    fact_snapshot_count(@s map value t)
     value
+}
+# A snapshot holds one entry per live entry of its dictionary (gone ones are left out):
+# its keys' length is the dictionary's entry count, so a loop over it runs that many
+# times (`[loop [k v] in d v]` is nonempty when d is). O(1).
+fact_snapshot_count=(@s:FactState map:MapWord value:MapWord t:MapWord):>void=>$unsafe {
+    if s.projections.length + 3 >=? FACT_CAP {return}
+    let f=fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields)]
+    let keys=fact_project(@s value int64(f.name) false int64(f.type))
+    let count=fact_project(@s map (-1) false T_INT)
+    if fact_projection_find(s keys (-1) false) <? 0 {
+        fact_add_projection(@s FactProjection(keys (-1) false count))
+        return
+    }
+    let length=fact_project(@s keys (-1) false T_INT)
+    if length =? count {return}
+    fact_difference(@s length count 0)
+    fact_difference(@s count length 0)
+}
+# The entry count of a dictionary snapshot's value of type t (fact_snapshot_count), or 0. O(1).
+fact_snapshot_length=(@s:FactState value:MapWord t:MapWord):>MapWord=>$unsafe {
+    if value =? 0 or tkind(t) not=? 'struct_' {return 0}
+    let f=fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields)]
+    let keys=fact_projection_find(s value int64(f.name) false)
+    if keys <? 0 {return 0}
+    fact_project(@s s.projections[keys].value (-1) false T_INT)
 }
 # A readonly dictionary loop takes key/value hulls from its entry snapshot,
 # even when the source dictionary is subsequently changed. Mutable loops

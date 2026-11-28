@@ -1,0 +1,19 @@
+# A loop over a dictionary runs once per entry, so what it collects from a
+# nonempty one is nonempty: keys, values, or pairs of both.
+largest = (d:dict<string int64>):>int64 => {
+    if d.is_empty return 0
+    [loop [k v] in d v].max
+}
+longest = (d:dict<string int64>):>int64 => {
+    if d.is_empty return 0
+    [loop k in d k.length].max
+}
+shortest = (d:dict<string int64>):>string => {
+    if d.is_empty return ""
+    [loop [k v] in d "{k}={v}"].sorted[0]
+}
+let d:dict<string int64> = ["ann"->3 "bo"->9]
+d.pop("ann")
+printl"{largest(d)} {longest(d)} {shortest(d)}"
+let none_yet:dict<string int64> = []
+printl"{largest(none_yet)} {longest(none_yet)} [{shortest(none_yet)}]"
