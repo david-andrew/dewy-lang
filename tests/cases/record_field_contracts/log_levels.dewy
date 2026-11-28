@@ -1,0 +1,24 @@
+# `entries` has no result annotation: its array of records keeps each level as a Level,
+# so it indexes a five-element array with no check.
+Level:type = <0 | 1 | 2 | 3 | 4>
+NAMES = ["debug" "info" "warn" "error" "fatal"]
+
+level_of = (word:string):>Level | none => {
+    loop l in members(Level) { if word =? NAMES[l] return l }
+    none
+}
+
+entries = (lines:array<string>) => [loop line in lines {
+    let words = line.split(" ")
+    if words.length <? 2 continue
+    [level = level_of(words[0]) ?? continue  text = words[1..].join(" ")]
+}]
+
+main = () => {
+    let log = entries(["info start" "warn disk 91%" "bogus line" "info ready" "error lost peer" "debug tick"])
+    let counts:array<int64 length=5> = [0 0 0 0 0]
+    loop e in log counts[e.level] += 1
+    loop name in NAMES and n in counts printl"{name} {n}"
+    let worst = [loop e in log if e.level >=? 3 e]
+    if worst.length >? 0 printl"first problem: {worst[0].text}"
+}

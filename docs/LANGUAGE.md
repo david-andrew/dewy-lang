@@ -2331,7 +2331,12 @@ be given, except an optional one (`next:Node?`), which defaults to `none`; leavi
 out a required field is an error naming the field. When every field has a default, the type's
 bare name where a value goes constructs it, as `Origin()` would: `let p = Origin`.
 The name stays the type in `Origin[...]`, `Origin.member` and `is? Origin`.
-Without an expected type, named fields infer an anonymous record. Anonymous record types agree by field names and types, even
+Without an expected type, named fields infer an anonymous record. A field takes its value's
+declared type, refinement included: with `c:Count`, `[cells = c]` is `[cells:Count]`, as a
+parameter's, annotated binding's, field's or declared result's contract gives it (an `if` or
+`??` whose arms one contract admits keeps it). A literal, arithmetic or a guarded value gives the
+plain type, as does a contract naming another binding, and `c as int64` keeps a field plain.
+Anonymous record types agree by field names and types, even
 when written in a different order, so one prints, like its JSON, with its fields in name
 order wherever it was written: `printl([y=2 x=1])` prints `[x=1 y=2]`. One converts to a shape whose integer fields
 differ only in width (`[x:int]` where `[x:int64]` is wanted), each such field the

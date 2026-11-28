@@ -1,0 +1,137 @@
+$runtime_checks
+# An inferred record field takes its value's written contract (docs/design/proposals/records/
+# refinements-round1.md): `[cells = c]` with `c:Count` is `[cells:Count]`. Reads already give
+# the plain representation, so the contract comes from where the value was declared: a
+# place's storage, a direct call's declared result, or the arms of an `if` or `??` that agree.
+# Facts (literals, arithmetic, guards) never become field types. O(arms) per field.
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (LF_ALIAS fns locals)
+from p"refine.jo" import (refine_active ref_predicates)
+from p"refine_metadata.dewy" import (refine_storage representation_type)
+from p"checks_thin_expr.dewy" import (int_intervals_wide)
+from p"intervals.dewy" import (interval_missing)
+from p"array_element_conversion.dewy" import (elem_subsumes)
+from p"types.jo" import (T_NEVER is_union prune type_eq types union_members)
+from p"expression_types.dewy" import (ntype)
+
+FieldContractWord:type=int64<overflow='wrap'>
+
+# The type t0 refined with t's representation, when its atoms name only the value and
+# constants (a contract naming a parameter, a local or a sibling means nothing in the record).
+fc_closed=(t0:FieldContractWord t:FieldContractWord):>FieldContractWord=>$unsafe {
+    let d=prune(t0)
+    if types.ptr[d].kind =? 'opt' {return fc_closed(FieldContractWord(types.ptr[d].elem) t)}
+    if is_union(d) {
+        # (`Count | UsageError` after `or_throw`: the member t reads as)
+        let found:FieldContractWord=0
+        loop m in union_members(d) {
+            let c=fc_closed(m t)
+            if c not=? 0 {
+                if found not=? 0 and found not=? c {return 0}
+                found=c
+            }
+        }
+        return found
+    }
+    if types.ptr[d].kind not=? 'refined' or types.ptr[d].bits <? 0 or not type_eq(representation_type(d) t) {return 0}
+    loop atom in ref_predicates[FieldContractWord(types.ptr[d].st)] {
+        let ka=atom.a.kind
+        let kb=atom.b.kind
+        if ka not=? 0 and ka not=? 1 and ka not=? 4 or kb not=? 0 and kb not=? 1 and kb not=? 4 {return 0}
+    }
+    d
+}
+# The declared type v carries, before choosing the member t reads as.
+fc_declared=(v:FieldContractWord):>FieldContractWord=>$unsafe {
+    let k=nodes.ptr[v].kind
+    if k =? 'call' {
+        let f=FieldContractWord(nodes.ptr[v].sym)
+        if nodes.ptr[v].aux =? 0 and f >? 0 and f <? fns.length {return FieldContractWord(fns.ptr[f].ret)}
+        return 0
+    }
+    if k =? 'propagate' {return fc_declared(FieldContractWord(nodes.ptr[v].a))}
+    if k =? 'block' {
+        # (`f(x) or_throw` checks as `{let tmp = f(x); if tmp is? E return tmp; tmp}`)
+        let last=fc_arm(v)
+        if last =? 0 {return 0}
+        let first=kid(v 0)
+        if nkids(v) <? 2 or nodes.ptr[last].kind not=? 'ident' or nodes.ptr[last].aux not=? int32(1) or nodes.ptr[first].kind not=? 'vardecl' or nodes.ptr[first].b =? 0 {return 0}
+        # (the value read may be tmp narrowed: an alias of it)
+        let l=FieldContractWord(nodes.ptr[last].sym)
+        loop depth in [0..4) {
+            let alias=FieldContractWord(locals.ptr[l].alias)
+            if l =? FieldContractWord(nodes.ptr[first].sym) or FieldContractWord(locals.ptr[l].flags) & LF_ALIAS =? 0 or alias =? 0 {break}
+            loop (nodes.ptr[alias].kind =? 'narrow' or nodes.ptr[alias].kind =? 'unwrap') and nodes.ptr[alias].a not=? 0 {alias=FieldContractWord(nodes.ptr[alias].a)}
+            if nodes.ptr[alias].kind not=? 'ident' {break}
+            l=FieldContractWord(nodes.ptr[alias].sym)
+        }
+        if l not=? FieldContractWord(nodes.ptr[first].sym) {return 0}
+        # (between them only tests that leave: nothing else can change tmp)
+        loop i in [1..nkids(v) - 1) {
+            let s=kid(v i)
+            if nodes.ptr[s].kind not=? 'if_' or nodes.ptr[s].c not=? 0 or not fc_leaves(FieldContractWord(nodes.ptr[s].b)) {return 0}
+        }
+        return fc_declared(FieldContractWord(nodes.ptr[first].b))
+    }
+    refine_storage(v 0)
+}
+# Whether statement b (a block or one statement) ends by leaving: return, break or continue.
+fc_leaves=(b:FieldContractWord):>bool=>$unsafe {
+    let s=if nodes.ptr[b].kind =? 'block' and nkids(b) >? 0 {kid(b nkids(b) - 1)} else {b}
+    let k=nodes.ptr[s].kind
+    k =? 'return_' or k =? 'break_' or k =? 'continue_'
+}
+# The value an `if` arm gives: its block's last expression.
+fc_arm=(b:FieldContractWord):>FieldContractWord=>$unsafe {
+    if nodes.ptr[b].kind not=? 'block' {return b}
+    if nkids(b) =? 0 {return 0}
+    let last=kid(b nkids(b) - 1)
+    if nodes.ptr[last].kind =? 'exprstmt' {return FieldContractWord(nodes.ptr[last].a)}
+    last
+}
+# Whether arm v (a literal or a value with contract cv) fits contract c.
+fc_fits=(v:FieldContractWord cv:FieldContractWord c:FieldContractWord):>bool=>$unsafe {
+    if cv not=? 0 {return cv =? c or elem_subsumes(cv c)}
+    let e=v
+    loop nodes.ptr[e].kind =? 'conv' {e=FieldContractWord(nodes.ptr[e].a)}
+    if nodes.ptr[e].kind not=? 'int_lit' {return false}
+    let [known low _high]=int_intervals_wide(c)
+    known and interval_missing([nodes.ptr[e].ival nodes.ptr[e].ival] low).length =? 0
+}
+# Whether arm v gives nothing because it leaves (`?? continue`, `else return e`).
+fc_gone=(v:FieldContractWord):>bool=>$unsafe {
+    let e=v
+    loop nodes.ptr[e].kind =? 'conv' and nodes.ptr[e].a >? 0 {e=FieldContractWord(nodes.ptr[e].a)}
+    prune(ntype(e)) =? T_NEVER or fc_leaves(e)
+}
+# Two arms: the contract one has that admits the other (a literal by its value, an arm that
+# jumps away by giving nothing), or 0.
+fc_join=(a:FieldContractWord ca:FieldContractWord b:FieldContractWord cb:FieldContractWord):>FieldContractWord=>$unsafe {
+    if fc_gone(b) {return ca}
+    if fc_gone(a) {return cb}
+    if ca not=? 0 and fc_fits(b cb ca) {return ca}
+    if cb not=? 0 and fc_fits(a ca cb) {return cb}
+    0
+}
+# The contract value v of representation t brings to an inferred field, or 0.
+field_contract=(v:FieldContractWord t:FieldContractWord):>FieldContractWord=>$unsafe {
+    if not refine_active or v <=? 0 {return 0}
+    let k=nodes.ptr[v].kind
+    # (a conversion checking added, as a payload or member a second check reads: fc_closed
+    # still requires the contract's representation to be t)
+    if k =? 'conv' and nodes.ptr[v].a >? 0 {return field_contract(FieldContractWord(nodes.ptr[v].a) t)}
+    if k =? 'if_' and nodes.ptr[v].c not=? 0 {
+        let a=fc_arm(FieldContractWord(nodes.ptr[v].b))
+        let b=fc_arm(FieldContractWord(nodes.ptr[v].c))
+        if a =? 0 or b =? 0 {return 0}
+        return fc_join(a field_contract(a t) b field_contract(b t))
+    }
+    if k =? 'coalesce' {
+        let a=FieldContractWord(nodes.ptr[v].a)
+        let b=FieldContractWord(nodes.ptr[v].b)
+        let opt=prune(fc_declared(a))
+        let ca=if opt not=? 0 and types.ptr[opt].kind =? 'opt' {fc_closed(FieldContractWord(types.ptr[opt].elem) t)} else {0}
+        return fc_join(a ca b field_contract(b t))
+    }
+    fc_closed(fc_declared(v) t)
+}

@@ -1,0 +1,19 @@
+# `size` has no result annotation: its record's fields are Positive because its parameters are.
+Positive:type = int64<(>? 0)>
+
+size = (w:Positive h:Positive) => [w = w h = h]
+square = (side:Positive) => size(side side)
+
+aspect = (s:[w:Positive h:Positive]):>rational => rational(s.w) / s.h
+tiles_across = (s:[w:Positive h:Positive] tile:Positive):>int64 => (s.w + tile - 1) // tile
+fit = (inner:[w:Positive h:Positive] outer:[w:Positive h:Positive]):>rational =>
+    min(rational(outer.w) / inner.w rational(outer.h) / inner.h)
+
+main = () => {
+    let screen = size(1920 1080)
+    let icon = square(48)
+    printl"aspect {screen.w}:{screen.h} is {fmt'.3f'(aspect(screen))}"
+    printl"{tiles_across(screen icon.w)} icons across"
+    printl"scale {fmt'.2f'(fit(icon screen))}"
+    printl(screen.h // icon.h)
+}

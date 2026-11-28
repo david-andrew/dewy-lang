@@ -1,0 +1,17 @@
+# `style` has no result annotation: width keeps the Width its annotated local declares.
+Width:type = int64<n => 10 <=? n and n <=? 300>
+
+style = (columns:int64) => {
+    let width:Width = max(10 min(300 columns - 20))
+    [width = width done = "#" left = "."]
+}
+
+render = (s:[width:Width done:string left:string] done:int64<(>=? 0)> total:int64<(>? 0)>):>string => {
+    let filled = min(s.width done * s.width // total)
+    "[{s.done * filled}{s.left * (s.width - filled)}] {done * 100 // total}%"
+}
+
+main = () => {
+    let s = style(32)
+    loop done in [0 5 9 12] printl(render(s done 12))
+}

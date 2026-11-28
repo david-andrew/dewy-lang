@@ -21,6 +21,7 @@ from p"record_construction.dewy" import (dewy_record_target dewy_record_schema)
 from p"type_expression_forms.dewy" import (type_value_expr)
 from p"aggregate_sources.dewy" import (dewy_spread_source_type)
 from p"refine_metadata.dewy" import (representation_type)
+from p"record_field_contracts.dewy" import (field_contract)
 from p"type_member_checks.dewy" import (type_member_type)
 from p"type_ops.dewy" import (dt mk_array)
 from p"types.jo" import (fields has_var is_union prune struct_targ structs telem tkind type_eq types union_members variants)
@@ -128,12 +129,15 @@ dewy_record_type=(n:int64):>int64=>$unsafe {
         if names.has(name) {fatal(nodes.ptr[field].pos "duplicate record field '{name_of(name)}'")}
         names[name]=true
         let value=RareExprWord(nodes.ptr[field].a)
+        let widened=nodes.ptr[value].kind =? 'cast'   # (`c as int64` keeps the field plain)
         check_expr(value 0);
         let t=finalize_literal(value)
         # (`[Png = Png]`: a field whose value is a type, comptime only, decisions.md batch 7)
         if tkind(t) =? 'typeval' and not has_var(telem(t)) {t=type_member_type(telem(t))} else if has_var(t) or tkind(t) =? 'void_' or tkind(t) =? 'typeval' {
             fatal(nodes.ptr[value].pos "cannot infer record field '{name_of(name)}'; give the record a type annotation")
         }
+        let contract=if widened {0} else {field_contract(value t)}
+        if contract not=? 0 {t=contract}
         add_flag(value NF_CHECKED)
         nodes.ptr[field].type=int32(t)
     }

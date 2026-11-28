@@ -1,0 +1,25 @@
+# args: 3
+# `window` has no result annotation: per and page keep their ranges, pages (computed) is plain.
+PerPage:type = int64<n => 1 <=? n and n <=? 200>
+PageNo:type = int64<n => 1 <=? n and n <=? 100000>
+
+window = (total:int64<(>=? 0)> per:PerPage page:PageNo) => [
+    per = per
+    page = page
+    pages = max(1 (total + per - 1) // per)
+]
+
+footer = (w:[per:PerPage page:PageNo pages:int]):>string => "page {w.page} of {w.pages}, {w.per} a page"
+
+rows_for = (all:array<string> w:[per:PerPage page:PageNo pages:int]):>array<string> => {
+    let first = (w.page - 1) * w.per
+    all[$clamp first..first + w.per)
+}
+
+main = (argv:array<string>) => {
+    let names = [loop i in [1..23] "user{i}"]
+    let page = PageNo(if argv.length >? 1 argv[1] else "1") ?? 1
+    let w = window(names.length 4 page)
+    printl(rows_for(names w).join(" "))
+    printl(footer(w))
+}

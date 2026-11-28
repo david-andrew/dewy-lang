@@ -1,0 +1,23 @@
+# Where the field keeps its contract: a parameter, a declared result, a field read, an optional
+# payload with a fallback inside it, `or_throw` on a declared union, and arms that agree.
+Count:type = int64<n => 1 <=? n and n <=? 400>
+Oops:type = type of error & [message:string]
+need = (c:Count):>int64 => c
+checked = (text:string):>Count | Oops => if text =? "7" 7 else Oops["not seven"]
+from_param = (c:Count) => [n = c]
+from_result = (c:Count) => [n = same(c)]
+same = (c:Count):>Count => c
+from_field = (r:[x:Count]) => [n = r.x]
+from_optional = (c:Count?) => [n = c ?? 9]
+from_throw = (text:string) => [n = checked(text) or_throw<Oops>]
+from_arms = (c:Count q:bool) => [n = if q c else 2]
+main = () => {
+    let c:Count = 5
+    printl(need(from_param(c).n) + need(from_result(c).n) + need(from_field([x = c]).n))
+    printl(need(from_optional(none).n) + need(from_arms(c false).n))
+    let t = from_throw("7") or_throw
+    printl(need(t.n))
+    # (a refined field by value where a plain shape is wanted)
+    let plain:[n:int64] = from_param(c)
+    printl(plain.n)
+}

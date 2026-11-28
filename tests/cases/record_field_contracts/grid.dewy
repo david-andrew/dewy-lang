@@ -1,0 +1,35 @@
+# Life on a torus: `grid` and `step` have no result annotations, and `g = step(g)` keeps
+# fitting step's parameter because the dimensions stay Dims.
+Dim:type = int64<n => 1 <=? n and n <=? 1024>
+
+grid = (w:Dim h:Dim) => [w = w h = h cells = fill(false w * h)]
+
+at = (g:[w:Dim h:Dim cells:array<bool>] x:int64 y:int64):>bool => {
+    let i = ((y % g.h + g.h) % g.h) * g.w + (x % g.w + g.w) % g.w
+    if i <? g.cells.length g.cells[i] else false
+}
+
+step = (g:[w:Dim h:Dim cells:array<bool>]) => {
+    let next = grid(g.w g.h)
+    loop y in [0..g.h) {
+        loop x in [0..g.w) {
+            let n = 0
+            loop dy in [-1..1] {
+                loop dx in [-1..1] { if (dx not=? 0 or dy not=? 0) and at(g x + dx y + dy) n += 1 }
+            }
+            let i = y * g.w + x
+            if i <? next.cells.length next.cells[i] = n =? 3 or n =? 2 and at(g x y)
+        }
+    }
+    next
+}
+
+main = () => {
+    let g = grid(8 6)
+    loop [x y] in [[1 0] [2 1] [0 2] [1 2] [2 2]] {
+        let i = y * g.w + x
+        if i <? g.cells.length g.cells[i] = true
+    }
+    loop generation in [1..4] g = step(g)
+    loop y in [0..g.h) printl([loop x in [0..g.w) if at(g x y) "#" else "."].join(""))
+}

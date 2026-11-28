@@ -1,0 +1,25 @@
+# What stays plain: literals, arithmetic, guarded values, `as`, contracts naming another
+# binding, and arms no single contract admits. Each field below takes -7 afterwards.
+Count:type = int64<n => 1 <=? n and n <=? 400>
+literal = () => [n = 5]
+sum = (c:Count) => [n = c + 1]
+guarded = (x:int64) => if x >? 0 [n = x] else [n = 1]
+widened = (c:Count) => [n = c as int64]
+dependent = (low:int64 b:int64<(>=? low)>) => [n = b + 0 * low]
+mixed = (c:Count q:bool) => [n = if q c else 0]
+main = () => {
+    let c:Count = 3
+    let a = literal
+    a.n = -7
+    let b = sum(c)
+    b.n = -7
+    let d = guarded(4)
+    d.n = -7
+    let e = widened(c)
+    e.n = -7
+    let f = dependent(1 2)
+    f.n = -7
+    let g = mixed(c true)
+    g.n = -7
+    printl"{a.n + b.n + d.n + e.n + f.n + g.n}"
+}

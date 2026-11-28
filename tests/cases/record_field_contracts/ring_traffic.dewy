@@ -1,0 +1,47 @@
+# args: cells=24 cars=6 steps=6 limit=3
+# The parsed record keeps the ranges argparse checked: the helpers divide by, fill with and
+# store from its fields without guards (docs/design/proposals/records/refinements-round1.md).
+import argparse
+
+Count:type = int64<n => 1 <=? n and n <=? 400>
+Speed:type = int64<s => 0 <=? s and s <=? 9>
+Args:type = [
+    cells = argparse.Named<Count>(default=60 help="cells on the ring")
+    cars = argparse.Named<Count>(default=18 help="cars on the road")
+    steps = argparse.Named<Count>(default=30 help="steps to run")
+    limit = argparse.Named<int64<n => 1 <=? n and n <=? 9>>(default=5 help="the speed limit")
+    dawdle = argparse.Named<int64<n => 0 <=? n and n <=? 100>>(default=25 help="percent chance a car slows")
+]
+Car:type = [id:int64 speed:Speed]
+
+start = (a:[cells:Count cars:Count steps:Count limit:int64<n => 1 <=? n and n <=? 9> dawdle:int64<n => 0 <=? n and n <=? 100>]):>array<Car?> => {
+    let road:array<Car?> = fill(none a.cells)
+    let id = 0
+    loop at in [0..a.cells) {
+        if id <? a.cars and at * a.cars >=? id * a.cells {
+            road[at] = Car[id 0]
+            id += 1
+        }
+    }
+    road
+}
+
+step = (road:array<Car?> a:[cells:Count cars:Count steps:Count limit:int64<n => 1 <=? n and n <=? 9> dawdle:int64<n => 0 <=? n and n <=? 100>] t:int64):>array<Car?> => {
+    let next:array<Car?> = fill(none a.cells)
+    loop i in [0..road.length) {
+        let car = road[i] ?? continue
+        let speed = min(car.speed + 1 a.limit)
+        if speed >? 0 and (t * 37 + i * 11) % 100 <? a.dawdle speed -= 1
+        next[(i + speed) % a.cells] = Car[car.id speed]
+    }
+    next
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="traffic on a ring road")
+    let road = start(args)
+    loop t in [0..args.steps) {
+        road = step(road args t)
+        printl([loop s in road if s is? Car "{s.speed}" else "."].join(""))
+    }
+}
