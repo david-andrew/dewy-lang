@@ -698,6 +698,38 @@
     "zed"
    ],
    "note": "Follow-graph report over stdin: edges parsed by a generator that yields malformed lines as values, compressed sparse rows whose targets carry a sibling-length bound so runs read through clamped slices index without checks, in-degree ranking, mutual follows, Kosaraju groups and breadth-first reach (explicit index stacks whose elements are bounded by the people count), a recursive follow tree through generator delegation, and suggestions from one row of A*A."
+  },
+  "149_tree_diff": {
+   "milestone": 12,
+   "args": [
+    "{dir}/v1",
+    "{dir}/v2",
+    "-U=2",
+    "--ignore-space"
+   ],
+   "note": "Tree diff CLI through the argparse library (positional paths, a refined `-U=` context, flags): files matched by their path below each root, a unified diff per changed text file from a longest-common-subsequence table built as `fill(fill(0 m) n)`, whitespace-insensitive keys, the no-newline marker, one-sided and binary files named, and a per-file insertion/deletion summary; the oracle re-applies every hunk."
+  },
+  "150_build_planner": {
+   "milestone": 13,
+   "args": [
+    "3",
+    "render",
+    "util",
+    "nope"
+   ],
+   "note": "Build planner over stdin targets with dependencies and Duration times read by `Duration(text)`: malformed, mistimed and repeated lines reported, a recursive depth-first walk with a by-value path and an `@` state that names missing dependencies, cycles and what they block, Kahn's order with alphabetical ties, the critical path, list scheduling on N workers by longest remaining chain, and the rebuild set of each changed target."
+  },
+  "151_ring_traffic": {
+   "milestone": 10,
+   "args": [
+    "cells=64",
+    "cars=20",
+    "steps=24",
+    "light=40",
+    "seed=2026",
+    "dawdle=30"
+   ],
+   "note": "Nagel-Schreckenberg ring-road traffic CLI through argparse (refined counts and percent, a `uint64` seed, an optional light cell, a flag): an `array<Car?>` road updated in parallel each step, floored-modulo ring indexing, a seeded xorshift64* for dawdling, a red light that walls a cell on a cycle, a space-time diagram, exact mean speed formatted, cars past the light and the longest stopped queue."
   }
  },
  "design_passing": [
@@ -762,7 +794,10 @@
   "146_sensor_stream",
   "147_timetable_solver",
   "148_follow_graph",
+  "149_tree_diff",
   "14_tokenizer",
+  "150_build_planner",
+  "151_ring_traffic",
   "15_expression_parser",
   "16_json_roundtrip",
   "17_fixed_ring",

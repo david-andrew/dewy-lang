@@ -1,0 +1,191 @@
+# Build planner. Stdin lists targets, one `name: dependencies (time)` per
+# line. The plan names what cannot be built (a dependency nothing builds, or
+# a cycle) and what that blocks, gives a build order, the critical path, a
+# schedule on a number of workers, and what a change to some targets
+# rebuilds.
+#
+# Usage: build_planner WORKERS [CHANGED...]
+
+Target:type = [name:string deps:array<string> time:Duration]
+BadLine:type = [line:int message:string]
+UsageError:type = type of error & [message:string]
+
+parse_line = (n:int raw:string):>Target | BadLine | none => {
+    let line = raw.trim
+    if line.is_empty or line.startswith("#") return none
+    let colon = line.find(":") ?? return BadLine[n "expected `target: dependencies (time)`, got `{line}`"]
+    let name = line[..colon).trim
+    let rest = line[$clamp colon + 1..].trim
+    let open = rest.find("(") ?? return BadLine[n "{name} has no (time)"]
+    if name.is_empty or not rest.endswith(")") return BadLine[n "expected `target: dependencies (time)`, got `{line}`"]
+    let time = Duration(rest[$clamp open + 1..rest.length - 1).trim)
+    if time is? ValidationError return BadLine[n "{name}: {time.message}, not `{time.input}`"]
+    Target[name rest[..open).split time]
+}
+
+read_targets = (text:string):>dict<string Target> => {
+    let targets:dict<string Target> = []
+    loop n in 1.. and raw in text.lines {
+        match parse_line(n raw) {
+            t:Target => {
+                if targets.has(t.name) {
+                    printl"line {n}: {t.name} is already defined; keeping the first"
+                } else {
+                    targets[t.name] = t
+                }
+            }
+            bad:BadLine => printl"line {bad.line}: {bad.message}"
+            <none> => {}
+        }
+    }
+    targets
+}
+
+# What cannot be built and why: a missing dependency or a cycle, found by a
+# depth-first walk that marks each target done or failed (with its reason);
+# `path` is the chain of targets that led here.
+State:type = [done:set<string> = set[] failed:dict<string string> = []]
+
+visit = (targets:dict<string Target> name:string path:array<string> @state:State):>void => {
+    if name in? state.done or state.failed.has(name) return
+    let t = targets.get(name) ?? return
+    let here = [path... name]
+    loop dep in t.deps {
+        if not targets.has(dep) {
+            state.failed[name] = "needs {dep}, which nothing builds"
+        } else if dep in? here {
+            let first = here.index_of(dep) ?? 0
+            let cycle = [here[$clamp first..]... dep]
+            loop member in here[$clamp first..] state.failed[member] = "cycle {cycle.join(" -> ")}"
+        } else {
+            visit(targets dep here @state)
+            let reason = state.failed.get(dep) ?? continue
+            if not state.failed.has(name) {
+                state.failed[name] = if reason.startswith("blocked") reason else "blocked by {dep}"
+            }
+        }
+    }
+    if not state.failed.has(name) state.done.push(name)
+}
+
+# Kahn's algorithm over the buildable targets, alphabetical among the ready.
+build_order = (targets:dict<string Target> ok:set<string>):>array<string> => {
+    let waiting:dict<string int> = []
+    let users:dict<string array<string>> = []
+    loop name in ok {
+        let deps = (targets.get(name) ?? continue).deps
+        waiting[name] = deps.length
+        loop dep in deps users[dep] = [(users.get(dep) ?? [])... name]
+    }
+    let ready = [loop name in ok if (waiting.get(name) ?? 0) =? 0 name].sorted
+    let order:array<string> = []
+    loop not ready.is_empty {
+        let next = ready[0]
+        ready = ready[1..)
+        order.push(next)
+        loop user in (users.get(next) ?? []) {
+            waiting[user] = (waiting.get(user) ?? 1) - 1
+            if waiting.get(user) =? 0 ready = [ready... user].sorted
+        }
+    }
+    order
+}
+
+# The longest chain of build times that ends at each target.
+critical = (targets:dict<string Target> order:array<string>):>void => {
+    let finish:dict<string Duration> = []
+    let via:dict<string string> = []
+    loop name in order {
+        let t = targets.get(name) ?? continue
+        let start:Duration = 0s
+        loop dep in t.deps {
+            let f = finish.get(dep) ?? 0s
+            if f >? start {
+                start = f
+                via[name] = dep
+            }
+        }
+        finish[name] = start + t.time
+    }
+    if order.is_empty return
+    let last = order.max_by((name) => finish.get(name) ?? 0s)
+    let chain = [last]
+    loop via.has(chain[end]) chain.push(via.get(chain[end]) ?? "")
+    printl"critical path ({finish.get(last) ?? 0s}): {chain.reversed.join(" -> ")}"
+}
+
+# List scheduling: whenever a worker is free it takes the ready target with
+# the longest remaining chain, then the first by name.
+Slot:type = [until:Duration name:string]
+
+schedule = (targets:dict<string Target> order:array<string> workers:int64<(>=? 1)>):>Duration => {
+    let tail:dict<string Duration> = []
+    let after:dict<string Duration> = []
+    loop name in order.reversed {
+        let t = targets.get(name) ?? continue
+        let mine = t.time + (after.get(name) ?? 0s)
+        tail[name] = mine
+        loop dep in t.deps {
+            if mine >? (after.get(dep) ?? 0s) after[dep] = mine
+        }
+    }
+    let busy:array<Slot?> = fill(none workers)
+    let done:set<string> = set[]
+    let started:set<string> = set[]
+    let clock:Duration = 0s
+    loop done.length <? order.length {
+        let ready = [loop name in order if name not in? started and (targets.get(name) ?? continue).deps.all((d) => d in? done) name]
+        let ranked = ready.sorted.sorted(key=(name) => tail.get(name) ?? 0s reverse=true)
+        loop k in [0..workers) {
+            if busy[k] isnt? none or ranked.is_empty continue
+            let name = ranked[0]
+            ranked = ranked[1..)
+            let t = targets.get(name) ?? continue
+            busy[k] = Slot[clock + t.time name]
+            started.push(name)
+            printl"  {fmt'>6'("{clock}")}  w{k + 1}  {name} ({t.time})"
+        }
+        let soonest:Duration? = none
+        loop slot in busy {
+            if slot isnt? none and (soonest is? none or slot.until <? soonest) soonest = slot.until
+        }
+        clock = soonest ?? break
+        loop k in [0..workers) {
+            let slot = busy[k] ?? continue
+            if slot.until =? clock {
+                done.push(slot.name)
+                busy[k] = none
+            }
+        }
+    }
+    clock
+}
+
+main = (argv:array<string>) => {
+    let workers = int64(argv.get(1) ?? "") ?? return UsageError["usage: build_planner WORKERS [CHANGED...]"]
+    if workers <? 1 return UsageError["WORKERS must be at least 1"]
+    let targets = read_targets(read_stdin or_throw)
+    let state = State[]
+    loop name in targets.keys.sorted visit(targets name [] @state)
+    loop name in state.failed.keys.sorted printl"cannot build {name}: {state.failed.get(name) ?? ""}"
+    let order = build_order(targets state.done)
+    printl"build order: {order.join(" ")}"
+    let total:Duration = 0s
+    loop name in order total += (targets.get(name) ?? continue).time
+    critical(targets order)
+    printl"schedule on {workers} workers:"
+    let span = schedule(targets order workers)
+    printl"finished at {span}, {total} of work"
+    loop changed in argv[$clamp 2..] {
+        if not targets.has(changed) {
+            printl"no target {changed}"
+            continue
+        }
+        let again = set[changed]
+        loop name in order {
+            if (targets.get(name) ?? continue).deps.any((d) => d in? again) again.push(name)
+        }
+        let redo = [loop name in order if name in? again name]
+        printl"changing {changed} rebuilds {redo.length}: {redo.join(" ")}"
+    }
+}

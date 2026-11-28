@@ -1,0 +1,25 @@
+line 17: expected `target: dependencies (time)`, got `lint`
+line 18: bench: must be a length of time, like 90s, 250ms or 1.5hour, not `ten minutes`
+line 19: server is already defined; keeping the first
+cannot build docs: cycle docs -> manual -> docs
+cannot build editor: needs plugin, which nothing builds
+cannot build manual: cycle docs -> manual -> docs
+cannot build package: blocked by docs
+build order: assets codegen util core audio physics render server ui game tests
+critical path (13min): util -> core -> render -> ui -> game -> tests
+schedule on 3 workers:
+      0s  w1  util (30s)
+      0s  w2  codegen (20s)
+      0s  w3  assets (45s)
+     30s  w1  core (2min)
+    150s  w1  render (3min)
+    150s  w2  physics (90s)
+    150s  w3  audio (40s)
+    190s  w3  server (75s)
+    330s  w1  ui (1min)
+    390s  w1  game (150s)
+    9min  w1  tests (4min)
+finished at 13min, 1050s of work
+changing render rebuilds 4: render ui game tests
+changing util rebuilds 9: util core audio physics render server ui game tests
+no target nope

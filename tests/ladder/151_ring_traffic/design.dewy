@@ -1,0 +1,142 @@
+# Traffic on a ring road, as the Nagel-Schreckenberg cellular automaton.
+# Each cell holds at most one car. Every step, all at once: each car speeds up
+# by one up to the limit, slows to the free cells ahead (a red light counts
+# as a wall), sometimes dawdles one slower at random, then moves. The run
+# prints a space-time diagram (a car shows its speed, `|` a red light), then
+# the flow: mean speed, cars past the light, and the longest queue.
+#
+# Usage: ring_traffic [cells=N] [cars=N] [steps=N] [dawdle=PERCENT] [seed=N]
+#                     [light=CELL] [red=STEPS] [green=STEPS] [--quiet]
+
+import argparse
+
+Count:type = int64<n => 1 <=? n and n <=? 400>
+
+Args:type = [
+    cells = argparse.Named<Count>(default=60 help="cells on the ring")
+    cars = argparse.Named<Count>(default=18 help="cars on the road")
+    steps = argparse.Named<Count>(default=30 help="steps to run")
+    limit = argparse.Named<int64<n => 1 <=? n and n <=? 9>>(default=5 help="the speed limit, in cells per step")
+    dawdle = argparse.Named<int64<n => 0 <=? n and n <=? 100>>(default=25 help="percent chance a car slows by one")
+    seed = argparse.Named<uint64>(default=7 help="seed for the dawdling")
+    light = argparse.Named<int64?>(help="the cell a traffic light stands before")
+    red = argparse.Named<Count>(default=6 help="steps the light stays red")
+    green = argparse.Named<Count>(default=9 help="steps the light stays green")
+    quiet = argparse.Flag(help="leave out the diagram")
+]
+
+Word:type = uint64<overflow='wrap'>
+
+# xorshift64*: the same dawdles for the same seed, wrapping by design.
+Rng:type = [state:Word]
+percent = (@rng:Rng):>int64 => {
+    let x = rng.state
+    x = x xor (x >> 12)
+    x = x xor (x << 25)
+    x = x xor (x >> 27)
+    rng.state = x
+    int64((Word(x * 2685821657736338717) >> 32) % 100)
+}
+
+Car:type = [id:int64 speed:int64<s => 0 <=? s and s <=? 9>]
+
+# Free cells ahead of `at`, up to `reach`: the next car or the red light's
+# cell stops the count.
+gap = (road:array<Car?> at:int64 reach:int64 wall:int64?):>int64<(>=? 0)> => {
+    let n = road.length
+    if n =? 0 or reach <? 1 return 0
+    loop d in [1..reach] {
+        let cell = (at + d) % n
+        if road[cell] isnt? none or cell =? wall return d - 1
+    }
+    reach
+}
+
+# Cars spread evenly, all standing still.
+start = (cells:Count cars:Count):>array<Car?> => {
+    let road:array<Car?> = fill(none cells)
+    let id = 0
+    loop at in [0..cells) {
+        if id <? cars and at * cars >=? id * cells {
+            road[at] = Car[id 0]
+            id += 1
+        }
+    }
+    road
+}
+
+row = (road:array<Car?> wall:int64?):>string => {
+    let cells = [loop i in 0.. and slot in road {
+        match slot {
+            car:Car => "{car.speed}"
+            _ => if i =? wall "|" else "."
+        }
+    }]
+    cells.join("")
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="traffic on a ring road")
+    # (argparse checked these ranges, but its record's fields are plain
+    # int64 here, so the counts are established again)
+    let n = args.cells
+    let count = args.cars
+    let limit = args.limit
+    let steps = args.steps
+    let cycle = args.red + args.green
+    if n <? 1 or n >? 400 or count <? 1 or count >? 400 or steps <? 1 or limit <? 1 or limit >? 9 or cycle <? 1 return
+    if args.light is? int64 and (args.light <? 0 or args.light >=? n) {
+        printl("light={args.light}: must be a cell from 0 to {n - 1}" file=stderr)
+        exit(2)
+    }
+    let rng = Rng[Word(args.seed) xor 0x9e3779b97f4a7c15]
+    let road = start(n count)
+    let cars = road.count((slot) => slot isnt? none)
+    let moved = 0
+    let passed = 0
+    let longest = 0
+    let stopped_at = 0
+    loop t in [0..steps) {
+        let red = args.light isnt? none and t % cycle <? args.red
+        let wall = if red args.light else none
+        let next:array<Car?> = fill(none n)
+        loop i in [0..n) {
+            let car = road[i] ?? continue
+            let speed = min(car.speed + 1 limit)
+            speed = min(speed gap(road i speed wall))
+            if speed >? 0 and percent(@rng) <? args.dawdle speed -= 1
+            let to = (i + speed) % n
+            if args.light is? int64 and i <? args.light and args.light <=? i + speed passed += 1
+            if args.light is? int64 and i + speed >=? n + args.light passed += 1
+            next[to] = Car[car.id speed]
+            moved += speed
+        }
+        road = next
+        if not args.quiet printl"{fmt'>3'(t)} {row(road wall)}"
+        # The longest run of stopped cars back to back (not across cell 0).
+        let queue = 0
+        let run = 0
+        loop slot in road {
+            match slot {
+                car:Car => if car.speed =? 0 {
+                    run += 1
+                    queue = max(queue run)
+                } else {
+                    run = 0
+                }
+                _ => {run = 0}
+            }
+        }
+        if queue >? longest {
+            longest = queue
+            stopped_at = t
+        }
+    }
+    printl"{cars} cars on {n} cells for {steps} steps, limit {args.limit}, dawdle {args.dawdle}%"
+    if cars =? 0 return
+    let mean = rational(moved) / (cars * steps)
+    printl"mean speed {fmt'.3f'(mean)} cells per step ({fmt'.1f'(mean * 100 / args.limit)}% of the limit)"
+    if args.light is? int64 printl"{passed} cars past the light at cell {args.light}"
+    printl"longest queue {longest} cars, at step {stopped_at}"
+    printl"order on the ring: {[loop slot in road if slot is? Car "{slot.id}"].join(" ")}"
+}

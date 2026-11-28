@@ -1,0 +1,78 @@
+--- a/README.md
++++ b/README.md
+@@ -1,14 +1,16 @@
+ # Lantern
+ 
+-A tiny static site builder.
++A tiny static site builder with live reload.
+ 
+ ## Install
+ 
+     make install
++    lantern --version
+ 
+ ## Usage
+ 
+ Run `lantern build` in a folder with a `pages/` directory.
+-Pages are written to `out/`.
++Pages are written to `site/`.
++Run `lantern serve` to watch and rebuild.
+ 
+ ## License
+Only in a: docs/CHANGES.txt
+Only in b: docs/history.txt
+Binary files a/docs/logo.png and b/docs/logo.png differ
+--- a/docs/notes.txt
++++ b/docs/notes.txt
+@@ -1,3 +1,3 @@
+ v1 notes
+ keep this
+-last line without newline
+\ No newline at end of file
++last line without newline
+--- a/src/build.py
++++ b/src/build.py
+@@ -6,13 +6,13 @@
+     pages = []
+     for name in sorted(os.listdir(root)):
+-        if name.endswith(".md"):
++        if name.endswith(".md") and not name.startswith("_"):
+             pages.append(os.path.join(root, name))
+     return pages
+ 
+ 
+-def render(path):
++def render(path, title):
+     with open(path) as f:
+         text = f.read()
+-    return "<html><body>" + text + "</body></html>"
++    return "<html><head><title>" + title + "</title></head><body>" + text + "</body></html>"
+ 
+ 
+@@ -20,7 +20,8 @@
+     root = sys.argv[1]
+     for page in collect(root):
+-        html = render(page)
++        html = render(page, "My Site")
+         print(page, len(html))
+ 
+ 
++if __name__ == "__main__":
+ main()
+--- a/src/config.ini
++++ b/src/config.ini
+@@ -5,4 +5,4 @@
+ 
+ [build]
+-minify = false
++minify = true
+ drafts = false
+summary:
+  README.md        | 6 ++++--
+  docs/CHANGES.txt | 0
+  docs/history.txt | 0
+  docs/logo.png    | 0
+  docs/notes.txt   | 2 +-
+  src/build.py     | 9 +++++----
+  src/config.ini   | 2 +-
+7 files changed, 11 insertions(+), 8 deletions(-)

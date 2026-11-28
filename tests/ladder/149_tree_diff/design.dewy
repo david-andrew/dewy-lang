@@ -1,0 +1,178 @@
+# Compare two directory trees, as `diff -ru` does for text. Files are matched
+# by their path below each root. Text files that differ get a unified diff
+# built from a longest common subsequence of their lines; files on one side
+# only and binary files that differ are named. A summary closes the report:
+# the lines added and removed per file and in all.
+#
+# Usage: tree_diff BEFORE AFTER [context=N] [--ignore-space] [--stat]
+
+import argparse
+
+Context:type = int64<n => 0 <=? n and n <=? 9>
+
+Args:type = [
+    before = argparse.Positional<Path>(help="the original tree")
+    after = argparse.Positional<Path>(help="the changed tree")
+    context = argparse.Named<Context>(default=3 short='U' help="unchanged lines around each change")
+    ignore_space = argparse.Flag(help="compare lines with each run of spaces as one space")
+    stat = argparse.Flag(help="print only the summary")
+]
+
+# A line as printed, and the key it is compared by.
+Line:type = [text:string key:string]
+
+# One step of an edit script: its line, and the position it starts from in
+# each file.
+Op:type = [kind:'keep' | 'del' | 'add' text:string i:int j:int]
+
+Change:type = [name:string added:int64 removed:int64]
+
+# A file's lines. A last line without a break carries the usual marker, so
+# it differs from the same text with one.
+lines_of = (text:string ignore_space:bool):>array<Line> => {
+    let raw = text.lines
+    let open_end = not text.is_empty and not text.endswith("\n")
+    [loop i in 0.. and line in raw {
+        let shown = if open_end and i =? raw.length - 1 "{line}\n\\ No newline at end of file" else line
+        Line[shown if ignore_space shown.split.join(" ") else shown]
+    }]
+}
+
+# The edit script from a longest common subsequence: lcs[i][j] is its length
+# for a[i..] and b[j..]. Ties remove before they add.
+edit_script = (a:array<Line> b:array<Line>):>array<Op> => {
+    let lcs = fill(fill(0 b.length + 1) a.length + 1)
+    loop i in [a.length - 1, a.length - 2..0] {
+        loop j in [b.length - 1, b.length - 2..0] {
+            lcs[i][j] = if a[i].key =? b[j].key lcs[i + 1][j + 1] + 1 else max(lcs[i + 1][j] lcs[i][j + 1])
+        }
+    }
+    let ops:array<Op> = []
+    let i = 0
+    let j = 0
+    loop i <? a.length and j <? b.length {
+        if a[i].key =? b[j].key {
+            ops.push(Op['keep' a[i].text i j])
+            i += 1
+            j += 1
+        } else if lcs[i + 1][j] >=? lcs[i][j + 1] {
+            ops.push(Op['del' a[i].text i j])
+            i += 1
+        } else {
+            ops.push(Op['add' b[j].text i j])
+            j += 1
+        }
+    }
+    loop k in [i..a.length) ops.push(Op['del' a[k].text k j])
+    loop k in [j..b.length) ops.push(Op['add' b[k].text a.length k])
+    ops
+}
+
+# `start,count` as a hunk header writes it: an empty range names the line
+# before it, and a count of one is left out.
+span = (start:int count:int):>string => {
+    if count =? 0 return "{start},0"
+    if count =? 1 return "{start + 1}"
+    "{start + 1},{count}"
+}
+
+# Hunks: runs of steps within `context` of a change. Two changes whose
+# context touches share a hunk.
+print_hunks = (ops:array<Op> context:int64):>void => {
+    # (argparse checked 0 to 9, but its record's field is a plain int64 here)
+    let reach = min(max(context 0) ops.length)
+    let shown = fill(false ops.length)
+    loop at in 0.. and op in ops {
+        if op.kind =? 'keep' continue
+        loop k in [max(0 at - reach)..min(ops.length at + reach + 1)) shown[k] = true
+    }
+    let at = 0
+    loop at <? ops.length {
+        if not shown[at] { at += 1; continue }
+        let stop = at
+        loop stop <? ops.length and shown[stop] stop += 1
+        let run = ops[at..stop)
+        let olds = run.count((op) => op.kind not=? 'add')
+        let news = run.count((op) => op.kind not=? 'del')
+        printl"@@ -{span(ops[at].i olds)} +{span(ops[at].j news)} @@"
+        loop op in run {
+            let mark = match op.kind {
+                <'keep'> => " "
+                <'del'> => "-"
+                <'add'> => "+"
+            }
+            printl"{mark}{op.text}"
+        }
+        at = stop
+    }
+}
+
+# Every file under `root`, by its path below the root.
+files_under = (root:Path) => {
+    let found:dict<string Path> = []
+    loop f in (root.walk ?? []) found[f.path.remove_prefix("{root}/")] = f
+    found
+}
+
+compare = (name:string left:Path right:Path stat:bool ignore_space:bool context:int64) => {
+    let before = left.read_bytes ?? return none
+    let after = right.read_bytes ?? return none
+    if before =? after return none
+    let old_text = left.read_text
+    let new_text = right.read_text
+    if old_text isnt? string or new_text isnt? string {
+        if not stat printl"Binary files a/{name} and b/{name} differ"
+        return Change[name 0 0]
+    }
+    let a = lines_of(old_text ignore_space)
+    let b = lines_of(new_text ignore_space)
+    let ops = edit_script(a b)
+    let added = ops.count((op) => op.kind =? 'add')
+    let removed = ops.count((op) => op.kind =? 'del')
+    if added + removed =? 0 return none
+    if not stat {
+        printl"--- a/{name}"
+        printl"+++ b/{name}"
+        print_hunks(ops context)
+    }
+    Change[name added removed]
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="compare two directory trees line by line")
+    if not args.before.is_dir or not args.after.is_dir {
+        printl("both trees must be directories" file=stderr)
+        return
+    }
+    let old_files = files_under(args.before) or_throw
+    let new_files = files_under(args.after) or_throw
+    let changes:array<Change> = []
+    loop name in set[old_files.keys... new_files.keys...].sorted {
+        let left = old_files.get(name) ?? {
+            printl"Only in b: {name}"
+            changes.push(Change[name 0 0])
+            continue
+        }
+        let right = new_files.get(name) ?? {
+            printl"Only in a: {name}"
+            changes.push(Change[name 0 0])
+            continue
+        }
+        let change = compare(name left right args.stat args.ignore_space args.context) ?? continue
+        changes.push(change)
+    }
+    printl"summary:"
+    let width = 0
+    let added = 0
+    let removed = 0
+    loop c in changes {
+        width = max(width c.name.length)
+        added += c.added
+        removed += c.removed
+    }
+    loop c in changes {
+        let bar = "{"+".repeat(c.added)}{"-".repeat(c.removed)}"
+        printl"  {c.name}{" ".repeat(width - c.name.length)} | {c.added + c.removed}{if bar.is_empty "" else " "}{bar}"
+    }
+    printl"{changes.length} files changed, {added} insertions(+), {removed} deletions(-)"
+}
