@@ -1,0 +1,8 @@
+# exit: 101
+# modes: native native-release
+# A missing C function panics at its declaration.
+$extern
+no_such_c_function_here = (x:int32):>int32
+main = ():>void => {
+    printl($unsafe no_such_c_function_here(1))
+}

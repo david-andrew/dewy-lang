@@ -12,7 +12,7 @@ from p"diagnostic_exit.dewy" import (fatal)
 from p"check.jo" import (fns target_arm64 target_macos target_windows)
 from p"ast.jo" import (nodes)
 from p"pe_format.dewy" import (pe_imports)
-from p"ir_builders.dewy" import (e_bin e_call1 e_call2 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_zero emit new_slot vreg)
+from p"ir_builders.dewy" import (e_bin e_call1 e_call2 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_zero emit ir_set_pos new_slot vreg)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LFFWord:type=int64<overflow='wrap'>
 mac_bound_lib=(lib:string):>string=>$unsafe {
@@ -22,6 +22,8 @@ mac_bound_lib=(lib:string):>string=>$unsafe {
 }
 lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
     begin_fn(fns.ptr[f].sym lf);
+    # (its declaration is where a backtrace places it: a missing library or symbol panics here)
+    ir_set_pos(LFFWord(nodes.ptr[LFFWord(fns.ptr[f].decl)].pos));
     let lib=fns.ptr[f].clib
     let nm=name_of(LFFWord(nodes.ptr[LFFWord(fns.ptr[f].decl)].name))
     if (fns.ptr[f].csym).length >? 0 {nm=fns.ptr[f].csym}
