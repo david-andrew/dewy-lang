@@ -4973,10 +4973,11 @@ pid = ():>int32 => $unsafe getpid()
 
 A foreign call is opaque to effect rows: a function declared `& no_effects`, or
 any closed row, cannot call one. It may block, so a `parallel` body cannot call
-one either; tasks can. On Linux, a program with tasks that calls C loads C's
+one either; tasks can. On Linux, a program with tasks or `parallel` work that calls C loads C's
 library on its main thread before its first task. A row written on the `$extern` declaration
 itself (`$extern` before `labs = (x:int64):>int64 & no_effects`) is trusted instead, as
-part of the unsafe claim.
+part of the unsafe claim: a `parallel` body may call a C function whose row excludes
+`blocks` (`& no_effects`, `& no blocks`).
 
 `$export` before a module function, on its line or the line above, gives it the
 C calling convention, so C can call it through a function pointer; `$export(name='sym')`

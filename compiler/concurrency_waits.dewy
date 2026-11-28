@@ -12,6 +12,7 @@ from p"effect_sources.dewy" import (effect_source_row)
 from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"check.jo" import (fns lib_dir modules)
+from p"checker_signature.dewy" import (fn_sig)
 from p"isolation_ops.dewy" import (iso_child_p isolation_children)
 from p"policy_value_queries.dewy" import (setting_value_target)
 from p"types.jo" import (tkind)
@@ -95,7 +96,13 @@ concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bo
         if fc =? int8(7) {return false}
         if name =? "panic" {return false}
     }
-    if has_flag(d NF_EXTERN) {return true}
+    # (a foreign function whose declared row excludes `blocks`, `& no_effects` or
+    # `& no blocks`, is trusted not to wait, as part of its unsafe claim)
+    if has_flag(d NF_EXTERN) {
+        if nodes.ptr[d].sval =? 0 {return true}
+        let row:WaitingWord=WaitingWord(fn_sig(d).contract)
+        return row =? 0 or effect_allows(row EffectAtom['block']) or effect_contracts.ptr[row].atoms.contains(EffectAtom['opaque'])
+    }
     if fns.ptr[f].body =? 0 {return true}
     return concurrency_blocks_node(WaitingWord(fns.ptr[f].body) @seen sharing)
 }

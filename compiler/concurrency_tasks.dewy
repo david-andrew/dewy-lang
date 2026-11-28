@@ -109,12 +109,13 @@ concurrency_finalize=():>void=>$unsafe {
     # (lowering shields cleanup and checks cancellation in task programs: their runtime, checked now)
     if concurrency_runtime_needed {
         loop name in ["__task_shield_enter" "__task_shield_leave" "__task_canceled"] {check_pending_functions(runtime_fn(name));}
-        # (C functions loaded through the system's ld.so: C's library starts on the main thread,
-        # before any task, compiler/main.jo)
-        if not target_wasm and not target_windows and not target_macos and concurrency_calls_c() {
-            concurrency_ffi_start=runtime_fn("__ffi_start")
-            check_pending_functions(concurrency_ffi_start);
-        }
+    }
+    # (C functions loaded through the system's ld.so: C's library starts on the main thread,
+    # before any task or parallel worker, compiler/main.jo; a parallel body calls one
+    # declared nonblocking)
+    if (concurrency_runtime_needed or concurrency_calls.length >? 0) and not target_wasm and not target_windows and not target_macos and concurrency_calls_c() {
+        concurrency_ffi_start=runtime_fn("__ffi_start")
+        check_pending_functions(concurrency_ffi_start);
     }
     if target_wasm {
         # (select runs on the caller's task: it needs no thread)

@@ -1,0 +1,10 @@
+# modes: native
+# A C function declared without a row may wait: a parallel body cannot call it.
+$extern
+labs = (x:int64):>int64
+
+main = ():>void => {
+    let xs:array<int64> = [-1 2]
+    let ys = [parallel x in xs $unsafe labs(x)]
+    printl(ys)
+}
