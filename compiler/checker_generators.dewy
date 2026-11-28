@@ -1,7 +1,7 @@
 $runtime_checks
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (NF_CHECKED NF_COMPREHENSION NF_DISCARD NF_LITERAL NF_LOOP_SETUP NF_MUT NF_SOA NF_SPREAD NF_SQUOTE NF_STMT NF_UNSCOPED TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
-from p"check.jo" import (FK_GENERATOR LF_ADDR LF_ALIAS LF_ASSIGNED LF_CAPTURED LF_DECL LF_QUIET SINK_GENERATOR check_scopes ctxs cx fns locals loop_serial_next loop_serials sink_body_mode sink_fn sinks throwing_iters)
+from p"ast.jo" import (NF_ALIASDECL NF_CHECKED NF_COMPREHENSION NF_DISCARD NF_GLOBAL NF_LITERAL NF_LOOP_SETUP NF_MUT NF_SOA NF_SPREAD NF_SQUOTE NF_STMT NF_UNSCOPED TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
+from p"check.jo" import (FK_GENERATOR FK_NORMAL LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_DECL LF_MUTPARAM LF_PARAM LF_QUIET LF_SHARED LF_VALUECAP SINK_GENERATOR check_scopes ctxs cx fns globals locals loop_serial_next loop_serials sink_body_mode sink_fn sinks throwing_iters)
 from p"checker_block_entries.dewy" import (check_block)
 from p"checker_contexts.dewy" import (cur_mod)
 from p"checker_expr.dewy" import (check_expr)
@@ -23,9 +23,10 @@ from p"expr.jo" import (IN bc_count last_checked)
 from p"expression_types.dewy" import (ntype)
 from p"literal_context.dewy" import (is_lit lit_default)
 from p"ownership.jo" import (ownership_fact_cleanup)
+from p"ownership_types.dewy" import (ownership_type)
 from p"sibling_types.jo" import (sibling_block sibling_index)
 from p"types.jo" import (T_BOOL T_INT T_NEVER T_NONE T_VOID fields has_var is_union prune structs targ telem tkind type_eq types union_members variants)
-from p"type_ops.dewy" import (dt is_values mk_generator mk_union mk_var unify zonk)
+from p"type_ops.dewy" import (dt is_managed is_values mk_generator mk_union mk_var unify zonk)
 from p"util.jo" import (intern name_of)
 
 GenWord:type=int64<overflow='wrap'>
@@ -55,6 +56,8 @@ let gen_iter_aliases:dict<int64 array<int64>>=dict<int64 array<int64>>()
 let gen_type_has_cache:array<uint8>=[]
 let gen_last_nodes_len:int64=0
 let gen_last_types_len:int64=0
+let gen_fuse_plan_nodes_len:int64=0
+let gen_fuse_plan_fns_len:int64=0
 
 gen_maybe_reset=():>void=>{
     if nodes.length <? gen_last_nodes_len {
@@ -63,6 +66,9 @@ gen_maybe_reset=():>void=>{
         gen_local_fresh.clear()
         gen_iter_throwing.clear()
         gen_iter_aliases.clear()
+        gen_fuse_plan_cache.clear()
+        gen_fuse_plan_nodes_len=0
+        gen_fuse_plan_fns_len=0
     }
     if types.length <? gen_last_types_len {
         gen_type_has_cache.clear()
@@ -812,10 +818,47 @@ gen_subtree_uses_local=(n:GenWord target_l:GenWord):>GenWord=>$unsafe {
     0
 }
 
+gen_subtree_uses_global=(n:GenWord target_g:GenWord):>GenWord=>$unsafe {
+    if n =? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(2) and GenWord(nodes.ptr[n].sym) =? target_g {
+        return nodes.ptr[n].pos
+    }
+    if k =? 'lambda' or k =? 'lazy_' {return 0}
+    let p:GenWord=0
+    if nodes.ptr[n].a not=? 0 {
+        p=gen_subtree_uses_global(GenWord(nodes.ptr[n].a) target_g)
+        if p not=? 0 {return p}
+    }
+    if nodes.ptr[n].b not=? 0 {
+        p=gen_subtree_uses_global(GenWord(nodes.ptr[n].b) target_g)
+        if p not=? 0 {return p}
+    }
+    if nodes.ptr[n].c not=? 0 and k not=? 'for_' {
+        p=gen_subtree_uses_global(GenWord(nodes.ptr[n].c) target_g)
+        if p not=? 0 {return p}
+    }
+    loop i in [0..nkids(n)) {
+        p=gen_subtree_uses_global(kid(n i) target_g)
+        if p not=? 0 {return p}
+    }
+    0
+}
+
 gen_named_local=(e:GenWord):>GenWord=>$unsafe {
     let r=place_root(e)
     if r not=? 0 and nodes.ptr[r].kind =? 'ident' and nodes.ptr[r].aux =? int32(1) {
         return GenWord(nodes.ptr[r].sym)
+    }
+    0
+}
+
+# Positive for local (`aux == 1`), negative for global (`aux == 2`), 0 otherwise.
+gen_named_root=(e:GenWord):>GenWord=>$unsafe {
+    let r=place_root(e)
+    if r not=? 0 and nodes.ptr[r].kind =? 'ident' {
+        if nodes.ptr[r].aux =? int32(1) {return GenWord(nodes.ptr[r].sym)}
+        if nodes.ptr[r].aux =? int32(2) {return -GenWord(nodes.ptr[r].sym)}
     }
     0
 }
@@ -838,7 +881,7 @@ gen_for_check=(s:GenWord):>bool=>$unsafe {
 
     # Temporary generator expression: bind to a local in a wrapper block so break/return/exit drops it immediately.
     let ik=nodes.ptr[it].kind
-    let is_named=(ik =? 'ident' and nodes.ptr[it].aux =? int32(1)) or (ik =? 'field' and gen_named_local(it) >? 0)
+    let is_named=(ik =? 'ident' and (nodes.ptr[it].aux =? int32(1) or nodes.ptr[it].aux =? int32(2))) or (ik =? 'field' and gen_named_root(it) not=? 0)
     if not is_named {
         let serial=@bc_count
         let tmp_name="$gen_tmp{serial}"
@@ -913,14 +956,21 @@ gen_for_check=(s:GenWord):>bool=>$unsafe {
     if scope_mark() not=? mark {scope_reset(mark)}
 
     # Reject re-entry / use of a named generator while iterating over it.
-    let borrow_l=gen_named_local(it)
-    if borrow_l >? 0 {
-        let nm=name_of(GenWord(locals.ptr[borrow_l].name))
+    let borrow_root=gen_named_root(it)
+    if borrow_root >? 0 {
+        let nm=name_of(GenWord(locals.ptr[borrow_root].name))
         if not starts_with(nm "$gen_tmp") {
-            let bad=gen_subtree_uses_local(GenWord(nodes.ptr[s].b) borrow_l)
+            let bad=gen_subtree_uses_local(GenWord(nodes.ptr[s].b) borrow_root)
             if bad not=? 0 {
                 fatal(bad "cannot use generator '{nm}' while iterating over it")
             }
+        }
+    } else if borrow_root <? 0 {
+        let g_id=-borrow_root
+        let nm=name_of(GenWord(globals.ptr[g_id].name))
+        let bad=gen_subtree_uses_global(GenWord(nodes.ptr[s].b) g_id)
+        if bad not=? 0 {
+            fatal(bad "cannot use generator '{nm}' while iterating over it")
         }
     }
     true
@@ -964,18 +1014,19 @@ gen_after_decl=(s:GenWord l:GenWord t:GenWord):>void=>$unsafe {
     # borrow named `g` via LF_ALIAS instead of moving it!
     if starts_with(nm "__s") and b not=? 0 {
         let bk=nodes.ptr[b].kind
-        let is_named=(bk =? 'ident' and nodes.ptr[b].aux =? int32(1)) or (bk =? 'field' and gen_named_local(b) >? 0)
+        let is_named=(bk =? 'ident' and (nodes.ptr[b].aux =? int32(1) or nodes.ptr[b].aux =? int32(2))) or (bk =? 'field' and gen_named_root(b) not=? 0)
         if throwing_iters.has(b) {
             gen_iter_throwing[l]=throwing_iters[b]
             throwing_iters.remove(b);
         }
         if is_named {
             # Detect `loop a in g and b in g` (same named generator twice in one combined loop).
-            let root=gen_named_local(b)
-            if root >? 0 and sibling_block >? 0 {
+            let root=gen_named_root(b)
+            if root not=? 0 and sibling_block >? 0 {
                 let prev=gen_iter_aliases.get(sibling_block) ?? []
                 if prev.contains(root) {
-                    fatal(nodes.ptr[b].pos "cannot iterate over generator '{name_of(GenWord(locals.ptr[root].name))}' twice in the same loop")
+                    let rname=if root >? 0 {name_of(GenWord(locals.ptr[root].name))} else {name_of(GenWord(globals.ptr[-root].name))}
+                    fatal(nodes.ptr[b].pos "cannot iterate over generator '{rname}' twice in the same loop")
                 }
                 prev.push(root)
                 gen_iter_aliases[sibling_block]=prev
@@ -1099,4 +1150,671 @@ gen_spread_parts=(c:GenWord count:GenWord @pre:array<int64> @out:array<int64>):>
     nodes[es].a=GenI32(end_call)
     add_flag(es NF_CHECKED)
     pre.push(es)
+}
+
+# ---------------- Shared AST Fusion Planner (Effect Scan + Lowering) ----------------
+# Pure AST analysis of non-escaping local generator pipelines (`lazy ...`, single-use
+# local chains, and direct single-`lazy` factory calls) consumed by a single `for_ (aux = 5)`
+# or combined-header `while_` loop. Cached per `(f, nodes.length, fns.length)` so both
+# `effect_scan` and `lower_generators` make the exact same fusion decisions.
+GenFuseSource:type=[
+    kind:int64=0        # 0 = direct lazy_, 1 = direct single-lazy factory call
+    node:int64=0        # lazy_ node or call node
+    lazy_node:int64=0   # underlying lazy_ AST node
+    fn_inst:int64=0     # FK_GENERATOR instance
+    factory_fn:int64=0  # FK_NORMAL factory instance (if kind == 1)
+    cap_fused:array<int64>=[]
+    cap_exprs:array<int64>=[]
+]
+
+GenFuseWhileInfo:type=[
+    while_node:int64=0
+    gen_l:int64=0
+    k_l:int64=0
+    el_l:int64=0
+    gi:int64=0
+    before_stmts:array<int64>=[]
+    after_stmts:array<int64>=[]
+    before_managed_locals:array<int64>=[]
+]
+
+GenFusePlan:type=[
+    active:bool=false
+    pool:array<GenFuseSource>=[]
+    locals_map:dict<int64 int64>=dict<int64 int64>()
+    decls_map:dict<int64 int64>=dict<int64 int64>()
+    skip_k_decls:dict<int64 bool>=dict<int64 bool>()
+    for_sources:dict<int64 int64>=dict<int64 int64>()
+    while_infos:dict<int64 GenFuseWhileInfo>=dict<int64 GenFuseWhileInfo>()
+    while_sources:dict<int64 int64>=dict<int64 int64>()
+    fused_only_captured:array<int64>=[]
+]
+
+GenFuseScan:type=[
+    cand_decl:dict<int64 int64>=dict<int64 int64>()
+    cand_rhs:dict<int64 int64>=dict<int64 int64>()
+    cand_depth:dict<int64 int64>=dict<int64 int64>()
+    cand_block:dict<int64 int64>=dict<int64 int64>()
+    cand_idx:dict<int64 int64>=dict<int64 int64>()
+    use_count:dict<int64 int64>=dict<int64 int64>()
+    use_kind:dict<int64 int64>=dict<int64 int64>()
+    use_parent:dict<int64 int64>=dict<int64 int64>()
+    use_block:dict<int64 int64>=dict<int64 int64>()
+    use_idx:dict<int64 int64>=dict<int64 int64>()
+    disqualified:dict<int64 bool>=dict<int64 bool>()
+    rhs_owner:dict<int64 int64>=dict<int64 int64>()
+    while_infos:dict<int64 GenFuseWhileInfo>=dict<int64 GenFuseWhileInfo>()
+    all_clos:array<int64>=[]
+    cands:array<int64>=[]
+]
+
+let gen_fuse_plan_cache:dict<int64 GenFusePlan>=dict<int64 GenFusePlan>()
+
+gen_local_is_shared=(l:GenWord):>bool=>$unsafe {
+    let fl=GenWord(locals.ptr[l].flags)
+    if fl & LF_CAPTURE =? 0 or fl & LF_VALUECAP not=? 0 {return fl & LF_SHARED not=? 0}
+    let r=l
+    loop GenWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and GenWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 {
+        r=GenWord(locals.ptr[r].outer)
+    }
+    GenWord(locals.ptr[r].flags) & LF_SHARED not=? 0
+}
+
+# Map a factory parameter's view local (if Dewy inserted a synthetic param-view vardecl `aux2 == 1`)
+# back to its parameter index in `fns.ptr[cf].params`, or -1 if not a direct parameter.
+gen_fuse_factory_param_idx=(cf:GenWord outer_l:GenWord):>int64=>$unsafe {
+    let target=outer_l
+    let body=GenWord(fns.ptr[cf].body)
+    loop i in [0..nkids(body)) {
+        let s=kid(body i)
+        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if GenWord(nodes.ptr[s].sym) =? target {
+            let rhs=GenWord(nodes.ptr[s].b)
+            if rhs >? 0 and nodes.ptr[rhs].kind =? 'ident' and nodes.ptr[rhs].aux =? int32(1) {
+                target=GenWord(nodes.ptr[rhs].sym)
+            }
+            break
+        }
+    }
+    loop j in [0..fns.ptr[cf].params.length) {
+        if GenWord(fns.ptr[cf].params.ptr[j]) =? target {return j}
+    }
+    -1
+}
+
+# Check if direct call `c` invokes a single-lazy factory function; return its `lazy_` node or 0.
+gen_fuse_factory_lazy=(c:GenWord):>int64=>$unsafe {
+    if c <=? 0 or nodes.ptr[c].kind not=? 'call' or nodes.ptr[c].aux not=? 0 {return 0}
+    let cf=GenWord(nodes.ptr[c].sym)
+    if cf <=? 0 or cf >=? fns.length {return 0}
+    if fns.ptr[cf].kind not=? FK_NORMAL or fns.ptr[cf].state not=? 2 {return 0}
+    if fns.ptr[cf].cabi or fns.ptr[cf].has_env {return 0}
+    let body=GenWord(fns.ptr[cf].body)
+    if body <=? 0 or nodes.ptr[body].kind not=? 'block' {return 0}
+    if nkids(c) not=? fns.ptr[cf].params.length {return 0}
+    let si:int64=0
+    loop si <? nkids(body) {
+        let st=kid(body si)
+        if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].aux2 =? 1 {si += 1}
+        else {break}
+    }
+    if si not=? nkids(body) - 1 {return 0}
+    let s0=kid(body si)
+    let s0k=nodes.ptr[s0].kind
+    if s0k not=? 'exprstmt' and s0k not=? 'return_' {return 0}
+    let lz=GenWord(nodes.ptr[s0].a)
+    if lz <=? 0 or nodes.ptr[lz].kind not=? 'lazy_' {return 0}
+    let fp=GenWord(nodes.ptr[lz].sym)
+    if fp <=? 0 or fp >=? fns.length {return 0}
+    # Every parameter must be a plain value parameter (no @mut, byref, addr, shared, or $__drop__ owner).
+    loop p in fns.ptr[cf].params {
+        let fl=GenWord(locals.ptr[p].flags)
+        if fl & (LF_MUTPARAM | LF_BYREF | LF_ADDR) not=? 0 or gen_local_is_shared(p) {return 0}
+        let pt=prune(GenWord(locals.ptr[p].type))
+        if ownership_type(pt) {return 0}
+    }
+    # Every capture of `lz` must be a direct parameter (or its synthetic view) of `cf`,
+    # and every parameter of `cf` must be captured so no argument side-effect is dropped.
+    if fns.ptr[fp].caps.length not=? fns.ptr[cf].params.length {return 0}
+    loop cap in fns.ptr[fp].caps {
+        if gen_fuse_factory_param_idx(cf GenWord(cap.outer)) <? 0 {return 0}
+    }
+    lz
+}
+
+# Check whether generator function `fp` is eligible for local loop fusion (bounded size & yields).
+gen_fuse_walk_eligible=(n:GenWord @ncount:int64 @ycount:int64):>bool=>$unsafe {
+    if n =? 0 {return true}
+    ncount += 1
+    if ncount >? 160 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'lazy_' {
+        # Reject inner closures/generators capturing locals of `fp` (would need frame env).
+        let inf=GenWord(nodes.ptr[n].sym)
+        if inf >? 0 and inf <? fns.length and fns.ptr[inf].caps.length >? 0 {return false}
+        return true
+    }
+    if k =? 'yield_' {
+        let aux=GenWord(nodes.ptr[n].aux)
+        # Dynamic delegation (`child()...`, aux=1) stays on the heap state machine.
+        if aux =? 1 {return false}
+        if aux =? 0 or aux =? 2 {
+            ycount += 1
+            if ycount >? 4 {return false}
+        }
+        return gen_fuse_walk_eligible(GenWord(nodes.ptr[n].a) @ncount @ycount)
+    }
+    if nodes.ptr[n].a not=? 0 and not gen_fuse_walk_eligible(GenWord(nodes.ptr[n].a) @ncount @ycount) {return false}
+    if nodes.ptr[n].b not=? 0 and not gen_fuse_walk_eligible(GenWord(nodes.ptr[n].b) @ncount @ycount) {return false}
+    if nodes.ptr[n].c not=? 0 and k not=? 'for_' and not gen_fuse_walk_eligible(GenWord(nodes.ptr[n].c) @ncount @ycount) {return false}
+    loop i in [0..nkids(n)) {
+        if not gen_fuse_walk_eligible(kid(n i) @ncount @ycount) {return false}
+    }
+    true
+}
+
+gen_fuse_eligible=(fp:GenWord depth:int64):>bool=>$unsafe {
+    if depth >? 6 or fp <=? 0 or fp >=? fns.length {return false}
+    let cap_set=dict<int64 bool>()
+    loop cap in fns.ptr[fp].caps {cap_set[GenWord(cap.inner)]=true}
+    loop l in fns.ptr[fp].locals {
+        if gen_local_is_shared(l) {return false}
+        let lt=prune(GenWord(locals.ptr[l].type))
+        if ownership_type(lt) {return false}
+        # Only allow generator-typed locals that are direct captures (upstream pipeline inputs).
+        if not cap_set.has(l) and gen_type_contains(lt) {return false}
+    }
+    let ncount:int64=0
+    let ycount:int64=0
+    gen_fuse_walk_eligible(GenWord(fns.ptr[fp].body) @ncount @ycount)
+}
+
+# Validate `before_stmts` of a combined-header `while_` loop and collect managed prefix locals.
+gen_fuse_before_ok=(n:GenWord loop_depth:int64 top_level:bool @before_managed:array<int64>):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'defer_' or k =? 'yield_' or k =? 'lambda' or k =? 'lazy_' {return false}
+    if k =? 'continue_' {
+        return GenWord(nodes.ptr[n].ival) <? loop_depth
+    }
+    if k =? 'break_' {
+        if loop_depth =? 0 {return GenWord(nodes.ptr[n].ival) =? 0}
+        return GenWord(nodes.ptr[n].ival) <=? loop_depth
+    }
+    if k =? 'vardecl' {
+        if has_flag(n NF_GLOBAL | NF_ALIASDECL) {return false}
+        if top_level {
+            if nkids(n) =? 0 {
+                let bl=GenWord(nodes.ptr[n].sym)
+                if bl <=? 0 {return false}
+                let fl=GenWord(locals.ptr[bl].flags)
+                if fl & (LF_ALIAS | LF_CAPTURED | LF_ADDR) not=? 0 or gen_local_is_shared(bl) {return false}
+                let bt=prune(GenWord(locals.ptr[bl].type))
+                if ownership_type(bt) {return false}
+                if is_managed(bt) {before_managed.push(bl)}
+            } else {
+                loop j in [0..nkids(n)) {
+                    let c=kid(n j)
+                    if nodes.ptr[c].kind =? 'hole' {continue}
+                    if has_flag(c NF_GLOBAL) or nodes.ptr[c].sym <=? 0 {return false}
+                    let bl=GenWord(nodes.ptr[c].sym)
+                    let fl=GenWord(locals.ptr[bl].flags)
+                    if fl & (LF_ALIAS | LF_CAPTURED | LF_ADDR) not=? 0 or gen_local_is_shared(bl) {return false}
+                    let bt=prune(GenWord(locals.ptr[bl].type))
+                    if ownership_type(bt) {return false}
+                    if is_managed(bt) {before_managed.push(bl)}
+                }
+            }
+        }
+        return gen_fuse_before_ok(GenWord(nodes.ptr[n].b) loop_depth false @before_managed)
+    }
+    let next_ld=if k =? 'for_' or k =? 'while_' {loop_depth + 1} else {loop_depth}
+    if nodes.ptr[n].a not=? 0 and not gen_fuse_before_ok(GenWord(nodes.ptr[n].a) next_ld false @before_managed) {return false}
+    if nodes.ptr[n].b not=? 0 and not gen_fuse_before_ok(GenWord(nodes.ptr[n].b) next_ld false @before_managed) {return false}
+    if nodes.ptr[n].c not=? 0 and k not=? 'for_' and not gen_fuse_before_ok(GenWord(nodes.ptr[n].c) next_ld false @before_managed) {return false}
+    loop i in [0..nkids(n)) {
+        if not gen_fuse_before_ok(kid(n i) next_ld false @before_managed) {return false}
+    }
+    true
+}
+
+# Match a combined-header `while true { <before>; k += 1; if __dewy_iter_done(g, k) { break }; let v = __dewy_iter_value(g, k); <after> }`.
+gen_fuse_while_match=(wl:GenWord):>GenFuseWhileInfo=>$unsafe {
+    let empty=GenFuseWhileInfo[]
+    if wl <=? 0 or nodes.ptr[wl].kind not=? 'while_' or nodes.ptr[wl].aux not=? 0 {return empty}
+    let cond=GenWord(nodes.ptr[wl].a)
+    if cond <=? 0 or nodes.ptr[cond].kind not=? 'bool_lit' or nodes.ptr[cond].ival not=? 1 {return empty}
+    let wb=GenWord(nodes.ptr[wl].b)
+    if wb <=? 0 or nodes.ptr[wb].kind not=? 'block' {return empty}
+    let nb=nkids(wb)
+    if nb <? 3 {return empty}
+
+    let found_gi:int64=-1
+    let gen_l:int64=0
+    let k_l:int64=0
+    let el_l:int64=0
+    loop gi in [0..nb - 2) {
+        let st0=kid(wb gi)
+        if nodes.ptr[st0].kind not=? 'assign' {continue}
+        let ka=GenWord(nodes.ptr[st0].a)
+        if ka <=? 0 or nodes.ptr[ka].kind not=? 'ident' or nodes.ptr[ka].aux not=? int32(1) {continue}
+        let kl=GenWord(nodes.ptr[ka].sym)
+
+        let st1=kid(wb gi + 1)
+        if nodes.ptr[st1].kind not=? 'if_' or nodes.ptr[st1].c not=? 0 {continue}
+        let ic=GenWord(nodes.ptr[st1].a)
+        if ic <=? 0 or nodes.ptr[ic].kind not=? 'intrinsic' or nodes.ptr[ic].aux not=? GenI32(int64(IN.dewy_iter_done)) or nkids(ic) not=? 2 {continue}
+        let a0=kid(ic 0)
+        let a1=kid(ic 1)
+        if nodes.ptr[a0].kind not=? 'ident' or nodes.ptr[a0].aux not=? int32(1) {continue}
+        if nodes.ptr[a1].kind not=? 'ident' or nodes.ptr[a1].aux not=? int32(1) or GenWord(nodes.ptr[a1].sym) not=? kl {continue}
+        let gl=GenWord(nodes.ptr[a0].sym)
+        if tkind(prune(GenWord(locals.ptr[gl].type))) not=? 'generator' {continue}
+        let th=GenWord(nodes.ptr[st1].b)
+        let is_brk=false
+        if th >? 0 and nodes.ptr[th].kind =? 'break_' and nodes.ptr[th].ival =? 0 {is_brk=true}
+        else if th >? 0 and nodes.ptr[th].kind =? 'block' and nkids(th) =? 1 {
+            let b0=kid(th 0)
+            if nodes.ptr[b0].kind =? 'break_' and nodes.ptr[b0].ival =? 0 {is_brk=true}
+        }
+        if not is_brk {continue}
+
+        let st2=kid(wb gi + 2)
+        if nodes.ptr[st2].kind not=? 'vardecl' or nkids(st2) not=? 0 or has_flag(st2 NF_GLOBAL | NF_ALIASDECL) or nodes.ptr[st2].sym <=? 0 {continue}
+        let vl=GenWord(nodes.ptr[st2].sym)
+        if (GenWord(locals.ptr[vl].flags) & LF_ALIAS) not=? 0 or gen_local_is_shared(vl) {continue}
+        let vr=GenWord(nodes.ptr[st2].b)
+        if vr <=? 0 or nodes.ptr[vr].kind not=? 'intrinsic' or nodes.ptr[vr].aux not=? GenI32(int64(IN.dewy_iter_value)) or nkids(vr) not=? 2 {continue}
+        let v0=kid(vr 0)
+        let v1=kid(vr 1)
+        if nodes.ptr[v0].kind not=? 'ident' or nodes.ptr[v0].aux not=? int32(1) or GenWord(nodes.ptr[v0].sym) not=? gl {continue}
+        if nodes.ptr[v1].kind not=? 'ident' or nodes.ptr[v1].aux not=? int32(1) or GenWord(nodes.ptr[v1].sym) not=? kl {continue}
+
+        found_gi=gi
+        gen_l=gl
+        k_l=kl
+        el_l=vl
+        break
+    }
+    if found_gi <? 0 {return empty}
+
+    # Ensure `gen_l` and `k_l` are not referenced anywhere else in the loop body.
+    loop j in [0..nb) {
+        if j >=? found_gi and j <=? found_gi + 2 {continue}
+        let sj=kid(wb j)
+        if gen_subtree_uses_local(sj gen_l) not=? 0 or gen_subtree_uses_local(sj k_l) not=? 0 {
+            return empty
+        }
+    }
+
+    let before_stmts:array<int64>=[]
+    let before_managed:array<int64>=[]
+    loop j in [0..found_gi) {
+        let bs=kid(wb j)
+        if not gen_fuse_before_ok(bs 0 true @before_managed) {return empty}
+        before_stmts.push(bs)
+    }
+    let after_stmts:array<int64>=[]
+    loop j in [found_gi + 3..nb) {
+        after_stmts.push(kid(wb j))
+    }
+
+    GenFuseWhileInfo[
+        while_node=wl
+        gen_l=gen_l
+        k_l=k_l
+        el_l=el_l
+        gi=found_gi
+        before_stmts=before_stmts
+        after_stmts=after_stmts
+        before_managed_locals=before_managed
+    ]
+}
+
+gen_fuse_note_use=(@sc:GenFuseScan l:GenWord ukind:int64 parent:GenWord depth:int64 blk_n:int64 st_idx:int64 in_lam:bool):>void=>{
+    if not sc.cand_decl.has(l) {return}
+    let prev=sc.use_count.get(l) ?? 0
+    sc.use_count[l]=prev + 1
+    if prev >? 0 or in_lam or ukind =? 99 or depth not=? sc.cand_depth[l] {
+        sc.disqualified[l]=true
+        return
+    }
+    sc.use_kind[l]=ukind
+    sc.use_parent[l]=parent
+    sc.use_block[l]=blk_n
+    sc.use_idx[l]=st_idx
+}
+
+gen_fuse_scan_node=(n:GenWord @sc:GenFuseScan depth:int64 blk_n:int64 st_idx:int64 in_lam:bool):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'block' {
+        loop i in [0..nkids(n)) {
+            gen_fuse_scan_node(kid(n i) @sc depth n i in_lam)
+        }
+        return
+    }
+    if k =? 'vardecl' {
+        let rhs=GenWord(nodes.ptr[n].b)
+        if not has_flag(n NF_GLOBAL) and nkids(n) =? 0 and nodes.ptr[n].sym >? 0 and rhs not=? 0 and not in_lam {
+            let l=GenWord(nodes.ptr[n].sym)
+            let fl=GenWord(locals.ptr[l].flags)
+            let lt=prune(GenWord(locals.ptr[l].type))
+            if types.ptr[lt].kind =? 'generator' and (fl & (LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_ADDR | LF_ASSIGNED)) =? 0 and not gen_local_is_shared(l) {
+                sc.cand_decl[l]=n
+                sc.cand_rhs[l]=rhs
+                sc.cand_depth[l]=depth
+                sc.cand_block[l]=blk_n
+                sc.cand_idx[l]=st_idx
+                sc.rhs_owner[rhs]=l
+                sc.cands.push(l)
+            }
+        }
+        if rhs not=? 0 {gen_fuse_scan_node(rhs @sc depth blk_n st_idx in_lam)}
+        return
+    }
+    if k =? 'for_' {
+        let it=GenWord(nodes.ptr[n].a)
+        if nodes.ptr[n].aux =? 5 and it not=? 0 and nodes.ptr[it].kind =? 'ident' and nodes.ptr[it].aux =? int32(1) {
+            gen_fuse_note_use(@sc GenWord(nodes.ptr[it].sym) 1 n depth blk_n st_idx in_lam)
+        } else if it not=? 0 {
+            gen_fuse_scan_node(it @sc depth blk_n st_idx in_lam)
+        }
+        gen_fuse_scan_node(GenWord(nodes.ptr[n].b) @sc depth + 1 blk_n st_idx in_lam)
+        return
+    }
+    if k =? 'while_' {
+        let wi=gen_fuse_while_match(n)
+        if wi.while_node =? n {
+            sc.while_infos[n]=wi
+            gen_fuse_note_use(@sc wi.gen_l 4 n depth blk_n st_idx in_lam)
+            loop bs in wi.before_stmts {gen_fuse_scan_node(bs @sc depth + 1 blk_n st_idx in_lam)}
+            loop as_ in wi.after_stmts {gen_fuse_scan_node(as_ @sc depth + 1 blk_n st_idx in_lam)}
+            return
+        }
+        gen_fuse_scan_node(GenWord(nodes.ptr[n].a) @sc depth blk_n st_idx in_lam)
+        gen_fuse_scan_node(GenWord(nodes.ptr[n].b) @sc depth + 1 blk_n st_idx in_lam)
+        return
+    }
+    if k =? 'lazy_' {
+        sc.all_clos.push(n)
+        let fp=GenWord(nodes.ptr[n].sym)
+        if fp >? 0 and fp <? fns.length {
+            loop cap in fns.ptr[fp].caps {
+                gen_fuse_note_use(@sc GenWord(cap.outer) 2 n depth blk_n st_idx in_lam)
+            }
+        }
+        return
+    }
+    if k =? 'lambda' {
+        sc.all_clos.push(n)
+        let lf=GenWord(nodes.ptr[n].sym)
+        if lf >? 0 and lf <? fns.length {
+            loop cap in fns.ptr[lf].caps {
+                gen_fuse_note_use(@sc GenWord(cap.outer) 99 n depth blk_n st_idx true)
+            }
+        }
+        return
+    }
+    if k =? 'call' {
+        let flz=gen_fuse_factory_lazy(n)
+        if flz not=? 0 {
+            loop i in [0..nkids(n)) {
+                let arg=kid(n i)
+                if nodes.ptr[arg].kind =? 'ident' and nodes.ptr[arg].aux =? int32(1) {
+                    gen_fuse_note_use(@sc GenWord(nodes.ptr[arg].sym) 3 n depth blk_n st_idx in_lam)
+                } else {
+                    if sc.rhs_owner.has(n) {sc.rhs_owner[arg]=sc.rhs_owner[n]}
+                    gen_fuse_scan_node(arg @sc depth blk_n st_idx in_lam)
+                }
+            }
+            return
+        }
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        gen_fuse_note_use(@sc GenWord(nodes.ptr[n].sym) 99 n depth blk_n st_idx in_lam)
+        return
+    }
+    if nodes.ptr[n].a not=? 0 {gen_fuse_scan_node(GenWord(nodes.ptr[n].a) @sc depth blk_n st_idx in_lam)}
+    if nodes.ptr[n].b not=? 0 {gen_fuse_scan_node(GenWord(nodes.ptr[n].b) @sc depth blk_n st_idx in_lam)}
+    if nodes.ptr[n].c not=? 0 {gen_fuse_scan_node(GenWord(nodes.ptr[n].c) @sc depth blk_n st_idx in_lam)}
+    loop i in [0..nkids(n)) {
+        gen_fuse_scan_node(kid(n i) @sc depth blk_n st_idx in_lam)
+    }
+}
+
+gen_fuse_build_source=(@plan:GenFusePlan e:GenWord active_fns:array<int64> depth:int64):>int64=>$unsafe {
+    if e <=? 0 or depth >? 6 {return -1}
+    let k=nodes.ptr[e].kind
+    if k =? 'lazy_' {
+        let fp=GenWord(nodes.ptr[e].sym)
+        if active_fns.contains(fp) or not gen_fuse_eligible(fp depth) {return -1}
+        let idx=plan.pool.length
+        plan.pool.push(GenFuseSource[kind=0 node=e lazy_node=e fn_inst=fp])
+        return idx
+    }
+    if k =? 'call' {
+        let lz=gen_fuse_factory_lazy(e)
+        if lz =? 0 {return -1}
+        let cf=GenWord(nodes.ptr[e].sym)
+        let fp=GenWord(nodes.ptr[lz].sym)
+        if active_fns.contains(fp) or active_fns.contains(cf) or not gen_fuse_eligible(fp depth) {return -1}
+        let idx=plan.pool.length
+        plan.pool.push(GenFuseSource[kind=1 node=e lazy_node=lz fn_inst=fp factory_fn=cf])
+        return idx
+    }
+    -1
+}
+
+gen_fuse_has_managed_cap=(plan:GenFusePlan src_idx:int64):>bool=>$unsafe {
+    let fp=plan.pool[src_idx].fn_inst
+    loop cap in fns.ptr[fp].caps {
+        let t=prune(GenWord(locals.ptr[GenWord(cap.inner)].type))
+        if types.ptr[t].kind not=? 'generator' and is_managed(t) {return true}
+    }
+    false
+}
+
+gen_fuse_node_has_defer=(n:GenWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'lazy_' {return false}
+    if k =? 'defer_' {return true}
+    if nodes.ptr[n].a not=? 0 and gen_fuse_node_has_defer(GenWord(nodes.ptr[n].a)) {return true}
+    if nodes.ptr[n].b not=? 0 and gen_fuse_node_has_defer(GenWord(nodes.ptr[n].b)) {return true}
+    if nodes.ptr[n].c not=? 0 and k not=? 'for_' and gen_fuse_node_has_defer(GenWord(nodes.ptr[n].c)) {return true}
+    loop i in [0..nkids(n)) {
+        if gen_fuse_node_has_defer(kid(n i)) {return true}
+    }
+    false
+}
+
+gen_fuse_straight_between=(blk_n:GenWord i0:int64 i1:int64):>bool=>$unsafe {
+    if blk_n <=? 0 or nodes.ptr[blk_n].kind not=? 'block' {return false}
+    loop i in [i0 + 1..i1) {
+        let sk=nodes.ptr[kid(blk_n i)].kind
+        if sk not=? 'vardecl' and sk not=? 'assign' {return false}
+    }
+    true
+}
+
+gen_fuse_resolve_source=(@plan:GenFusePlan ok_src:dict<int64 int64> @resolved:dict<int64 bool> sidx:int64 active_fns:array<int64> depth:int64):>void=>$unsafe {
+    if resolved.has(sidx) {return}
+    resolved[sidx]=true
+    let src=plan.pool[sidx]
+    let fp=src.fn_inst
+    let ncaps=fns.ptr[fp].caps.length
+    let fused:array<int64>=[]
+    let exprs:array<int64>=[]
+    let next_active=[active_fns... fp]
+    if src.factory_fn >? 0 {next_active.push(src.factory_fn)}
+
+    loop ci in [0..ncaps) {
+        let cap=fns.ptr[fp].caps.ptr[ci]
+        let inn_l=GenWord(cap.inner)
+        let t=prune(GenWord(locals.ptr[inn_l].type))
+        let arg_e:GenWord=0
+        let child_idx:int64=-1
+        if src.kind =? 0 {
+            let out_l=GenWord(cap.outer)
+            if types.ptr[t].kind =? 'generator' and ok_src.has(out_l) {
+                child_idx=ok_src[out_l]
+                gen_fuse_resolve_source(@plan ok_src @resolved child_idx next_active depth + 1)
+            }
+        } else {
+            let pi=gen_fuse_factory_param_idx(src.factory_fn GenWord(cap.outer))
+            arg_e=kid(src.node pi)
+            if types.ptr[t].kind =? 'generator' {
+                if nodes.ptr[arg_e].kind =? 'ident' and nodes.ptr[arg_e].aux =? int32(1) {
+                    let al=GenWord(nodes.ptr[arg_e].sym)
+                    if ok_src.has(al) {
+                        child_idx=ok_src[al]
+                        gen_fuse_resolve_source(@plan ok_src @resolved child_idx next_active depth + 1)
+                    }
+                } else {
+                    let inline_idx=gen_fuse_build_source(@plan arg_e next_active depth + 1)
+                    if inline_idx >=? 0 {
+                        gen_fuse_resolve_source(@plan ok_src @resolved inline_idx next_active depth + 1)
+                        child_idx=inline_idx
+                    }
+                }
+            }
+        }
+        fused.push(child_idx)
+        exprs.push(arg_e)
+    }
+    plan.pool[sidx].cap_fused=fused
+    plan.pool[sidx].cap_exprs=exprs
+}
+
+gen_fuse_plan=(f:GenWord):>GenFusePlan=>$unsafe {
+    if nodes.length not=? gen_fuse_plan_nodes_len or fns.length not=? gen_fuse_plan_fns_len {
+        if gen_fuse_plan_cache.length >? 0 {gen_fuse_plan_cache.clear()}
+        gen_fuse_plan_nodes_len=nodes.length
+        gen_fuse_plan_fns_len=fns.length
+    }
+    if gen_fuse_plan_cache.has(f) {return gen_fuse_plan_cache[f]}
+    let plan=GenFusePlan[]
+    if f <=? 0 or f >=? fns.length {return plan}
+    let body=GenWord(fns.ptr[f].body)
+    if body <=? 0 {
+        gen_fuse_plan_cache[f]=plan
+        return plan
+    }
+    let sc=GenFuseScan[]
+    gen_fuse_scan_node(body @sc 0 body 0 false)
+    if sc.cands.length =? 0 {
+        gen_fuse_plan_cache[f]=plan
+        return plan
+    }
+
+    let ok_src=dict<int64 int64>()
+    # Pass 1: direct `for_ (aux = 5)` and combined-header `while_` consumers.
+    loop l in sc.cands {
+        if sc.disqualified.has(l) or (sc.use_count.get(l) ?? 0) not=? 1 {continue}
+        let uk=sc.use_kind.get(l) ?? 0
+        if uk not=? 1 and uk not=? 4 {continue}
+        let sidx=gen_fuse_build_source(@plan sc.cand_rhs[l] [f] 0)
+        if sidx <? 0 {continue}
+        if gen_fuse_has_managed_cap(plan sidx) {
+            if sc.cand_block[l] not=? sc.use_block[l] or not gen_fuse_straight_between(sc.cand_block[l] sc.cand_idx[l] sc.use_idx[l]) {
+                continue
+            }
+        }
+        if gen_fuse_node_has_defer(GenWord(fns.ptr[plan.pool[sidx].fn_inst].body)) {
+            if sc.cand_block[l] not=? sc.use_block[l] or sc.use_idx[l] not=? nkids(sc.cand_block[l]) - 1 {
+                continue
+            }
+        }
+        ok_src[l]=sidx
+    }
+    # Pass 2: propagate upstream through local generator pipelines (up to 6 hops).
+    loop hop in [0..6) {
+        let added=false
+        loop l in sc.cands {
+            if ok_src.has(l) or sc.disqualified.has(l) or (sc.use_count.get(l) ?? 0) not=? 1 {continue}
+            let uk=sc.use_kind.get(l) ?? 0
+            if uk not=? 2 and uk not=? 3 {continue}
+            let par=sc.use_parent[l]
+            if not sc.rhs_owner.has(par) {continue}
+            let owner_l=sc.rhs_owner[par]
+            if not ok_src.has(owner_l) {continue}
+            let sidx=gen_fuse_build_source(@plan sc.cand_rhs[l] [f plan.pool[ok_src[owner_l]].fn_inst] hop + 1)
+            if sidx <? 0 {continue}
+            if gen_fuse_has_managed_cap(plan sidx) {
+                if sc.cand_block[l] not=? sc.use_block[l] or not gen_fuse_straight_between(sc.cand_block[l] sc.cand_idx[l] sc.use_idx[l]) {
+                    continue
+                }
+            }
+            if gen_fuse_node_has_defer(GenWord(fns.ptr[plan.pool[sidx].fn_inst].body)) {
+                if sc.cand_block[l] not=? sc.use_block[l] or sc.use_idx[l] not=? nkids(sc.cand_block[l]) - 1 {
+                    continue
+                }
+            }
+            ok_src[l]=sidx
+            added=true
+        }
+        if not added {break}
+    }
+
+    if ok_src.length >? 0 {
+        let resolved=dict<int64 bool>()
+        loop [l sidx] in ok_src {
+            gen_fuse_resolve_source(@plan ok_src @resolved sidx [f] 0)
+            plan.locals_map[l]=sidx
+            plan.decls_map[sc.cand_decl[l]]=l
+            let uk=sc.use_kind.get(l) ?? 0
+            let par=sc.use_parent[l]
+            if uk =? 1 {
+                plan.for_sources[par]=sidx
+            } else if uk =? 4 and sc.while_infos.has(par) {
+                let wi=sc.while_infos[par]
+                plan.while_sources[par]=sidx
+                plan.while_infos[par]=wi
+                # Mark dead synthetic `let __kN = -1` decl for skipping when `k_l` is unused elsewhere in its block.
+                let blk_n=sc.cand_block[l]
+                let ci=sc.cand_idx[l]
+                if blk_n >? 0 and ci + 1 <? nkids(blk_n) {
+                    let kd=kid(blk_n ci + 1)
+                    if nodes.ptr[kd].kind =? 'vardecl' and nkids(kd) =? 0 and GenWord(nodes.ptr[kd].sym) =? wi.k_l and (GenWord(locals.ptr[wi.k_l].flags) & (LF_CAPTURED | LF_ADDR)) =? 0 {
+                        let k_other=false
+                        loop si in [0..nkids(blk_n)) {
+                            let st=kid(blk_n si)
+                            if st =? kd or st =? par {continue}
+                            if gen_subtree_uses_local(st wi.k_l) not=? 0 {k_other=true; break}
+                        }
+                        if not k_other {plan.skip_k_decls[kd]=true}
+                    }
+                }
+            }
+        }
+        # Identify locals of `f` captured ONLY by fused `lazy_` sources (so effect_scan treats them as non-escaping).
+        let fused_lazys=dict<int64 bool>()
+        loop src in plan.pool {
+            if src.kind =? 0 {fused_lazys[src.lazy_node]=true}
+        }
+        let non_fused_caps=dict<int64 bool>()
+        loop cn in sc.all_clos {
+            if fused_lazys.has(cn) {continue}
+            let cf=GenWord(nodes.ptr[cn].sym)
+            if cf >? 0 and cf <? fns.length {
+                loop cap in fns.ptr[cf].caps {non_fused_caps[GenWord(cap.outer)]=true}
+            }
+        }
+        let seen_fc=dict<int64 bool>()
+        loop src in plan.pool {
+            if src.kind not=? 0 {continue}
+            let fp=src.fn_inst
+            loop cap in fns.ptr[fp].caps {
+                let ol=GenWord(cap.outer)
+                if not non_fused_caps.has(ol) and not seen_fc.has(ol) {
+                    seen_fc[ol]=true
+                    plan.fused_only_captured.push(ol)
+                }
+            }
+        }
+        plan.active=true
+    }
+    gen_fuse_plan_cache[f]=plan
+    plan
 }

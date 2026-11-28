@@ -13,7 +13,7 @@ from p"lower_views.dewy" import (bounded_open_for declared_in_scope fixed_path_o
 from p"lower_storage.dewy" import (V arr_len arr_unique blk borrow box_put box_val boxed_field_of br_to brif_to build_slot cell_place copy_at drop_at drop_held els endc enter_cond field_place field_store_type field_val_addr finish_call freeze_scalar hdr_load hdr_store iff is_shared leave_cond load_val lop new_cell new_temp norm opt_has opt_value own owner_array_from_fixed place_addr read_place reg_temp_slot reg_temp_vreg release release_arg_snapshots result_from_slot ret_vt retain retain_elems scope_add_local scope_push stmt_begin stmt_end store_field store_type store_val vc vt_of write_place zero_declare zero_note zero_val)
 from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change copy_through index_stable lm_change_at lm_resizing_call lpath_key lpath_root may_write_heap may_write_root mentions_local mut_alias_check mut_may_reach path_within place_steps place_text place_var same_var shares_mut_root unchanged_by write_root)
 from p"lower_helpers.dewy" import (field_list fixed_elem_addr fixed_loop_begin fixed_loop_end)
-from p"lower_generators.dewy" import (gen_for_generator gen_fuse_active gen_fuse_brk_scope gen_fuse_init_decl gen_fuse_yield gen_intrinsic_iter_done gen_intrinsic_iter_value gen_lazy)
+from p"lower_generators.dewy" import (gen_for_generator gen_fuse_active gen_fuse_brk_scope gen_fuse_init_decl gen_fuse_try_while gen_fuse_yield gen_intrinsic_iter_done gen_intrinsic_iter_value gen_lazy)
 from p"lower.jo" import (once_slots BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index cond_depth copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry lower_epoch opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals zero_ctls)
 from p"expr.jo" import (CV FMT_DEWY IN format_word_inst)
 from p"integer_conversions.dewy" import (int_widens integer_constant)
@@ -6001,7 +6001,7 @@ gen_stmt=(s:LGWord):>void=>$unsafe {
     else if k =? 'if_' or k =? 'iflet' {gen_expr(s);}
     else if k =? 'while_' or k =? 'for_' {
         let n=uq_begin(s)
-        if k =? 'while_' {gen_while(s);}
+        if k =? 'while_' {if not gen_fuse_try_while(s) {gen_while(s);}}
         else {gen_for(s);}
         uq_end(n);
     }

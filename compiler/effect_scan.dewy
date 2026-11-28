@@ -46,6 +46,8 @@ from p"refine_metadata.dewy" import (representation_type)
 from p"lower_storage.dewy" import (vc)
 from p"effect_owners.dewy" import (effect_owner_init)
 from p"isolation_ops.dewy" import (iso_child_p isolation_children isolation_effect isolation_intrinsic)
+from p"type_constructors.dewy" import (tb_generators_seen)
+from p"checker_generators.dewy" import (GenFusePlan gen_fuse_plan)
 from p"util.jo" import (intern)
 # Demanded body and place scanning; shared state has one owner in effects.jo.
 EffectScanWord:type=int64<overflow='wrap'>
@@ -555,6 +557,12 @@ effect_body_moves_out=(body:EffectScanWord depth:EffectScanWord=0 result:bool=tr
 let es_seen_gen:EffectScanWord=1
 let es_ro_owner:EffectScanWord=-1
 let es_has_ro:bool=false
+let es_fuse_root:EffectScanWord=0
+let es_fuse_active:bool=false
+let es_fuse_depth:int64=0
+let es_fuse_plan:GenFusePlan=GenFusePlan[]
+let es_fuse_up_caps:dict<int64 int64>=dict<int64 int64>()
+let es_fuse_val_caps:dict<int64 bool>=dict<int64 bool>()
 effect_seen_bump=():>void=>$unsafe {
     es_ro_owner=-1
     es_seen_gen += 1
@@ -564,15 +572,180 @@ effect_seen_bump=():>void=>$unsafe {
     }
     if effect_seen.length <? nodes.length {effect_seen.resize(nodes.length)}
 }
+effect_scan_fused_args=(f:EffectScanWord sidx:int64):>void=>$unsafe {
+    let src=es_fuse_plan.pool[sidx]
+    let fp=src.fn_inst
+    loop ci in [0..fns.ptr[fp].caps.length) {
+        let child=src.cap_fused[ci]
+        if child >=? 0 {
+            if src.kind =? 1 {
+                let ae=src.cap_exprs[ci]
+                let is_local=ae >? 0 and nodes.ptr[ae].kind =? 'ident' and nodes.ptr[ae].aux =? int32(1) and es_fuse_plan.locals_map.has(EffectScanWord(nodes.ptr[ae].sym))
+                if not is_local {effect_scan_fused_args(f child);}
+            }
+        } else if src.kind =? 1 {
+            effect_scan_node(f src.cap_exprs[ci]);
+        } else {
+            let ol=EffectScanWord(fns.ptr[fp].caps.ptr[ci].outer)
+            let fl=EffectScanWord(locals.ptr[ol].flags)
+            let ot=representation_type(EffectScanWord(locals.ptr[ol].type))
+            if fl & (LF_SHARED | LF_BYREF | LF_ADDR | LF_EXPOSED) not=? 0 {
+                effect_opaque(f src.lazy_node);
+            } else if fl & LF_MUTPARAM not=? 0 {
+                let p=effect_export(f PlaceIdentity['local' f ol])
+                if p.declaration not=? 0 and p.root =? 'formal' {
+                    effect_add(f EffectEvent[EffectAtom['read' p] src.lazy_node]);
+                } else {
+                    effect_opaque(f src.lazy_node);
+                }
+            } else if not effect_value(ot) and not (tkind(ot) =? 'array' and effect_scalar(telem(ot)) and ((fl & LF_PARAM not=? 0) or effect_copy_capture(f ol))) {
+                effect_opaque(f src.lazy_node);
+            }
+        }
+    }
+}
+effect_scan_fused_producer=(f:EffectScanWord sidx:int64):>void=>$unsafe {
+    let src=es_fuse_plan.pool[sidx]
+    if es_fuse_depth >? 8 {
+        effect_opaque(f src.node);
+        return
+    }
+    let fp=src.fn_inst
+    let saved_fl:array<int64>=[]
+    let saved_up_k:array<int64>=[]
+    let saved_up_v:array<int64>=[]
+    let saved_val_k:array<int64>=[]
+    let saved_val_had:array<bool>=[]
+    loop ci in [0..fns.ptr[fp].caps.length) {
+        let inn_l=EffectScanWord(fns.ptr[fp].caps.ptr[ci].inner)
+        let child=src.cap_fused[ci]
+        if child >=? 0 {
+            # Always scan upstream fused producers (even if `fp.body` was already stamped by an earlier call).
+            effect_scan_fused_producer(f child);
+            saved_up_k.push(inn_l)
+            saved_up_v.push(es_fuse_up_caps.get(inn_l) ?? (-1))
+            es_fuse_up_caps[inn_l]=child
+        } else {
+            if tkind(prune(EffectScanWord(locals.ptr[inn_l].type))) =? 'generator' {
+                effect_opaque(f src.node);
+            } else {
+                saved_val_k.push(inn_l)
+                saved_val_had.push(es_fuse_val_caps.has(inn_l))
+                es_fuse_val_caps[inn_l]=true
+            }
+        }
+        let fl=EffectScanWord(locals.ptr[inn_l].flags)
+        if fl & LF_CAPTURE not=? 0 {
+            saved_fl.push(inn_l)
+            locals[inn_l].flags=int32<overflow='wrap'>(fl & ~LF_CAPTURE)
+        }
+    }
+    es_fuse_depth += 1
+    effect_scan_node(f EffectScanWord(fns.ptr[fp].body));
+    es_fuse_depth -= 1
+    loop cl in saved_fl {
+        locals[cl].flags=int32<overflow='wrap'>(EffectScanWord(locals.ptr[cl].flags) | LF_CAPTURE)
+    }
+    loop i in [0..saved_up_k.length) {
+        let k=saved_up_k[i]
+        let prev=saved_up_v[i]
+        if prev >=? 0 {es_fuse_up_caps[k]=prev}
+        else {es_fuse_up_caps.remove(k);}
+    }
+    loop i in [0..saved_val_k.length) {
+        if not saved_val_had[i] {es_fuse_val_caps.remove(saved_val_k[i]);}
+    }
+}
 effect_scan_begin=(f:EffectScanWord):>void=>$unsafe {
     if es_ro_owner =? f {es_ro_owner=-1}
+    es_fuse_root=0
+    es_fuse_active=false
+    es_fuse_depth=0
+    if tb_generators_seen {
+        let plan=gen_fuse_plan(f)
+        if plan.active {
+            es_fuse_plan=plan
+            es_fuse_root=EffectScanWord(fns.ptr[f].body)
+        }
+    }
 }
 effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if n =? 0 or effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {return}
+    if n =? es_fuse_root {
+        es_fuse_root=0
+        let saved_caps:array<int64>=[]
+        loop cl in es_fuse_plan.fused_only_captured {
+            let fl=EffectScanWord(locals.ptr[cl].flags)
+            if fl & LF_CAPTURED not=? 0 {
+                saved_caps.push(cl)
+                locals[cl].flags=int32<overflow='wrap'>(fl & ~LF_CAPTURED)
+            }
+        }
+        es_fuse_active=true
+        effect_scan_node(f n);
+        es_fuse_active=false
+        es_fuse_depth=0
+        if es_fuse_up_caps.length >? 0 {es_fuse_up_caps.clear()}
+        if es_fuse_val_caps.length >? 0 {es_fuse_val_caps.clear()}
+        loop cl in saved_caps {
+            locals[cl].flags=int32<overflow='wrap'>(EffectScanWord(locals.ptr[cl].flags) | LF_CAPTURED)
+        }
+        return
+    }
     let stamp:EffectScanWord=(es_seen_gen << 24) | f
     if effect_seen.ptr[n] =? stamp {return}
     effect_seen.ptr[n]=stamp
     let k=nodes.ptr[n].kind
+    if es_fuse_active {
+        if k =? 'vardecl' {
+            if es_fuse_plan.skip_k_decls.has(n) {return}
+            if es_fuse_plan.decls_map.has(n) {
+                let fl_l=es_fuse_plan.decls_map[n]
+                effect_scan_fused_args(f es_fuse_plan.locals_map[fl_l]);
+                return
+            }
+        } else if k =? 'for_' and nodes.ptr[n].aux =? 5 {
+            let fsidx:int64=-1
+            if es_fuse_depth =? 0 and es_fuse_plan.for_sources.has(n) {
+                fsidx=es_fuse_plan.for_sources[n]
+            } else if es_fuse_depth >? 0 {
+                let it=EffectScanWord(nodes.ptr[n].a)
+                if it >? 0 and nodes.ptr[it].kind =? 'ident' and nodes.ptr[it].aux =? int32(1) {
+                    let il=EffectScanWord(nodes.ptr[it].sym)
+                    if es_fuse_up_caps.has(il) {fsidx=es_fuse_up_caps[il]}
+                }
+            }
+            if fsidx >=? 0 {
+                let el_l=EffectScanWord(nodes.ptr[n].sym)
+                if el_l >? 0 and not effect_share(representation_type(EffectScanWord(locals.ptr[el_l].type))) {
+                    effect_opaque(f n);
+                }
+                effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
+                effect_scan_fused_producer(f fsidx);
+                return
+            }
+        } else if k =? 'while_' and es_fuse_depth =? 0 and es_fuse_plan.while_sources.has(n) {
+            let fsidx=es_fuse_plan.while_sources[n]
+            let wi=es_fuse_plan.while_infos[n]
+            if wi.el_l >? 0 and not effect_share(representation_type(EffectScanWord(locals.ptr[wi.el_l].type))) {
+                effect_opaque(f n);
+            }
+            loop bs in wi.before_stmts {effect_scan_node(f bs);}
+            loop as_ in wi.after_stmts {effect_scan_node(f as_);}
+            effect_scan_fused_producer(f fsidx);
+            return
+        } else if k =? 'yield_' and es_fuse_depth >? 0 {
+            let a=EffectScanWord(nodes.ptr[n].a)
+            if a not=? 0 {effect_scan_node(f a);}
+            return
+        } else if k =? 'ident' and es_fuse_depth >? 0 and nodes.ptr[n].aux =? int32(1) {
+            let il=EffectScanWord(nodes.ptr[n].sym)
+            if es_fuse_val_caps.has(il) {
+                let it=representation_type(ntype(n))
+                if tkind(it) =? 'array' and effect_scalar(telem(it)) {return}
+            }
+        }
+    }
     let exact_rep=effect_exact_rep
     if not exact_rep and ownership_decls.length =? 0 {
         match k {
