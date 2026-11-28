@@ -2,6 +2,9 @@ name: CI
 
 "on":
   push:
+    # (land.sh pushes land-candidate only to run the nightly tier on it)
+    branches-ignore:
+      - land-candidate
     paths-ignore:
       - 'site/**'
       - 'resources/**'

@@ -5643,7 +5643,7 @@ that end when it has it (once), and the text unchanged otherwise.
 `text.trim_start` and `text.trim_end` drop whitespace from one end (`trim` both;
 `text.trim(chars)` drops any of the characters in `chars` from both ends instead),
 `text.split(sep)` gives the pieces between separators (`"a,,b".split(",")` is
-`["a" "" "b"]`) and `text.split()` the words between runs of whitespace (none for
+`["a" "" "b"]`) and `text.split` the words between runs of whitespace (none for
 blank text), `text.lines` gives the lines without their breaks (a final break adds no empty
 line), `text.chars` its graphemes (as `graphemes(text)`), `text.count(part)` the
 nonoverlapping occurrences and `text.is_empty` whether it has none (when it is
