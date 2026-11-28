@@ -48,7 +48,7 @@ from p"facts_slice_prep.dewy" import (fact_slice_flags fsp_is_lib_sp)
 from p"facts_summaries.dewy" import (fact_constructor_join fact_summary fact_summary_actual fact_summary_kept_upper fact_summary_length fact_summary_payload fact_summary_payload_publish fact_summary_record)
 from p"facts_text.dewy" import (fact_affix_call fact_byte_slice fact_byte_view fact_find_start fact_lines_call fact_regex_search_result fact_removal fact_search_call fact_search_reads_only fact_search_result fact_split_call fact_string_call fact_string_index fact_string_slice fact_words_call)
 from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_slot fact_truth)
-from p"facts_values.dewy" import (fact_bcast_common fact_domain fact_literal fact_place fact_project fact_scalar fact_string_set fact_type fact_unmodeled)
+from p"facts_values.dewy" import (fact_bcast_common fact_domain fact_literal fact_place fact_project fact_scalar fact_signed_twin fact_string_set fact_twin_link fact_type fact_unmodeled)
 from p"float_ops.dewy" import (ff_conversion_operand ff_diverges ff_integer_demand ff_integer_record)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"lower.jo" import (VC_VOID)
@@ -1206,10 +1206,16 @@ fc_conv=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$unsafe {
         if to =? T_MATH_INT and b.wide and b.nz {return fact_new(@s FactBound(reason='unsupported' witness=n wide=true nz=true) FactTerm(type=to))}
         # (a value both types hold converts exactly: decode or encode its interval)
         if fact_scalar(ntype(n)) and fact_scalar(ntype(CaptureWord(nodes.ptr[n].a))) and nodes.ptr[n].aux =? int32(int64(CV.int_)) {
-            if to =? T_U64 and b.lo >=? 0 {return fact_new(@s FactBound(b.lo xor FACT_MIN b.hi xor FACT_MIN) FactTerm(type=T_U64))}
+            if to =? T_U64 and b.lo >=? 0 {
+                let unsigned=fact_new(@s FactBound(b.lo xor FACT_MIN b.hi xor FACT_MIN) FactTerm(type=T_U64))
+                if source_type =? T_INT {fact_twin_link(@s unsigned a)}
+                return unsigned
+            }
             if to not=? T_U64 and b.hi <? 0 and sa_fits(b.lo xor FACT_MIN ntype(n)) and sa_fits(b.hi xor FACT_MIN ntype(n)) {
                 let r=FactBound(b.lo xor FACT_MIN b.hi xor FACT_MIN)
                 r.nz=r.lo >? 0
+                # (to int64: the uint64 value's twin, which a guard may have related)
+                if to =? T_INT {return fact_signed_twin(@s a r)}
                 return fact_new(@s r FactTerm(type=ntype(n)))
             }
             # (a uint64 interval reaching past int64's top, as an `int`: its

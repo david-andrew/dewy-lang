@@ -1,0 +1,23 @@
+# A uint64 position below a length indexes the array, however the guard is written.
+direct = (xs:array<int64> i:uint64):>int64 => if i <? xs.length xs[i] else -1
+flipped = (xs:array<int64> i:uint64):>int64 => if xs.length >? i xs[i] else -1
+converted = (xs:array<int64> i:uint64):>int64 => if i <? uint64(xs.length) xs[int64(i)] else -1
+stored = (xs:array<int64> i:uint64):>int64 => {
+    let n:uint64 = xs.length
+    if i <? n return xs[i]
+    -1
+}
+scan = (xs:array<int64>):>int => {
+    let total = 0
+    let i:uint64 = 0
+    loop i <? xs.length {
+        total += xs[i]
+        i += 1
+    }
+    total
+}
+main = () => {
+    let xs:array<int64> = [10 20 30]
+    loop f in [@direct @flipped @converted @stored] printl"{f(xs uint64(2))} {f(xs uint64(3))}"
+    printl(scan(xs))
+}

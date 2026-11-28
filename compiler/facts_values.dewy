@@ -229,3 +229,33 @@ fact_project=(@s:FactState base:ValueBuildWord selector:ValueBuildWord element:b
     }
     v
 }
+
+# A uint64 value's signed twin: the same number as an int64, a projection of the
+# uint64 value, so one state's conversions of it share the value and the relations
+# a guard gave (`i <? xs.length` with i:uint64, then `xs[i]`). A nonnegative int64
+# converted to uint64 has the int64 as its twin. O(1) indexed projection reads.
+const FACT_SIGNED_TWIN = -40
+fact_twin_of=(s:FactState v:ValueBuildWord):>int64=>{
+    let i=fact_projection_find(s v FACT_SIGNED_TWIN false)
+    if i >=? 0 {s.projections[i].value} else {0}
+}
+fact_twin_link=(@s:FactState v:ValueBuildWord twin:ValueBuildWord):>void=>{
+    if v not=? 0 and twin not=? 0 and s.projections.length <? FACT_CAP and fact_twin_of(s v) =? 0 {fact_add_projection(@s FactProjection(v FACT_SIGNED_TWIN false twin))}
+}
+# (v's twin within b, the decoded interval: made when v has none)
+fact_signed_twin=(@s:FactState v:ValueBuildWord b:FactBound):>int64=>{
+    let twin=fact_twin_of(s v)
+    if twin =? 0 {
+        twin=fact_new(@s b FactTerm(type=T_INT))
+        fact_twin_link(@s v twin)
+        return twin
+    }
+    let c=fact_bound(s twin)
+    if not c.wide and not b.wide and max(c.lo b.lo) <=? min(c.hi b.hi) {
+        c.lo=max(c.lo b.lo)
+        c.hi=min(c.hi b.hi)
+        c.nz=c.nz or b.nz
+        fact_set_bound(@s twin c)
+    }
+    twin
+}

@@ -5,7 +5,7 @@ from p"check.jo" import (fns)
 from p"checker_tokens.dewy" import (Tok)
 from p"facts.jo" import (FACT_RECORD FactAffine FactDifference FactState fact_equal_arrays fact_name_starts_with fact_terms)
 from p"facts_slice_builder.dewy" import (fact_comparison)
-from p"facts_values.dewy" import (fact_domain fact_pair_key fact_project fact_type)
+from p"facts_values.dewy" import (fact_domain fact_pair_key fact_project fact_signed_twin fact_twin_of fact_type)
 from p"facts_arith.dewy" import (fact_u64_literal)
 from p"facts_changes.dewy" import (fact_length_comparison)
 from p"facts_collect.dewy" import (fact_guarded_word fact_remainder_decided)
@@ -1023,6 +1023,9 @@ fact_assume=(@s:FactState v:CompareWord truth:bool):>void=>$unsafe {
         let y_open=y.hi =? FACT_MAX and fact_open_endpoint(s b true)
         # (a guard's own relation, written by the program: the wider cap)
         fact_difference(@s a b (-d) t.origin 16)
+        # (two uint64 values, b the twin of an int64 such as a length: a is below
+        # it too as an int64, `i <? xs.length` with i:uint64, for `xs[i]`)
+        if fact_type(fact_terms[a].type) =? T_U64 and fact_type(fact_terms[b].type) =? T_U64 {fact_twin_below(@s a b d t.origin)}
         if d =? 1 and (y.hi =? FACT_MIN and not x_open or x.lo =? FACT_MAX and not y_open) {s.live=false}
         else {
             let below:CompareWord=if CompareWord(y.hi) =? FACT_MIN {FACT_MIN} else {CompareWord(y.hi) - d}
@@ -1041,6 +1044,17 @@ fact_assume=(@s:FactState v:CompareWord truth:bool):>void=>$unsafe {
         fact_remainder_decided(@s a)
         fact_remainder_decided(@s b)
     }
+}
+# (a <? b + 1 - d as uint64 values with b's twin bounded: a's twin, made below it. O(1))
+fact_twin_below=(@s:FactState a:CompareWord b:CompareWord d:CompareWord at:CompareWord):>void=>{
+    let tb=fact_twin_of(s b)
+    if tb =? 0 {return}
+    let y=fact_bound(s tb)
+    let x=fact_bound(s a)
+    # (b's number fits int64, so a's below it does: a's encoded low end is below 2^63)
+    if y.wide or x.wide or y.hi <? d or x.lo >=? 0 {return}
+    let ta=fact_signed_twin(@s a FactBound(x.lo xor FACT_MIN y.hi - d))
+    fact_difference(@s ta tb (-d) at)
 }
 # A compared offset `i+c` (or `i-c`) narrows i too: `i+1 <? stop` bounds i
 # below stop-1, so a counter guarded at an offset stays below a length. O(1).
