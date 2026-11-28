@@ -3311,6 +3311,10 @@ its own lower bound. Construction and replacing either field check every element
 pushing or inserting into `next` checks the value against `nodes.length`, and `next.extend(xs)`
 checks every element of `xs` once; and every read knows
 the bound, so `g.nodes[g.next[i]]` and `loop e in g.next printl(g.nodes[e])` check no bounds.
+The bound is on the field's direct elements only: for lists of indexes, as an adjacency list,
+name a constant (`const n = names.length`, then `array<array<addr<(<? n)>>>`) or keep one entry
+per edge. A key callback reading the record (`t.order.sort(key=(i) => t.words[i])`) knows its
+parameter is below the sibling's length.
 Growing `nodes` (an element read before or after a call that rewrote `next` stays a valid index; `nodes`
 may be self-length itself, its pushed values checked against its own length), permuting either field (`swap`, `reverse`, the `sort` family) and shrinking
 or clearing `next` keep the bound and work in place. Making

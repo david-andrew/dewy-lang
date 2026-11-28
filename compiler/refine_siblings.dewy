@@ -378,6 +378,22 @@ ref_sib_field=(ft0:RefineSibWord name:RefineSibWord pos:RefineSibWord):>int64=>$
     ref_self_elements[prune(out)]=made[2]
     out
 }
+# (a sibling's length named deeper than a field's direct element, as an adjacency list's
+# `edges:array<array<int64<(<? names.length)>>>`: no one array's length change could keep it)
+ref_sib_nested=(t0:RefineSibWord name:RefineSibWord at:RefineSibWord pos:RefineSibWord depth:RefineSibWord):>void=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if depth >? 16 or k not=? 'array' and k not=? 'fixed' and k not=? 'opt' and k not=? 'refined' {return}
+    if k =? 'refined' {
+        loop atom in ref_predicates[RefineSibWord(types.ptr[t].st)] {
+            # (the field's own length is a self-length contract's, whose declaration says why)
+            if atom.b.kind =? 5 and atom.b.value not=? at and ref_path_length(atom.b.path) or atom.a.kind =? 5 and atom.a.value not=? at and ref_path_length(atom.a.path) {
+                fatal(pos "field '{name_of(name)}': a sibling's length can bound the field's direct elements, or a dictionary field's values, and nothing nested deeper; for lists of indexes, as an adjacency list, name a constant length (`const n = names.length`, then `array<array<addr<(<? n)>>>`) or keep one entry per edge in arrays bounded by the sibling (`targets:array<int64<(<? names.length)>>`)")
+            }
+        }
+    }
+    ref_sib_nested(RefineSibWord(types.ptr[t].elem) name at pos depth + 1)
+}
 # `edges:dict<string int64<(<? terminal.length)>>`: the values of a dictionary field bounded by a
 # sibling's length, as the field's contract over its values, as for an array's elements; else 0.
 ref_sib_dict_field=(ft0:RefineSibWord name:RefineSibWord pos:RefineSibWord total:bool):>int64=>$unsafe {

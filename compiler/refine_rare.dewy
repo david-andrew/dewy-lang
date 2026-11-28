@@ -44,7 +44,7 @@ from p"node_store.dewy" import (Node)
 from p"refine.jo" import (RefArrayCall ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_spans refine_bindings refine_owners refine_requests str_sets total_literals ref_pair_hints ref_nd_receivers ref_pair_after ref_self_direct ref_self_shrinks ref_holder_elems refine_arg_target refine_active ref_narrowing ref_sib_sums str_set_types)
 from p"refine_transfers.dewy" import (ref_assume ref_value)
 from p"refine_metadata.dewy" import (is_total_dict ref_dependent_ancestor ref_interval ref_place_alias refine_storage representation_type str_set_of ref_safe_path_ancestor ref_dependent_record ref_storage_contract ref_repr_match ref_has_formals mk_refined ref_intern)
-from p"refine_siblings.dewy" import (ref_held_element ref_sib_holder ref_pair_call_finish ref_sib_in_place ref_sib_self_grows ref_pair_record ref_pair_role ref_pair_rewrite ref_pair_hint ref_pair_op_name ref_pair_reads ref_pair_validation ref_sib_free ref_sib_permutable ref_sib_dict_field ref_sib_field)
+from p"refine_siblings.dewy" import (ref_held_element ref_sib_holder ref_pair_call_finish ref_sib_in_place ref_sib_self_grows ref_pair_record ref_pair_role ref_pair_rewrite ref_pair_hint ref_pair_op_name ref_pair_reads ref_pair_validation ref_sib_free ref_sib_permutable ref_sib_dict_field ref_sib_field ref_sib_nested)
 from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys ref_self_shrink ref_self_resolve ref_without_name)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind)
 from p"refine_resolve.dewy" import (ref_resolve_atoms)
@@ -1123,11 +1123,16 @@ ref_sib_fields=(si:int64 pos:int64):>void=>$unsafe {
         if tn =? 0 {continue}
         if nodes.ptr[tn].kind =? 'trefined' and nodes.ptr[tn].b not=? 0 {tn=RefineRareWord(nodes.ptr[tn].a)}
         let dict=nodes.ptr[tn].kind =? 'tmap' and nodes.ptr[tn].b not=? 0 and nodes.ptr[RefineRareWord(nodes.ptr[tn].b)].kind =? 'trefined'
-        if not dict and (nodes.ptr[tn].kind not=? 'tarray' or nodes.ptr[tn].a =? 0 or nodes.ptr[RefineRareWord(nodes.ptr[tn].a)].kind not=? 'trefined') {continue}
+        let nested=nodes.ptr[tn].kind =? 'tarray' and nodes.ptr[tn].a not=? 0 and nodes.ptr[RefineRareWord(nodes.ptr[tn].a)].kind =? 'tarray'
+        if not dict and not nested and (nodes.ptr[tn].kind not=? 'tarray' or nodes.ptr[tn].a =? 0 or nodes.ptr[RefineRareWord(nodes.ptr[tn].a)].kind not=? 'trefined') {continue}
         let name=RefineRareWord(nodes.ptr[kid(d k)].name)
         loop i in [0..RefineRareWord(structs.ptr[si].nfields)) {
             let f=RefineRareWord(structs.ptr[si].fields) + i
             if RefineRareWord(fields.ptr[f].name) not=? name {continue}
+            if nested {
+                ref_sib_nested(RefineRareWord(fields.ptr[f].type) name i pos 0)
+                continue
+            }
             let made=if dict {ref_sib_dict_field(RefineRareWord(fields.ptr[f].type) name pos nodes.ptr[tn].aux =? 1)} else {ref_sib_field(RefineRareWord(fields.ptr[f].type) name pos)}
             if made not=? 0 {fields.ptr[RefineRareWord(structs.ptr[si].fields) + i].type=int32(made)}
         }

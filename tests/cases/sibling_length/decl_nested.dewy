@@ -1,0 +1,5 @@
+Graph:type = [names:array<string> edges:array<array<int64<(<? names.length)>>>]
+main = ():>void => {
+    let g = Graph[["a" "b" "c"] [[1 2] [2] []]]
+    loop out in g.edges { loop e in out { printl(g.names[e]) } }
+}
