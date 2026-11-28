@@ -6987,7 +6987,8 @@ rd_dc_iterable=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$un
         let edits:int64=reader_ctx.reader.dn_edit_at.length
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         let range:int64=rd_dc_range(@reader_ctx @reader_nodes true)
-        if ((range not=? 0) or (reader_ctx.at <? 0)) {
+        # (`loop i in [0..n).reversed {`: the range begins a longer source, read whole below)
+        if ((range not=? 0) or ((reader_ctx.at <? 0) and (not rd_dc_group_continues(@reader_ctx start)))) {
             return range
         }
         # (not a range: the brackets hold a value, `[1 2 3]`, `(xs)`)
@@ -9279,6 +9280,28 @@ rd_dc_range_fail=(@reader_ctx:ParserContext):>int64=>$unsafe {
 }
 
 # A `..` follows at `at`'s depth before its group closes: `[0,1,2..5]` is a range of too many starts.
+# The group opening at `at` (`[0..n)`, `(a..b]`) is followed by a member, `?` or `...`:
+# an operand of a longer expression, as rd_dc_range's own test for a value.
+rd_dc_group_continues=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
+    let depth:int64=0
+    let k:int64=at
+    loop (reader_ctx.tokens[k].kind not=? 'eof') {
+        let t:DewyToken=reader_ctx.tokens[k].symbol
+        if (((t =? 'lparen') or (t =? 'lbrack')) or (t =? 'lbrace')) {
+            depth = (int64<overflow='wrap'>(depth) + 1)
+        }
+        if (((t =? 'rparen') or (t =? 'rbrack')) or (t =? 'rbrace')) {
+            depth = (int64<overflow='wrap'>(depth) - 1)
+            if (depth =? 0) {
+                let after:DewyToken=reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].symbol
+                return (((after =? 'dot') or (after =? 'question')) or (after =? 'ellipsis'))
+            }
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
+    false
+}
+
 rd_dc_range_follows=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
     let depth:int64=0
     let k:int64=at
