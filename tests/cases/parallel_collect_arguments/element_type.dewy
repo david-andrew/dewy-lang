@@ -1,0 +1,7 @@
+# A parallel collection given to a parameter takes its element type, as a loop's does.
+Level:type = int64<v => 0 <=? v and v <=? 255>
+take = (xs:array<Level>):>int64 => xs.length
+main = ():>void => {
+    printl(take([parallel i in [0..3) min(255 i * 2)]))
+    printl(take([loop i in [0..3) min(255 i * 2)]))
+}

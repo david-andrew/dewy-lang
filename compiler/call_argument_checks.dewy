@@ -51,6 +51,15 @@ comprehension_settle=(args:array<int64>):>bool=>$unsafe {
     let settled=false
     loop a0 in args {
         let a=unnamed(a0)
+        # (`[parallel x in xs e]`: its callback's body is the element)
+        if nodes.ptr[a].kind =? 'parallel_region' and not has_flag(a NF_CHECKED) and dewy_at(nodes.ptr[a].pos) {
+            let call=int64(nodes.ptr[a].a)
+            if nodes.ptr[call].kind not=? 'call' or nkids(call) not=? 2 or nodes.ptr[kid(call 1)].kind not=? 'lambda' or not comprehension_self_typed(int64(nodes.ptr[kid(call 1)].b)) {continue}
+            check_expr(a 0);
+            add_flag(a NF_CHECKED)
+            settled=true
+            continue
+        }
         if nodes.ptr[a].kind not=? 'block' or not has_flag(a NF_COMPREHENSION) or has_flag(a NF_CHECKED) or nkids(a) not=? 3 {continue}
         if not dewy_at(nodes.ptr[a].pos) or not comprehension_self_typed(kid(a 1)) {continue}
         check_expr(a 0);

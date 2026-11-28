@@ -132,6 +132,8 @@ ctx_dependent=(a:CGWord):>bool=>$unsafe {
         <'lambda'|'none_lit'|'hole'|'record_lit'> => true
         <'if_'|'match_'> => (CGWord(nd[0].flags) & 128) =? 0 and cg_dewy(nd[0].pos)
         <'block'> => (CGWord(nd[0].flags) & 67108864) not=? 0 and (CGWord(nd[0].flags) & 128) =? 0
+        # (a parallel collection takes its element type from the parameter, as a loop's does)
+        <'parallel_region'> => (CGWord(nd[0].flags) & 128) =? 0 and nd[0].type =? 0 and cg_dewy(nd[0].pos)
         <'map_lit'> => nd[0].nlist =? 0 or (nd[0].type =? 0 and (CGWord(nd[0].flags) & 128) =? 0 and cg_dewy(nd[0].pos))
         <'call'> => ctx_dependent_call(a)
         <'array'> => ctx_dependent_array(a)

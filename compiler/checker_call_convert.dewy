@@ -373,7 +373,7 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
             if pk =? 'param' and has_var(target) {return 3}
             return -1
         }
-        if k =? 'array' or (k =? 'block' and has_flag(a NF_COMPREHENSION)) {
+        if k =? 'array' or (k =? 'block' and has_flag(a NF_COMPREHENSION)) or k =? 'parallel_region' {
             if pk =? 'array' {return 0}
             if nkids(a) =? 0 and not has_flag(a NF_CHECKED) and dewy_record_target(p) not=? 0 and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {return 0}
             # (`[]` is a dictionary where one is wanted; an array, its default, wins an overload)
