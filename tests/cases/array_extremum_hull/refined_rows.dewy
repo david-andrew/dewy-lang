@@ -1,0 +1,10 @@
+# An array's max is one of its elements, so it keeps their refinement.
+Cell:type = [col:int64<0 <=? col <? 26> row:int64<1 <=? row <=? 99>]
+last_row = (cells:array<Cell>):>Cell => {
+    if cells.is_empty return Cell[0 1]
+    let top = [loop c in cells c.row].max
+    let left = [loop c in cells c.col].min
+    Cell[left top]
+}
+printl(last_row([Cell[3 4] Cell[1 7] Cell[2 2]]))
+printl(last_row([]))

@@ -31,7 +31,7 @@ from p"facts_forks.dewy" import (fact_call_arguments fact_fork_record fact_key_c
 from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound ft_back_only ft_begin ft_depth ft_is_active ft_rollback ft_set_back_only)
 from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_into fact_join_length)
 from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_max fact_shrunk_elements)
-from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
+from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_array_extremum fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
 from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check fact_parallel_range_call fact_refinements_unreachable fact_scope_exit)
 from p"facts_loops.dewy" import (fact_generator_call fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
 from p"facts_maps.dewy" import (fact_map_value_refined fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_reflexive_key)
@@ -1667,7 +1667,11 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
             if common not=? 0 {return common}
         }
         if fact_gpu_index_call(n) {fact_gpu_index_check(n @s values)}
-        if fact_nonempty_call(n) {fact_nonempty_check(n @s values)}
+        if fact_nonempty_call(n) {
+            fact_nonempty_check(n @s values)
+            let picked=fact_array_extremum(n @s values)
+            if picked not=? 0 {return picked}
+        }
         else if fact_exact_sum_call(n) {fact_exact_sum_check(n @s values)}
         if array =? 4 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
             let route=fact_receiver_route(n @s)

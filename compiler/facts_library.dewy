@@ -9,7 +9,7 @@ from p"directive_rules.dewy" import (dir_defer)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"checks_thin_expr.dewy" import (is_gpu_array is_gpu_buffer is_map_type nd_elem)
 from p"facts.jo" import (FACT_CAP FACT_CLAMPED FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactProjection FactState fact_gpu_file fact_gpu_files_seen fact_hull_owner fact_name_count fact_name_first fact_name_gpu_atomics fact_name_gpu_read fact_name_gpu_write fact_name_graphemes fact_name_last fact_name_least fact_name_len fact_name_max_by fact_name_min_by fact_name_most fact_name_peek fact_name_peek_priority fact_name_push fact_name_sorted fact_name_sorted_by fact_name_sorted_with fact_name_sum fact_name_take fact_owner fact_policy fact_probe_on fact_query fact_speculating fact_terms)
-from p"facts_values.dewy" import (fact_domain fact_type fact_project)
+from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_project)
 from p"facts_compare.dewy" import (fact_compare)
 from p"facts_lengths.dewy" import (fact_difference fact_length_max)
 from p"facts_index_writes.dewy" import (fact_constant fact_new fact_set_bound)
@@ -354,6 +354,21 @@ fact_exact_sum_check=(n:LibraryWord @s:FactState values:array<int64>):>void=>$un
     # (an `int` total is exact: adding into one needs no bound. O(1))
     if dewy_at(nodes.ptr[n].pos) {err_notes.push([(-1) "help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`"])}
     wit_unknown(n hull "the exact sum of {shown} fits `{dt(e)}`" 0 "" "bounds on its elements and length that keep every running sum in range")
+}
+# An array's min or max is one of its elements, so it lies in their hull:
+# `[loop c in cells c.row].max` keeps the rows' refinement. The picked value,
+# or 0 when the call is not one or no hull is known. O(1) indexed lookups.
+fact_array_extremum=(n:LibraryWord @s:FactState values:array<int64>):>LibraryWord=>$unsafe {
+    if values.length =? 0 or values[0] =? 0 {return 0}
+    let name=LibraryWord(nodes.ptr[LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)].name)
+    if name not=? fact_name_least and name not=? fact_name_most {return 0}
+    let t=fact_type(ntype(kid(n 0)))
+    if tkind(t) not=? 'array' and tkind(t) not=? 'fixed' {return 0}
+    let e=fact_type(telem(t))
+    if e not=? fact_type(ntype(n)) or not fact_scalar(e) {return 0}
+    let hull=fact_element_hull(@s fact_map_receiver(@s n values[0]) e)
+    if hull.wide {return 0}
+    fact_new(@s hull FactTerm(type=ntype(n)))
 }
 # What every element of base (of type e) lies in: a fill's value, else the
 # comprehension hull within e's range. O(1) indexed lookups.
