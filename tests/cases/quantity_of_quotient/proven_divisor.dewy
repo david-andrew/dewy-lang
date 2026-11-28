@@ -1,0 +1,12 @@
+# A quotient given a unit keeps its divisor's proof: a constant, or a guard.
+per_worker = (total:rational):>Duration => {
+    let [d _] = quantize((total / 7) * 1s rounding='ceil' tick=1ms)
+    d
+}
+share = (total:rational parts:int64):>rational => {
+    if parts =? 0 return 0
+    (total / parts) * 1s / 1s
+}
+printl(per_worker(2/3))
+printl(1s * (rational(5) / 4))
+printl(share(9 4))

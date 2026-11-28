@@ -332,6 +332,8 @@ quantity_binary_plain=(n:UnitWord a:UnitWord b:UnitWord expected:UnitWord):>int6
         if q.numerator =? 1 and q.denominator =? 1 {
             let built=quantity_number(value)
             nodes.ptr[n]=nodes.ptr[built]
+            # (n is now the number's own node: `(x / 7) * 1s` keeps x / 7's divisor proof)
+            move_divisor(built n)
             return quantity_result(n dim)
         }
     }
