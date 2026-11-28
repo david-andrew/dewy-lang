@@ -1074,7 +1074,10 @@ fact_offset_narrow=(@s:FactState v:CompareWord b:FactBound):>void=>{
         c=fact_bound(s t.a)
         operand=t.b
     }
-    if c.lo not=? c.hi or c.lo =? FACT_MIN or c.lo =? FACT_MAX {return}
+    if c.lo not=? c.hi or c.lo =? FACT_MIN or c.lo =? FACT_MAX {
+        fact_sum_narrow(@s t b)
+        return
+    }
     let k:CompareWord=if t.op =? 'plus' {c.lo} else {-CompareWord(c.lo)}
     let x=fact_bound(s operand)
     if x.reason =? 'budget' and x.lo =? FACT_MIN and x.hi =? FACT_MAX {return}
@@ -1090,6 +1093,35 @@ fact_offset_narrow=(@s:FactState v:CompareWord b:FactBound):>void=>{
     }
 }
 
+# A compared sum or difference of two varying operands narrows each by the
+# other's interval: `i + run <? n` with i >=? 0 keeps run below n, so a
+# counter guarded beside another stays below a length. Intervals only (no
+# relation is claimed between the operands); O(1).
+fact_sum_narrow=(@s:FactState t:FactTerm b:FactBound):>void=>{
+    if b.wide {return}
+    let x=fact_bound(s t.a)
+    let y=fact_bound(s t.b)
+    if x.wide or y.wide or x.reason =? 'budget' or y.reason =? 'budget' {return}
+    let plus=t.op =? 'plus'
+    # (v = a + b: a <= v.hi - b.lo and a >= v.lo - b.hi; v = a - b: a <= v.hi + b.hi, a >= v.lo + b.lo)
+    let x2=x
+    let y2=y
+    if CompareWord(b.hi) not=? FACT_MAX {
+        let other=if plus {y.lo} else {y.hi}
+        if other not=? FACT_MIN and other not=? FACT_MAX and fact_add_fits(CompareWord(b.hi) (if plus {-CompareWord(other)} else {CompareWord(other)})) {x2.hi=min(CompareWord(x.hi) (if plus {CompareWord(b.hi) - other} else {CompareWord(b.hi) + other}))}
+        # (b = a - v >= a.lo - v.hi for a difference; b <= v.hi - a.lo for a sum)
+        if x.lo not=? FACT_MIN and x.lo not=? FACT_MAX and fact_add_fits(CompareWord(b.hi) (-CompareWord(x.lo))) and plus {y2.hi=min(CompareWord(y.hi) CompareWord(b.hi) - x.lo)}
+        if x.lo not=? FACT_MIN and x.lo not=? FACT_MAX and fact_add_fits(CompareWord(x.lo) (-CompareWord(b.hi))) and not plus {y2.lo=max(CompareWord(y.lo) CompareWord(x.lo) - b.hi)}
+    }
+    if CompareWord(b.lo) not=? FACT_MIN {
+        let other=if plus {y.hi} else {y.lo}
+        if other not=? FACT_MIN and other not=? FACT_MAX and fact_add_fits(CompareWord(b.lo) (if plus {-CompareWord(other)} else {CompareWord(other)})) {x2.lo=max(CompareWord(x.lo) (if plus {CompareWord(b.lo) - other} else {CompareWord(b.lo) + other}))}
+        if x.hi not=? FACT_MIN and x.hi not=? FACT_MAX and fact_add_fits(CompareWord(b.lo) (-CompareWord(x.hi))) and plus {y2.lo=max(CompareWord(y.lo) CompareWord(b.lo) - x.hi)}
+        if x.hi not=? FACT_MIN and x.hi not=? FACT_MAX and fact_add_fits(CompareWord(x.hi) (-CompareWord(b.lo))) and not plus {y2.hi=min(CompareWord(y.hi) CompareWord(x.hi) - b.lo)}
+    }
+    if x2 not=? x {fact_set_bound(@s t.a x2)}
+    if y2 not=? y {fact_set_bound(@s t.b y2)}
+}
 # Checked node IDs, with zero/negative sentinels rejected before any read.
 fact_saved_boolean=(n0:CompareWord):>bool=>$unsafe {
     let n=n0

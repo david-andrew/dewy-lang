@@ -1,0 +1,7 @@
+# Beside an operand with no lower bound the guard bounds nothing.
+reach = (i:int64 n:int64):>int64 => {
+    let run:int64 = 0
+    loop i + run <? n run += 1
+    i + run
+}
+printl(reach(2 5))

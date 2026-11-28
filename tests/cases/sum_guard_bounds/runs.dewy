@@ -1,0 +1,27 @@
+# A loop guarded by `i + run <? n` keeps run below the length beside i,
+# so the run's end and the next start stay in range.
+runs = (xs:array<int64>):>array<[int64 int64]> => {
+    let out:array<[int64 int64]> = []
+    let n = xs.length
+    let i:int64 = 0
+    loop i <? n {
+        let run:int64 = 1
+        loop i + run <? n and xs[i + run] =? xs[i] run += 1
+        out.push([xs[i] run])
+        i += run
+    }
+    out
+}
+widest = (text:string):>int64 => {
+    let chars = text.chars
+    let best:int64 = 0
+    loop start in [0..chars.length) {
+        let width:int64 = 0
+        loop start + width <? chars.length and chars[start + width] not=? " " width += 1
+        best = max(best width)
+    }
+    best
+}
+printl(runs([1 1 2 3 3 3]))
+printl(runs([]))
+printl(widest("a bcd ef"))
