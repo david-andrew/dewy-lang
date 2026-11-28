@@ -1,0 +1,13 @@
+# Mixed-sign comparisons compare values, at any width, with no proof needed.
+Box:type = [count:uint32 limit:int32]
+under = (b:Box):>bool => b.count <? b.limit
+narrow = (a:uint64 b:int8):>bool => a >=? b
+same = (a:uint16 b:int16):>bool => a =? b
+main = () => {
+    printl(under(Box[uint32(3) int32(-2)]))
+    printl(under(Box[uint32(3) int32(7)]))
+    printl(narrow(uint64(0) int8(-128)))
+    printl(narrow(uint64(0) int8(1)))
+    printl(same(uint16(65535) int16(-1)))
+    printl(same(uint16(7) int16(7)))
+}

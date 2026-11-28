@@ -6,7 +6,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
-from p"checks_value_hooks.dewy" import (numeric_exact numeric_nan numeric_warn_division numeric_warn_percent numeric_error)
+from p"checks_value_hooks.dewy" import (numeric_exact numeric_mixed_compare numeric_nan numeric_warn_division numeric_warn_percent numeric_error)
 from p"checker_exact.dewy" import exact_potential
 from p"util.jo" import (pos_in_lib)
 # Binary arithmetic and comparison of two plain numbers: integer division in Dewy,
@@ -216,8 +216,13 @@ xw_numeric=(n:XWWord op:int32 a:XWWord b:XWWord ta:XWWord tb:XWWord is_cmp:bool)
         return xw_bool_type[0]
     }
     if is_cmp and not a_lit and not b_lit and tak =? 'int_' and tbk =? 'int_' and ta not=? xw_math_int[0] and tb not=? xw_math_int[0] and xw_dewy(n) {
-        # i:uint64 <? s.length: compared in the left operand's width, the right one's cast.
-        if num_join(ta tb) =? 0 {coerce(b ta);}
+        # i:uint64 <? s.length: compared in the left operand's width, the right one's cast;
+        # two reads of mixed sign compare exactly (mixed_sign_compare.dewy).
+        if num_join(ta tb) =? 0 {
+            let exact=numeric_mixed_compare(n a b ta tb)
+            if exact >? 0 {return exact}
+            if exact <? 0 {coerce(b ta);}
+        }
     }
     let j:XWWord=if ta =? tb and not a_lit and not b_lit and (tak =? 'int_' or tak =? 'float_') and ta not=? xw_never_type[0] and xw_nodes[0].ptr[a].kind not=? 'str_lit' and xw_nodes[0].ptr[b].kind not=? 'str_lit' {ta} else {xw_join(a b xw_nodes[0].ptr[n].pos)}
     if (op =? 63 or op =? 64 or op =? 65) and xw_types[0].ptr[j].kind not=? 'int_' {numeric_error(n 3)}

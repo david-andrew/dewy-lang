@@ -461,6 +461,8 @@ EXPR_NUMERIC_JO = {
         'num_join': 'num_join = (a0: int, b0: int) -> int: xe_num_numjoin(a0, b0)',
         'join_types': 'join_types = (a: int, b: int, pos: int) -> int: xe_num_join(a, b, pos)',
         'numeric_exact': 'numeric_exact = (n: int) -> int: xe_num_exact(n)',
+        # (the frozen Jo casts mixed-sign comparisons: this differential keeps the cast)
+        'numeric_mixed_compare': 'numeric_mixed_compare = (n: int, a: int, b: int, ta: int, tb: int) -> int: -1',
         'numeric_nan': 'numeric_nan = (v: f64) -> f64: xe_num_nan(v)',
         'numeric_warn_division': 'numeric_warn_division = (n: int, x: int, y: int): xe_num_division(n, x, y)',
         'numeric_warn_percent': 'numeric_warn_percent = (n: int, a: int): xe_num_percent(n, a)',

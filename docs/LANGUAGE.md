@@ -1016,7 +1016,8 @@ uses `int`; a literal beside a fixed-width operand can take that operand's type,
 without making an `int64` arithmetic result narrow.
 Fixed-width arithmetic is exact when observed: `uint64(2) - uint64(34)` prints
 `-32`, `int8(127) + 100` prints `227`, and a later fixed-width store checks
-whether the value fits.
+whether the value fits. Comparisons are exact across signs too: `u <? s` with
+`u:uint64` and `s:int64` is false for a negative `s`, and needs no proof.
 Implicit conversions involving `int` preserve the value; narrowing an `int` to a
 fixed width is the same proven conversion as a narrowing between fixed widths
 (below), an `int` index's being its bounds check (a known constant failure is a

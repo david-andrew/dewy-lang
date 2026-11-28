@@ -1,0 +1,19 @@
+# Calls are held first, in order, and each runs once.
+let calls = 0
+next = (x:int32):>int64 => {
+    calls += 1
+    x - 1
+}
+grow = (x:uint32):>uint64 => {
+    calls += 10
+    x + 1
+}
+main = () => {
+    let u:uint64 = 3
+    let w:uint32 = 3
+    printl(u <? next(5))
+    printl(u <? next(-5))
+    printl(next(0) >=? grow(w))
+    printl(grow(w) not=? next(5))
+    printl(calls)
+}

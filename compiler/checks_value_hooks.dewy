@@ -51,8 +51,13 @@ from p"unit_ops.dewy" import (quantity_constant quantity_unary)
 from p"util.jo" import (err_notes files intern name_of pos_file)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"mixed_sign_compare.dewy" import (mixed_sign_compare)
 
 ValueHookWord:type=int64<overflow='wrap'>
+# (a comparison of mixed-sign words: mixed_sign_compare.dewy)
+numeric_mixed_compare=(n:int64 a:int64 b:int64 ta:int64 tb:int64):>int64=>{
+    mixed_sign_compare(n a b ta tb)
+}
 numeric_exact=(n:int64):>int64=>{
     exact_int_result(n)
 }

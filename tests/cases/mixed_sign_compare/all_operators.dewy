@@ -1,0 +1,21 @@
+us_lt = (u:uint64 s:int64):>bool => u <? s
+su_lt = (s:int64 u:uint64):>bool => s <? u
+us_le = (u:uint64 s:int64):>bool => u <=? s
+su_le = (s:int64 u:uint64):>bool => s <=? u
+us_gt = (u:uint64 s:int64):>bool => u >? s
+su_gt = (s:int64 u:uint64):>bool => s >? u
+us_ge = (u:uint64 s:int64):>bool => u >=? s
+su_ge = (s:int64 u:uint64):>bool => s >=? u
+us_eq = (u:uint64 s:int64):>bool => u =? s
+su_eq = (s:int64 u:uint64):>bool => s =? u
+us_ne = (u:uint64 s:int64):>bool => u not=? s
+su_ne = (s:int64 u:uint64):>bool => s not=? u
+main = () => {
+    let us:array<uint64> = [0 1 5 9223372036854775807 9223372036854775808 18446744073709551615]
+    let ss:array<int64> = [(-9223372036854775808) (-1) 0 1 5 9223372036854775807]
+    loop u in us {
+        loop s in ss {
+            printl"{if us_lt(u s) "1" else "0"}{if su_lt(s u) "1" else "0"}{if us_le(u s) "1" else "0"}{if su_le(s u) "1" else "0"}{if us_gt(u s) "1" else "0"}{if su_gt(s u) "1" else "0"}{if us_ge(u s) "1" else "0"}{if su_ge(s u) "1" else "0"}{if us_eq(u s) "1" else "0"}{if su_eq(s u) "1" else "0"}{if us_ne(u s) "1" else "0"}{if su_ne(s u) "1" else "0"}"
+        }
+    }
+}

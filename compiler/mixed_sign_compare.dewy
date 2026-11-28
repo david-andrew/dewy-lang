@@ -1,0 +1,73 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag clone nodes)
+from p"checked_expression_nodes.dewy" import (bc_bin)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_tokens.dewy" import (Tok)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"checks_builders.dewy" import (bc_block bc_ident bc_int bc_let bc_stmt)
+from p"coerce_expression.dewy" import (coerce)
+from p"node_store.dewy" import (Node)
+from p"refine_metadata.dewy" import (representation_type)
+from p"types.jo" import (prune types)
+
+# A comparison of an unsigned word with a signed one is exact (LANGUAGE.md: widths
+# describe storage): `u <? s` is `s >=? 0 and u <? s` with s read as u's type, so
+# the guard in front of the conversion proves it. Two reads (names and their
+# fields) are read again; other operands are held first, in order. O(1) nodes.
+MixedWord:type=int64<overflow='wrap'>
+let mixed_inner:dict<int64 bool>=[]
+let mixed_count:MixedWord=0
+
+mixed_unsigned=(t:MixedWord):>bool=>$unsafe {not types.ptr[representation_type(prune(t))].sign}
+
+# (a name, or a field of one: a read)
+mixed_read=(n:MixedWord depth:MixedWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return true}
+    k =? 'field' and depth <? 4 and mixed_read(MixedWord(nodes.ptr[n].a) depth + 1)
+}
+
+# Comparison n of a and b, whose types ta and tb have no join: -1 when both have one
+# sign (b is cast to ta), 0 when it is the guarded compare (its signed side converted),
+# else the type of n checked as the guarded form.
+mixed_sign_compare=(n:MixedWord a:MixedWord b:MixedWord ta:MixedWord tb:MixedWord):>int64=>$unsafe {
+    let op=cx_token_values[MixedWord(nodes.ptr[n].op)]
+    let ua=mixed_unsigned(ta)
+    if ua =? mixed_unsigned(tb) {return -1}
+    let s=if ua {b} else {a}
+    if mixed_inner.has(n) {
+        coerce(s (if ua {ta} else {tb}));
+        return 0
+    }
+    let pos=nodes.ptr[n].pos
+    # (anything but two reads is held first, in order, each once)
+    let stmts:array<int64>=[]
+    let x=a
+    let y=b
+    let again=clone(s)
+    if not mixed_read(a 0) or not mixed_read(b 0) {
+        mixed_count += 1
+        add_flag(a NF_CHECKED)
+        add_flag(b NF_CHECKED)
+        stmts.push(bc_let("$mixed{mixed_count}a" a pos))
+        stmts.push(bc_let("$mixed{mixed_count}b" b pos))
+        x=bc_ident("$mixed{mixed_count}a" pos)
+        y=bc_ident("$mixed{mixed_count}b" pos)
+        again=bc_ident(if ua {"$mixed{mixed_count}b"} else {"$mixed{mixed_count}a"} pos)
+    }
+    # (u <? s, u <=? s, u =? s, s >? u, s >=? u, s =? u need s >=? 0; the others hold when s <? 0)
+    let nonnegative=if ua {op =? 'lt' or op =? 'le' or op =? 'eq'} else {op =? 'gt' or op =? 'ge' or op =? 'eq'}
+    let guard=bc_bin((if nonnegative {'ge'} else {'lt'}) again bc_int(0 pos) pos)
+    let inner=bc_bin(op x y pos)
+    nodes.ptr[inner].op=nodes.ptr[n].op
+    mixed_inner[inner]=true
+    let both=Node[kind=(if nonnegative {'and_'} else {'or_'}) pos=pos a=int32(guard) b=int32(inner)]
+    if stmts.length =? 0 {nodes.ptr[n]=both}
+    else {
+        let c=nodes.length
+        nodes.push(both)
+        stmts.push(bc_stmt(c pos))
+        nodes.ptr[n]=nodes.ptr[bc_block(stmts pos)]
+    }
+    check_expr(n 0)
+}

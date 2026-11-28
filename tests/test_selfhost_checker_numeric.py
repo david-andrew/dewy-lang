@@ -113,6 +113,8 @@ NUMERIC_JO = {
         'num_join': 'num_join = (a0: int, b0: int) -> int: xw_num_join_host(a0, b0)',
         'join_types': 'join_types = (a: int, b: int, pos: int) -> int: xw_join_host(a, b, pos)',
         'numeric_exact': 'numeric_exact = (n: int) -> int: xw_exact_host(n)',
+        # (the frozen Jo casts mixed-sign comparisons: this differential keeps the cast)
+        'numeric_mixed_compare': 'numeric_mixed_compare = (n: int, a: int, b: int, ta: int, tb: int) -> int: -1',
         'numeric_nan': 'numeric_nan = (v: f64) -> f64: xw_nan_host(v)',
         'numeric_warn_division': 'numeric_warn_division = (n: int, x: int, y: int): xw_division_host(n, x, y)',
         'numeric_warn_percent': 'numeric_warn_percent = (n: int, a: int): xw_percent_host(n, a)',
