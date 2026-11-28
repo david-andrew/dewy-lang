@@ -54,7 +54,7 @@ from p"temperature_ops.dewy" import (temperature_write)
 from p"types.jo" import (T_MATH_INT T_NEVER T_STR T_VOID is_numeric is_union prune targ tkind type_eq types union_members)
 from p"type_ops.dewy" import (dt is_soa mk_tuple union_index)
 from p"unit_ops.dewy" import (quantity_compound)
-from p"util.jo" import (err_notes files intern name_of pos_file pos_in_lib)
+from p"util.jo" import (err_notes files intern name_of pos_file pos_in_lib pos_off)
 from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -86,9 +86,23 @@ sink_void_error=(s:int64 t:int64):>void=>$unsafe {
         let e=sink_failures(t)
         fatal(nodes.ptr[v].pos "this gives nothing when it succeeds and expresses {e} when it fails, which is not taken here: propagate the failure with `or_throw`, handle it (`match`, `is?`), or attach `;` to discard it, as in `f();`")
     }
+    void_written_error(nodes.ptr[v].pos)
     let rt=prune(AssignHookWord(ctxs[cx].ret))
     let gives=if union_has_void(rt) {"nothing, or the errors it returns"} else {"nothing"}
     fatal(nodes.ptr[v].pos "this expresses {a_type(t)}, and {fname} is written `:>{dt(rt)}`, so its body gives {gives}: attach `;` to discard the value, as in `f();`, or change the result type")
+}
+# (`_ => void`: the type written where nothing is meant, at pos)
+void_written_error=(pos:int64):>void=>$unsafe {
+    let f=pos_file(pos)
+    if pos <=? 0 or f <? 0 or f >=? files.length {return}
+    let src=files[f].src as array<uint8>
+    let at=pos_off(pos)
+    if at + 4 >? src.length or src[at] not=? b'v' or src[at + 1] not=? b'o' or src[at + 2] not=? b'i' or src[at + 3] not=? b'd' {return}
+    if at + 4 <? src.length {
+        let c=src[at + 4]
+        if c =? b'_' or (c >=? b'a' and c <=? b'z') or (c >=? b'A' and c <=? b'Z') or (c >=? b'0' and c <=? b'9') or c =? b'<' or c =? b'|' {return}
+    }
+    fatal(pos "`void` is a type, not a value: a block or match arm that does nothing is written `\{}`, as in `_ => \{}`")
 }
 # The name a several-valued expression is shown by: `pair`, or the called function's.
 values_shown=(v:int64):>string=>$unsafe {
@@ -110,6 +124,7 @@ sink_main_value=(i:int64 pos:int64):>void=>$unsafe {
     if d =? 0 or nodes.ptr[d].kind not=? 'fn_' or name_of(AssignHookWord(nodes.ptr[d].name)) not=? "main" {return}
     let first=AssignHookWord(sinks[i].first)
     if first =? 0 {first=pos}
+    void_written_error(first)
     fatal(first "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
 }
 # (how a block's values go: a function body's, a collector's, an arm's, a binding's, or
@@ -634,7 +649,10 @@ sink_close_body_error=(i:int64 first:int64):>void=>$unsafe {
         fatal(first "this expresses a value before the function's end, and {back}; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
     }
     let d=AssignHookWord(fns.ptr[AssignHookWord(ctxs[cx].inst)].decl)
-    if d not=? 0 and nodes.ptr[d].kind =? 'fn_' and name_of(AssignHookWord(nodes.ptr[d].name)) =? "main" {fatal(first "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")}
+    if d not=? 0 and nodes.ptr[d].kind =? 'fn_' and name_of(AssignHookWord(nodes.ptr[d].name)) =? "main" {
+        void_written_error(first)
+        fatal(first "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
+    }
 }
 sink_acc_name=():>int64=>{
     intern("$pack{nodes.length}")
