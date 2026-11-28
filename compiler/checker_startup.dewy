@@ -28,7 +28,7 @@ from p"refine.jo" import (ref_addr_type refine_active)
 from p"refine_metadata.dewy" import (mk_refined ref_intern)
 from p"refine_ops.dewy" import ref_addr_max
 from p"unit_rare.dewy" import register_quantity_names
-from p"types.jo" import (T_MATH_INT T_INT T_I8 T_I16 T_I32 T_U8 T_U16 T_U32 T_U64 T_FLOAT T_F32 T_STR T_BOOL T_VOID T_NEVER T_VEC2 T_VEC3 T_VEC4 T_MAT4 T_IVEC2 T_IVEC3 T_IVEC4)
+from p"types.jo" import (T_MATH_INT T_INT T_I8 T_I16 T_I32 T_U8 T_U16 T_U32 T_U64 T_FLOAT T_F32 T_STR T_BOOL T_VOID T_NEVER T_VEC2 T_VEC3 T_VEC4 T_MAT4 T_IVEC2 T_IVEC3 T_IVEC4 tkind)
 from p"node_store.dewy" import (node_mod node_with_sval)
 
 StartupWord:type=int64<overflow='wrap'>
@@ -81,13 +81,28 @@ check_pushers_first=():>void=>$unsafe {
     }
 }
 # (new instances since the last call: an extern among them brings in what its thunk calls)
+let runtime_ffi_strings=false
+runtime_string_parameter=(f:StartupWord):>bool=>$unsafe {
+    loop t in fns.ptr[f].ptypes {
+        if tkind(t) =? 'str_' {return true}
+    }
+    false
+}
 runtime_ffi_demand=():>bool=>$unsafe {
     let done = @runtime_ffi_done
     if done {return false}
     let scan = @runtime_ffi_scan
     loop scan <? fns.length {
         let d=StartupWord(fns.ptr[scan].decl)
+        # (a `$export` function taking a string passes and takes it as C's `char *` too)
+        let strings=fns.ptr[scan].cabi and d not=? 0 and not has_flag(d NF_EXTERN) and runtime_string_parameter(scan)
         scan = StartupWord(scan) + 1
+        if strings and not runtime_ffi_strings {
+            runtime_ffi_strings=true
+            runtime_demand("__c_str")
+            runtime_demand("__cstr")
+            return true
+        }
         if d not=? 0 and has_flag(d NF_EXTERN) {
             done = true
             if prelude_game_pending {load_game_file("dl.jo");}

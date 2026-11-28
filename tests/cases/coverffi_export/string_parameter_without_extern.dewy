@@ -1,0 +1,9 @@
+# modes: native native-release
+# A program whose only C-boundary function is a `$export` taking a string still
+# gets the runtime's string conversions.
+$export
+shout = (word:string):>int32 => {
+    printl"{word}!"
+    if word.length >? 3 1 else 0
+}
+main = ():>void => printl(shout("hello"))
