@@ -1,0 +1,11 @@
+# Only one path moves the counter; the other keeps the strict bound.
+prefix = (chars:array<string> i0:int64):>array<string> => {
+    let i = i0
+    if 0 <=? i and i <? chars.length {
+        if i + 1 <? chars.length { i += 2 }
+        return chars[0..i)
+    }
+    []
+}
+printl(prefix(["a" "b" "c"] 0))
+printl(prefix(["a" "b" "c"] 2))

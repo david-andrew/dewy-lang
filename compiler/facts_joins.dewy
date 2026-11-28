@@ -17,7 +17,7 @@ from p"facts_conditions.dewy" import (fact_implication)
 from p"facts_loops.dewy" import (fact_entails)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"proofs.jo" import (ResultEvidence)
-from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactReason FactTerm)
 from p"types.jo" import (T_INT T_MATH_INT T_U64 tkind)
 
 JoinWord:type=int64<overflow='wrap'>
@@ -849,6 +849,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     let gterms=fact_terms.ptr; let ngterms:JoinWord=fact_terms.length
     fj_join_diff_side(@s a b common_rows l_chg_mask lm_gen_p lm_val_p lr_gen_p lr_val_p rg rcap bids_p bn_ids bslots_p bslots_n gterms ngterms)
     fj_join_diff_side(@s b a common_rows r_chg_mask rm_gen_p rm_val_p rl_gen_p rl_val_p rg rcap aids_p an_ids aslots_p aslots_n gterms ngterms)
+    if nodes.ptr[at].kind =? 'if_' {fj_join_offsets(@s a b left right merged binding_pairs)}
     # (a value two places held, one replaced on one path only, `let hi = o`
     # then `if hi <? lo hi = lo`: the renaming above follows its last pair;
     # each earlier pair's rows follow here. O(shadowed pairs x their rows))
@@ -892,6 +893,71 @@ fj_join_diff_side=(@s:FactState src:FactState peer:FactState common_rows:JoinWor
         if not same_dist and ra not=? 0 and rb not=? 0 and fact_distance(peer ra rb row.limit) {fact_difference(@s aa bb row.limit row.at)}
         else if aa not=? row.a and bb =? row.b and ra =? rb and ra not=? 0 and row.limit <? 0 {fact_difference(@s aa bb 0 row.at)}
     }
+}
+# A value two paths moved by different constants from one common value,
+# `if i + 1 <? n { i += 2 } else { i += 1 }`: no row names either path's
+# value, but each path bounds it against the common value's rows, so the
+# merged value keeps the tightest bound both prove (`i <=? n`). Only for
+# such pairs, where an `if` joins its branches (a loop's own analysis carries
+# its counters); O(rows of the common value x the steps' spread).
+fj_join_offsets=(@s:FactState a:FactState b:FactState left:array<int64> right:array<int64> merged:array<int64> count:JoinWord):>void=>{
+    let found:array<int64>=[]
+    loop i in [0..count) {
+        let lv=left[i]
+        let rv=right[i]
+        if lv =? rv {continue}
+        let [base ka]=fj_offset(a lv)
+        let [other kb]=fj_offset(b rv)
+        if base =? 0 or base not=? other or ka =? kb or fact_slot_ref(@s base) <? 0 {continue}
+        let lo=min(ka kb)
+        let hi=max(ka kb)
+        if hi - lo >? 8 {continue}
+        let m=merged[i]
+        found.clear()
+        # (stepping up risks only the upper bounds, stepping down the lower ones)
+        let direction:JoinWord=if lo >=? 0 {1} else if hi <=? 0 {0} else {-1}
+        if direction >=? 0 {
+            let ri=fact_difference_head(s base direction)
+            loop ri >=? 0 {
+                let row=s.differences[ri]
+                ri=fact_difference_next(s ri direction)
+                # (direction 1: base - c <= L; direction 0: c - base <= L)
+                let c=if direction =? 1 {row.b} else {row.a}
+                if c =? base or c =? m or found.length >? 24 {continue}
+                # (the tightest d both prove, from the loosest that can still prove
+                # an index or a slice, d <= 0: a failure leaves every smaller d unproved)
+                let first:JoinWord=if direction =? 1 {row.limit + lo} else {row.limit - hi}
+                let d:JoinWord=min(0 (if direction =? 1 {row.limit + hi} else {row.limit - lo}))
+                let best:JoinWord=1
+                loop d >=? first {
+                    let both=if direction =? 1 {fact_distance(a lv c d) and fact_distance(b rv c d)} else {fact_distance(a c lv d) and fact_distance(b c rv d)}
+                    if not both {break}
+                    best=d
+                    d -= 1
+                }
+                if best <=? 0 {
+                    found.push(direction)
+                    found.push(c)
+                    found.push(best)
+                }
+            }
+        }
+        loop k in [0..found.length // 3) {
+            let c=found[3 * k + 1]
+            let d=found[3 * k + 2]
+            if found[3 * k] =? 1 {fact_difference(@s m c d)} else {fact_difference(@s c m d)}
+        }
+    }
+}
+# v as a common value plus a constant: `x + 2` is [x 2], `x - 1` [x -1],
+# anything else [v 0].
+fj_offset=(s:FactState v:JoinWord):>[JoinWord JoinWord]=>{
+    if v <=? 0 or v >=? fact_terms.length {return [v 0]}
+    let t=fact_terms[v]
+    if t.op not=? 'plus' and t.op not=? 'minus' or t.a =? 0 or t.b =? 0 {return [v 0]}
+    let c=fact_bound(s t.b)
+    if c.lo not=? c.hi or c.wide or c.lo =? FACT_MIN or c.lo =? FACT_MAX or c.lo >? 64 or c.lo <? -64 {return [v 0]}
+    [t.a (if t.op =? 'plus' {c.lo} else {-c.lo})]
 }
 fj_join_pair_rows_fast=(@s:FactState from_:FactState peer:FactState v:JoinWord w:JoinWord m:JoinWord to_theirs_g:ptr<int32> to_theirs_v:ptr<int32> to_merged_g:ptr<int32> to_merged_v:ptr<int32> rg:int32 rcap:JoinWord pids:ptr<int64> pn_ids:JoinWord pslots:ptr<int64> pslots_n:JoinWord gterms:ptr<FactTerm> ngterms:JoinWord):>void=>$unsafe {
     loop direction in [0..2) {

@@ -1,0 +1,19 @@
+# Each path bounds its own step: `i += 2` under `i + 1 <? n`, `i += 1`
+# under the loop's `i <? n`, so after the branches `i <=? n` still holds.
+tokens = (text:string):>array<string> => {
+    let chars = text.chars
+    let out:array<string> = []
+    let i:int64 = 0
+    loop i <? chars.length {
+        let ch = chars[i]
+        let start = i
+        if (ch =? "<" or ch =? ">") and i + 1 <? chars.length and chars[i + 1] =? "=" {
+            i += 2
+        } else {
+            i += 1
+        }
+        out.push(chars[start..i).join(""))
+    }
+    out
+}
+printl(tokens("1<=3<4>=5"))
