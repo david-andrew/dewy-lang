@@ -1,0 +1,205 @@
+# Ignore rules, as a version-control tool reads them. The first argument names
+# a rules file in .gitignore syntax: `#` comments, `!` to re-include, a
+# trailing `/` for directories only, a `/` at the start or inside to anchor
+# the pattern at the root, and `*`, `?`, `[a-z]`, `[!...]`, `\` escapes and
+# `**` across directories. Stdin lists file paths. Each path is reported
+# ignored or kept with the rule that decided it; a file under an ignored
+# directory stays ignored, as no rule can re-include it. Rules that never
+# decide anything, and patterns that cannot be read, are reported too.
+#
+# Usage: ignore_rules RULES < paths.txt
+
+# A pattern piece: one literal character, `?`, `*` (within a name), `**`
+# (across names, including none), or a bracket class.
+Literal:type = [text:string]
+AnyOne:type = [_:bool = true]
+Star:type = [_:bool = true]
+Globstar:type = [_:bool = true]
+Span:type = [low:string high:string]
+Class:type = [spans:array<Span> negated:bool]
+Piece:type = Literal | AnyOne | Star | Globstar | Class
+
+Rule:type = [line:int64 source:string pieces:array<Piece> negated:bool dir_only:bool anchored:bool]
+BadRule:type = type of error & [message:string]
+UsageError:type = type of error & [message:string]
+
+# The pieces of a pattern body (no `!` or trailing `/`).
+compile = (body:string):>array<Piece> | BadRule => {
+    let chars = body.chars
+    let pieces:array<Piece> = []
+    let i:int64 = 0
+    loop i <? chars.length {
+        let ch = chars[i]
+        if ch =? "\\" {
+            if i + 1 >=? chars.length return BadRule["a pattern cannot end with `\\`"]
+            pieces.push(Literal[chars[i + 1]])
+            i += 2
+        } else if ch =? "*" {
+            let stop = i + 1
+            loop stop <? chars.length and chars[stop] =? "*" stop += 1
+            let at_start = i =? 0 or chars[i - 1] =? "/"
+            let at_end = stop =? chars.length or chars[stop] =? "/"
+            if stop - i >=? 2 and at_start and at_end {
+                pieces.push(Globstar[])
+                # (`**/` takes its slash: it matches no directories as well as some)
+                i = if stop <? chars.length stop + 1 else stop
+            } else {
+                pieces.push(Star[])
+                i = stop
+            }
+        } else if ch =? "?" {
+            pieces.push(AnyOne[])
+            i += 1
+        } else if ch =? "[" {
+            let close = class_end(chars i) ?? return BadRule["`[` at {i + 1} has no closing `]`"]
+            pieces.push(read_class(chars[$clamp i + 1..close)))
+            i = close + 1
+        } else {
+            pieces.push(Literal[ch])
+            i += 1
+        }
+    }
+    pieces
+}
+
+# Where the class opened at `open` closes: a `]` right after `[` or `[!` is a
+# member, not the end.
+class_end = (chars:array<string> open:int64<(>=? 0)>):>int64<(>=? 0)> | none => {
+    let i = open + 1
+    if i <? chars.length and chars[i] =? "!" i += 1
+    if i <? chars.length and chars[i] =? "]" i += 1
+    loop i <? chars.length {
+        if chars[i] =? "]" return i
+        i += 1
+    }
+    none
+}
+
+read_class = (inside:array<string>):>Class => {
+    let negated = inside.get(0) =? "!"
+    let members = if negated inside[$clamp 1..] else inside
+    let spans:array<Span> = []
+    let i:int64 = 0
+    loop i <? members.length {
+        if i + 2 <? members.length and members[i + 1] =? "-" {
+            spans.push(Span[members[i] members[i + 2]])
+            i += 3
+        } else {
+            spans.push(Span[members[i] members[i]])
+            i += 1
+        }
+    }
+    Class[spans negated]
+}
+
+in_class = (c:Class ch:string):>bool => {
+    if ch =? "/" return false
+    let hit = c.spans.any((s) => s.low <=? ch and ch <=? s.high)
+    hit not=? c.negated
+}
+
+# Whether the pieces match all of `text`, by dynamic programming from the
+# end: can[p][t] says pieces[p..] match text[t..].
+matches = (pieces:array<Piece> text:array<string>):>bool => {
+    let n = text.length
+    let can = fill(fill(false n + 1) pieces.length + 1)
+    can[pieces.length][n] = true
+    loop p in [pieces.length - 1, pieces.length - 2..0] {
+        loop t in [n, n - 1..0] {
+            can[p][t] = match pieces[p] {
+                l:Literal => t <? n and text[t] =? l.text and can[p + 1][t + 1]
+                _:AnyOne => t <? n and text[t] not=? "/" and can[p + 1][t + 1]
+                _:Star => can[p + 1][t] or (t <? n and text[t] not=? "/" and can[p][t + 1])
+                _:Globstar => can[p + 1][t] or (t <? n and can[p][t + 1])
+                c:Class => t <? n and in_class(c text[t]) and can[p + 1][t + 1]
+            }
+        }
+    }
+    can[0][0]
+}
+
+read_rules = (text:string):>array<Rule> => {
+    let rules:array<Rule> = []
+    loop n in 1.. and raw in text.lines {
+        let line = raw.trim_end
+        if line.is_empty or line.startswith("#") continue
+        let negated = line.startswith("!")
+        let body = line.remove_prefix("!")
+        let dir_only = body.endswith("/") and not body.endswith("\\/")
+        body = body.remove_suffix("/")
+        # (a slash before the last character anchors; the leading one is dropped)
+        let anchored = body.startswith("/") or body.remove_suffix("/").find("/") isnt? Missing
+        body = body.remove_prefix("/")
+        if body.is_empty {
+            printl"rule {n}: `{line}` has no pattern"
+            continue
+        }
+        match compile(body) {
+            pieces:array<Piece> => rules.push(Rule[n line pieces negated dir_only anchored])
+            bad:BadRule => printl"rule {n}: {bad.message} in `{line}`"
+        }
+    }
+    rules
+}
+
+# Whether the rule matches the path (a directory when `dir`).
+applies = (r:Rule path:array<string> dir:bool):>bool => {
+    if r.dir_only and not dir return false
+    if r.anchored return matches(r.pieces path)
+    let slash = path.reversed.index_of("/") ?? path.length
+    matches(r.pieces path[$clamp path.length - slash..])
+}
+
+# The last rule that matches, or none.
+decide = (rules:array<Rule> path:array<string> dir:bool):>Rule | none => {
+    let found:Rule? = none
+    loop r in rules if applies(r path dir) found = r
+    found
+}
+
+Verdict:type = [ignored:bool rule:Rule? via:string]
+
+# Directories decide first, from the root down: once one is ignored, what is
+# inside stays ignored.
+judge = (rules:array<Rule> path:string):>Verdict => {
+    let chars = path.chars
+    let i:int64 = 0
+    loop i <? chars.length {
+        if chars[i] =? "/" {
+            let dir = chars[..i)
+            let r = decide(rules dir true)
+            if r isnt? none and not r.negated return Verdict[true r dir.join("")]
+        }
+        i += 1
+    }
+    let r = decide(rules chars false)
+    Verdict[r isnt? none and not r.negated r ""]
+}
+
+main = (argv:array<string>) => {
+    let file = argv.get(1) ?? return UsageError["usage: ignore_rules RULES < paths.txt"]
+    let text = p(file).read_text ?? return UsageError["cannot read {file}"]
+    let rules = read_rules(text)
+    let used:dict<int64 int64> = []
+    let ignored = 0
+    let paths = [loop line in (read_stdin or_throw).lines if not line.trim.is_empty line.trim]
+    loop path in paths {
+        let v = judge(rules path)
+        if v.ignored ignored += 1
+        let word = if v.ignored "ignored" else "kept   "
+        match v.rule {
+            r:Rule => {
+                used[r.line] = (used.get(r.line) ?? 0) + 1
+                let where = if v.via.is_empty "" else " in {v.via}/"
+                printl"{word} {path}  (rule {r.line}: {r.source}{where})"
+            }
+            <none> => printl"{word} {path}"
+        }
+    }
+    printl"{ignored} of {paths.length} paths ignored"
+    loop r in rules {
+        let count = used.get(r.line) ?? 0
+        if count =? 0 printl"rule {r.line} `{r.source}` decides nothing"
+        else printl"rule {r.line} `{r.source}` decides {count}"
+    }
+}

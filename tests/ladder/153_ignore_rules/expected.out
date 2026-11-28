@@ -1,0 +1,72 @@
+rule 30: `[` at 7 has no closing `]` in `secret[.txt`
+rule 31: a pattern cannot end with `\` in `weird\`
+rule 32: `/` has no pattern
+kept    README.md
+ignored main.o  (rule 2: *.o)
+kept    src/main.c
+ignored src/util.o  (rule 2: *.o)
+ignored src/lib/helpers.tmp  (rule 3: *.tmp)
+kept    src/lib/helpers.c
+ignored build/out.bin  (rule 4: build/ in build/)
+ignored build/keep/important.log  (rule 4: build/ in build/)
+ignored src/build/stale.c  (rule 4: build/ in src/build/)
+ignored dist/app.js  (rule 5: /dist in dist/)
+kept    src/dist/keep.js
+ignored notes.txt~  (rule 6: *~)
+ignored .main.c.swp  (rule 7: .*.swp)
+ignored src/.util.c.swp  (rule 7: .*.swp)
+ignored logs/today.log  (rule 11: logs/**/*.log)
+ignored logs/2026/11/web.log  (rule 11: logs/**/*.log)
+kept    logs/keep/audit.log  (rule 12: !logs/keep/*.log)
+ignored logs/keep/old/audit.log  (rule 11: logs/**/*.log)
+kept    important.log  (rule 13: !important.log)
+kept    src/important.log  (rule 13: !important.log)
+ignored app.log  (rule 10: *.log)
+ignored docs/guide/gen/page.html  (rule 16: docs/**/gen/ in docs/guide/gen/)
+ignored docs/gen/index.html  (rule 16: docs/**/gen/ in docs/gen/)
+ignored docs/api/client.html  (rule 17: docs/api/*.html)
+kept    docs/api/index.html  (rule 18: !docs/api/index.html)
+kept    docs/api/v2/client.html
+ignored data/01-sales.csv  (rule 21: data/[0-9][0-9]-*.csv)
+kept    data/1-sales.csv
+kept    data/2026-sales.csv
+ignored data/zebra.json  (rule 22: data/[!a-m]*.json)
+kept    data/apple.json
+kept    data/sub/zebra.json
+ignored #notes#  (rule 23: \#notes#)
+ignored src/#notes#  (rule 23: \#notes#)
+ignored report-1.txt  (rule 24: report-?.txt)
+kept    report-12.txt
+ignored café.txt  (rule 25: caf?.txt)
+ignored cafe.txt  (rule 25: caf?.txt)
+ignored src/tests/test_parse.py  (rule 26: src/**/test_*.py)
+ignored src/a/b/c/test_deep.py  (rule 26: src/**/test_*.py)
+kept    tests/test_top.py
+ignored src/test_root.py  (rule 26: src/**/test_*.py)
+ignored web/node_modules/lib/index.js  (rule 27: **/node_modules in web/node_modules/)
+ignored node_modules/x.js  (rule 27: **/node_modules in node_modules/)
+ignored vendor/lib/a.c  (rule 28: vendor/** in vendor/lib/)
+kept    vendor/README.md  (rule 29: !vendor/README.md)
+30 of 46 paths ignored
+rule 2 `*.o` decides 2
+rule 3 `*.tmp` decides 1
+rule 4 `build/` decides 3
+rule 5 `/dist` decides 1
+rule 6 `*~` decides 1
+rule 7 `.*.swp` decides 2
+rule 10 `*.log` decides 1
+rule 11 `logs/**/*.log` decides 3
+rule 12 `!logs/keep/*.log` decides 1
+rule 13 `!important.log` decides 2
+rule 16 `docs/**/gen/` decides 2
+rule 17 `docs/api/*.html` decides 1
+rule 18 `!docs/api/index.html` decides 1
+rule 21 `data/[0-9][0-9]-*.csv` decides 1
+rule 22 `data/[!a-m]*.json` decides 1
+rule 23 `\#notes#` decides 2
+rule 24 `report-?.txt` decides 1
+rule 25 `caf?.txt` decides 2
+rule 26 `src/**/test_*.py` decides 3
+rule 27 `**/node_modules` decides 2
+rule 28 `vendor/**` decides 1
+rule 29 `!vendor/README.md` decides 1
