@@ -749,6 +749,17 @@
     "{dir}/rules.txt"
    ],
    "note": "Ignore rules as a version-control tool reads them: a .gitignore-syntax file compiled into a `Literal | AnyOne | Star | Globstar | Class` piece union (escapes, bracket classes with ranges and `!`, `**` across directories, anchoring, directory-only rules, negation), unreadable patterns reported, each stdin path matched by a dynamic-programming table over its graphemes (`?` takes `\u00e9` whole) with directories deciding first, the last matching rule winning, and rules that decide nothing listed."
+  },
+  "154_rate_limiter": {
+   "milestone": 57,
+   "args": [
+    "*=3/1s,burst=5",
+    "alice=10/1min",
+    "batch=1/5s,burst=2",
+    "dave=1/1hour,burst=1",
+    "cost=POST:2,DELETE:3,PUT:1"
+   ],
+   "note": "Token-bucket rate limiter replaying a stdin request log: UTC instants read by `instant(text)` with impossible dates and out-of-order lines reported, policies parsed with `Duration(text)`, exact rational tokens refilled by `elapsed / period` (whose `OutOfRange` a runtime divisor brings is defaulted), retry waits from rational seconds quantized up to 1ms, a day header across midnight by `format`, method costs above a burst refused outright, and per-client tallies with a sliding one-second window over kept instants."
   }
  },
  "design_passing": [

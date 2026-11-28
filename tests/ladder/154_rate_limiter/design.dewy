@@ -1,0 +1,153 @@
+# Rate limiter replay. Stdin is a request log, one `TIME CLIENT METHOD PATH`
+# per line with UTC instants. Each argument `CLIENT=COUNT/PERIOD` (with an
+# optional `,burst=N`) gives a client a token bucket refilled at COUNT per
+# PERIOD and holding at most N tokens (COUNT by default); `*` is everyone
+# else's; `cost=METHOD:N,...` makes some methods take more tokens than one.
+# Each request is allowed while its client has the tokens, or denied with
+# the time until it would have them; a summary per client follows.
+#
+# Usage: rate_limiter POLICY... [cost=METHOD:N,...] < requests.log
+
+Policy:type = [count:int64<(>=? 1)> per:Duration burst:int64<(>=? 1)>]
+Bucket:type = [tokens:rational last:Instant]
+Tally:type = [requests:int = 0 allowed:int = 0 denied:int = 0 refused_cost:int = 0 run:int = 0 longest_run:int = 0 busiest:int64 = 0 recent:array<Instant> = []]
+Request:type = [line:int64 at:Instant client:string method:string path:string]
+UsageError:type = type of error & [message:string]
+
+parse_policy = (text:string):>Policy | UsageError => {
+    let parts = text.split(",")
+    let rate = parts[0].split("/")
+    if rate.length not=? 2 return UsageError["`{text}`: expected COUNT/PERIOD"]
+    let count = int64(rate[0]) ?? return UsageError["`{text}`: `{rate[0]}` is not a count"]
+    if count <? 1 return UsageError["`{text}`: the count must be at least 1"]
+    let per = Duration(rate[1])
+    if per is? ValidationError return UsageError["`{text}`: {per.message}, not `{per.input}`"]
+    if per <=? 0s return UsageError["`{text}`: the period must be longer than 0s"]
+    let burst = count
+    loop extra in parts[$clamp 1..] {
+        let value = extra.remove_prefix("burst=")
+        if value =? extra return UsageError["`{text}`: unknown setting `{extra}`"]
+        burst = int64(value) ?? return UsageError["`{text}`: `{value}` is not a burst size"]
+        if burst <? 1 return UsageError["`{text}`: the burst must be at least 1"]
+    }
+    Policy[count per burst]
+}
+
+parse_costs = (text:string):>dict<string int64> | UsageError => {
+    let costs:dict<string int64> = []
+    loop item in text.split(",") {
+        let pair = item.split(":")
+        if pair.length not=? 2 return UsageError["`{item}`: expected METHOD:N"]
+        let [method weight] = pair
+        let n = int64(weight) ?? return UsageError["`{item}`: `{weight}` is not a cost"]
+        if n <? 1 or n >? 1000 return UsageError["`{item}`: a cost is between 1 and 1000"]
+        costs[method.upper] = n
+    }
+    costs
+}
+
+read_requests = (text:string):>array<Request> => {
+    let found:array<Request> = []
+    loop n in 1.. and raw in text.lines {
+        let line = raw.trim
+        if line.is_empty or line.startswith("#") continue
+        let words = line.split
+        if words.length not=? 4 {
+            printl"line {n}: expected `TIME CLIENT METHOD PATH`"
+            continue
+        }
+        let at = instant(words[0])
+        if at isnt? Instant {
+            printl"line {n}: `{words[0]}` is not a UTC time"
+            continue
+        }
+        if not found.is_empty and at <? found[end].at {
+            printl"line {n}: {clock(at)} is before {clock(found[end].at)}; skipped"
+            continue
+        }
+        found.push(Request[n at words[1] words[2].upper words[3]])
+    }
+    found
+}
+
+clock = (t:Instant):>string => t.format("HH:mm:ss.SSS")
+
+# Tokens refill continuously; a request takes its cost if they are there.
+# The wait is how long the missing part takes to refill, rounded up to 1ms.
+take = (@b:Bucket p:Policy now:Instant cost:int64):>Duration | none => {
+    # (a period of 0s, which parse_policy refuses, would refill nothing)
+    let refill = ((now - b.last) / p.per ?? 0) * p.count
+    b.tokens = min(rational(p.burst) b.tokens + refill)
+    b.last = now
+    if b.tokens >=? cost {
+        b.tokens -= cost
+        return none
+    }
+    let seconds = (cost - b.tokens) * (p.per / 1s) / p.count
+    let [wait _] = quantize(seconds * 1s rounding='ceil' tick=1ms)
+    wait
+}
+
+main = (argv:array<string>) => {
+    let policies:dict<string Policy> = []
+    let costs:dict<string int64> = []
+    loop word in argv[$clamp 1..] {
+        if word.startswith("cost=") {
+            costs = parse_costs(word.remove_prefix("cost=")) or_throw
+            continue
+        }
+        let eq = word.find("=") ?? return UsageError["`{word}`: expected CLIENT=COUNT/PERIOD"]
+        policies[word[..eq)] = parse_policy(word[$clamp eq + 1..]) or_throw
+    }
+    let fallback = policies.get("*") ?? return UsageError["usage: rate_limiter *=COUNT/PERIOD [CLIENT=COUNT/PERIOD...] [cost=METHOD:N,...]"]
+    let requests = read_requests(read_stdin or_throw)
+    let buckets:dict<string Bucket> = []
+    let tallies:dict<string Tally> = []
+    let day = ""
+    loop r in requests {
+        let p = policies.get(r.client) ?? fallback
+        let cost = costs.get(r.method) ?? 1
+        let b = buckets.get(r.client) ?? Bucket[p.burst r.at]
+        let t = tallies.get(r.client) ?? Tally[]
+        let today = r.at.format("yyyy-MM-dd")
+        if today not=? day {
+            printl"-- {today}"
+            day = today
+        }
+        t.requests += 1
+        let head = "{clock(r.at)} {r.client.pad_end(6)} {r.method.pad_end(6)} {r.path}"
+        if cost >? p.burst {
+            t.denied += 1
+            t.refused_cost += cost
+            t.run += 1
+            printl"{head}  denied: costs {cost}, more than {r.client}'s burst of {p.burst}"
+        } else {
+            match take(@b p r.at cost) {
+                wait:Duration => {
+                    t.denied += 1
+                    t.refused_cost += cost
+                    t.run += 1
+                    printl"{head}  denied, retry in {wait}"
+                }
+                <none> => {
+                    t.allowed += 1
+                    t.run = 0
+                    t.recent = [loop seen in t.recent if r.at - seen <? 1s seen]
+                    t.recent.push(r.at)
+                    t.busiest = max(t.busiest t.recent.length)
+                    printl"{head}  ok, {b.tokens.floor} left"
+                }
+            }
+        }
+        t.longest_run = max(t.longest_run t.run)
+        buckets[r.client] = b
+        tallies[r.client] = t
+    }
+    if requests.is_empty return
+    printl"{requests.length} requests over {requests[end].at - requests[0].at}"
+    loop client in tallies.keys.sorted {
+        let t = tallies.get(client) ?? continue
+        let p = policies.get(client) ?? fallback
+        printl"{client}: {t.requests} requests, {t.allowed} allowed, {t.denied} denied (cost {t.refused_cost}), at most {t.busiest} in a second, longest denial run {t.longest_run}; {p.count} per {p.per}, burst {p.burst}"
+    }
+}
