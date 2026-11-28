@@ -77,14 +77,11 @@ row = (road:array<Car?> wall:int64?):>string => {
 
 main = (argv:array<string>) => {
     let args = argparse.parse(Args argv about="traffic on a ring road")
-    # (argparse checked these ranges, but its record's fields are plain
-    # int64 here, so the counts are established again)
     let n = args.cells
     let count = args.cars
     let limit = args.limit
     let steps = args.steps
     let cycle = args.red + args.green
-    if n <? 1 or n >? 400 or count <? 1 or count >? 400 or steps <? 1 or limit <? 1 or limit >? 9 or cycle <? 1 return
     if args.light is? int64 and (args.light <? 0 or args.light >=? n) {
         printl("light={args.light}: must be a cell from 0 to {n - 1}" file=stderr)
         exit(2)
