@@ -12,7 +12,6 @@ import argparse
 
 Side:type = int64<n => 1 <=? n and n <=? 1024>
 Level:type = int64<v => 0 <=? v and v <=? 255>
-Step:type = int64<d => -1 <=? d and d <=? 1>
 
 Args:type = [
     file = argparse.Positional<Path>(help="a plain PGM picture")
@@ -92,9 +91,8 @@ edges = (img:Image):>Image => {
     with_pixels(img [parallel i in [0..w * img.height) {
         let x = i % w
         let y = i // w
-        let p = (dx:Step dy:Step):>Level => at(img x + dx y + dy)
-        let gx = p(1 (-1)) + 2 * p(1 0) + p(1 1) - p((-1) (-1)) - 2 * p((-1) 0) - p((-1) 1)
-        let gy = p((-1) 1) + 2 * p(0 1) + p(1 1) - p((-1) (-1)) - 2 * p(0 (-1)) - p(1 (-1))
+        let gx = at(img x + 1 y - 1) + 2 * at(img x + 1 y) + at(img x + 1 y + 1) - at(img x - 1 y - 1) - 2 * at(img x - 1 y) - at(img x - 1 y + 1)
+        let gy = at(img x - 1 y + 1) + 2 * at(img x y + 1) + at(img x + 1 y + 1) - at(img x - 1 y - 1) - 2 * at(img x y - 1) - at(img x + 1 y - 1)
         min(255 abs(gx) + abs(gy))
     }])
 }
