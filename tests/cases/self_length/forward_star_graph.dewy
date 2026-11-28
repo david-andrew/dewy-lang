@@ -1,0 +1,28 @@
+# Forward-star adjacency: next is self-length and head and target bound by siblings; growing
+# next keeps head valid, so it pushes in place, its value checked against its own length.
+Graph:type = [
+    head:array<int64<v => -1 <=? v and v <? next.length>>
+    next:array<int64<v => -1 <=? v and v <? next.length>>
+    target:array<int64<(<? head.length)>>
+]
+add_node = (@g:Graph):>void => { g.head.push(-1) }
+add_edge = (@g:Graph a:int64 b:int64):>void => {
+    if a <? 0 or a >=? g.head.length or b <? 0 or b >=? g.head.length { return }
+    g.next.push(g.head[a])
+    g.target.push(b)
+    g.head[a] = g.next.length - 1
+}
+main = ():>void => {
+    let g = Graph[[] [] []]
+    loop _ in [0..4) { add_node(@g) }
+    add_edge(@g 0 1)
+    add_edge(@g 0 2)
+    add_edge(@g 2 3)
+    loop v in [0..g.head.length) {
+        let e = g.head[v]
+        loop e >=? 0 {
+            if e <? g.target.length { printl("{v} -> {g.target[e]}") }
+            e = g.next[e]
+        }
+    }
+}

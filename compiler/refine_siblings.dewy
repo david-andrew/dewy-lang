@@ -732,6 +732,20 @@ ref_sib_in_place=(n:RefineSibWord id:IN place0:RefineSibWord t:RefineSibWord):>b
     if types.ptr[prune(t)].kind =? 'refined' or not ref_sib_only_bounds(record at) {return false}
     id =? IN.push or id =? IN.insert or id =? IN.extend
 }
+# A push or extend of a self-length field another field's elements are bounded by
+# (`next:array<int64<(<? next.length)>>` with `head:array<int64<(<? next.length)>>`):
+# growing keeps both contracts, so it grows in place as a lone self-length array does,
+# its new elements checked against its own length. O(fields x atoms).
+ref_sib_self_grows=(id:IN place0:RefineSibWord t:RefineSibWord):>bool=>$unsafe {
+    if id not=? IN.push and id not=? IN.extend {return false}
+    let record=ref_sib_record(place0)
+    if record =? 0 {return false}
+    loop atom in ref_predicates[RefineSibWord(types.ptr[prune(t)].st)] {
+        if atom.a.kind not=? 6 or atom.b.kind =? 5 or atom.b.kind =? 6 {return false}
+    }
+    let at=RefineSibWord(nodes.ptr[ref_place_alias(place0)].aux)
+    ref_sib_unnamed(record at) or ref_sib_only_bounds(record at)
+}
 # `g.targets.extend(more)` with `more:array<int64>`: its elements admit negatives, so no fact
 # about their values makes them valid indexes, and a converted copy would hide that. Say so,
 # naming the sibling, before the element types disagree. O(atoms), on extend only.
