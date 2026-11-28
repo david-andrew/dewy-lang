@@ -172,7 +172,10 @@ fn_value=(n:int64 expected:int64 explicit_types:array<int64>=[] mod:int64=-1 clo
     let t=mk_fn(fns.ptr[f].ptypes FunctionValueChecksWord(fns.ptr[f].ret) mm labels keeps fns.ptr[f].pack not=? 0)
     if et not=? 0 and types.ptr[et].kind =? 'cfn' {
         if not fns.ptr[f].cabi {fatal(nodes.ptr[n].pos "'{name_of(FunctionValueChecksWord(nodes.ptr[n].name))}' must be marked {jd(nodes.ptr[n].pos "@cabi" "`$export`")} to be used as a C function pointer")}
-        t=mk_cfn(fns.ptr[f].ptypes FunctionValueChecksWord(fns.ptr[f].ret))
+        # (C sees a refined result's base: the body proves the refinement)
+        let ret=FunctionValueChecksWord(fns.ptr[f].ret)
+        if types.ptr[prune(ret)].kind =? 'refined' {ret=FunctionValueChecksWord(types.ptr[prune(ret)].elem)}
+        t=mk_cfn(fns.ptr[f].ptypes ret)
         nodes[n].aux = 1
     }
     if nodes.ptr[d].sval not=? 0 {t=mk_callable_contract(t effect_subst(FunctionValueChecksWord(fn_sig(d).contract) fns.ptr[f].targs))}

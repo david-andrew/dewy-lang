@@ -1,0 +1,16 @@
+# modes: native native-release
+# A refined result crosses to C as its base, as a C function pointer too.
+$extern
+qsort = (base:ptr<int32> count:uint64 size:uint64 compare:((a:ptr<int32> b:ptr<int32>):>int32)):>void
+$export
+order = (a:ptr<int32> b:ptr<int32>):>int32<c => -1 <=? c and c <=? 1> => $unsafe {
+    if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
+}
+$export
+level = (x:int32):>uint8<b => b <=? 100> => if x <? 0 0 else if x >? 100 100 else uint8(x)
+main = ():>void => $unsafe {
+    let xs:array<int32> = [3 -1 2]
+    qsort(xs.ptr 3 size_of<int32> @order)
+    printl(xs)
+    printl"{level(-5)} {level(50)} {level(500)}"
+}
