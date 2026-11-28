@@ -1,0 +1,8 @@
+# The callback reads another record than the receiver's, so its parameter is not below that one's sibling
+Table:type = [words:array<string> order:array<int64<(<? words.length)>>]
+main = ():>void => {
+    let t = Table[["pear" "apple" "fig"] [1 2 0]]
+    let u = Table[["x"] [0]]
+    t.order.sort(key=(i) => u.words[i])
+    printl(t.order)
+}

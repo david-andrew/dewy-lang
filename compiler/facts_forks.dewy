@@ -24,7 +24,7 @@ from p"facts_ranges.dewy" import (fact_refinement_covers)
 from p"facts_routes.dewy" import (fact_route fact_route_bounds fact_route_values)
 from p"facts_elements.dewy" import (fact_inventory)
 from p"facts_joins.dewy" import (fact_hull)
-from p"facts_library.dewy" import (fact_element_hull fact_library_call)
+from p"facts_library.dewy" import (fact_element_hull fact_field_args fact_library_call)
 from p"facts_probes.dewy" import (fact_probe_route)
 from p"facts_text.dewy" import (fact_string_call)
 from p"isolation_ops.dewy" import (isolation_children)
@@ -35,6 +35,9 @@ from p"ownership.jo" import (ownership_decls)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"refine_transfers.dewy" import (ref_assume ref_capture_links ref_check ref_fact_current_entry)
 from p"refine_rare.dewy" import (ref_named_locals)
+from p"refine.jo" import (ref_predicates ref_self_active)
+from p"refine_metadata.dewy" import (refine_storage)
+from p"refine_siblings.dewy" import (ref_sib_atom ref_sib_contract ref_sib_limit)
 from p"refine_rare.dewy" import (ref_signature_has)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"sequence_selectors.dewy" import (fact_sequence_store fact_sequence_store_call)
@@ -58,7 +61,12 @@ let fact_inline_forks:dict<int64 bool>=[]
 # disagree): every element it is called with was stored as that type, so its parameter
 # holds the contract (`idx.sorted(key=(v) => names[v])`).
 let fact_key_elements:dict<int64 int64>=[]
+# A key callback whose receiver is a field bounded by a sibling (`t.order.sort(key=(i) =>
+# t.words[i])`), by the callback: its unchanged copy of that record and the field's type, or
+# [0 0] when its records disagree. The copy holds the same sibling, so the parameter is below it.
+let fact_key_records:dict<int64 [int64 int64]>=[]
 fact_seed_reset=():>void=>{
+    fact_key_records=[]
     fact_key_elements=[]
     fact_seed_lambdas=[]
     fact_general_forks=[]
@@ -300,6 +308,45 @@ fact_key_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
     if element not=? 0 and tkind(prune(element)) not=? 'refined' {element=0}
     let held=fact_key_elements.get(f)
     fact_key_elements[f]=if held not=? none and held not=? element {0} else {element}
+    let record=fact_key_record_capture(kid(n 0) f)
+    let known=fact_key_records.get(f)
+    fact_key_records[f]=if known not=? none and known not=? record {[0 0]} else {record}
+}
+# The callback's unchanged copy of the record whose sibling-bounded field r is, and that
+# field's type; else [0 0]. O(captures).
+fact_key_record_capture=(r:ForkWord f:ForkWord):>[int64 int64]=>$unsafe {
+    if not ref_self_active or nodes.ptr[r].kind not=? 'field' or nodes.ptr[r].aux <? 0 {return [0 0]}
+    let t=prune(refine_storage(r ntype(r)))
+    if not ref_sib_contract(t) {return [0 0]}
+    let root=ForkWord(nodes.ptr[r].a)
+    if nodes.ptr[root].kind not=? 'ident' or nodes.ptr[root].aux not=? int32(1) {return [0 0]}
+    let o=ForkWord(nodes.ptr[root].sym)
+    loop cap in fns.ptr[f].caps {
+        if int64(cap.outer) not=? o or int64(cap.inner) <=? 0 {continue}
+        let inner=int64(cap.inner)
+        let flags=ForkWord(locals.ptr[inner].flags)
+        if flags & LF_VALUECAP =? 0 or flags & (LF_ASSIGNED | LF_ADDR | LF_SHARED | LF_EXPOSED) not=? 0 {return [0 0]}
+        return [inner t]
+    }
+    [0 0]
+}
+# The key parameter below each sibling bound of the receiver's field, read with the callback's
+# copy of the record. O(fields + atoms).
+fact_key_sibling=(@s:FactState f:ForkWord record:[int64 int64] value:ForkWord):>void=>$unsafe {
+    let p=PlaceIdentity('local' f record[0])
+    let i=fact_binding(s p)
+    let held=if i >=? 0 {s.bindings[i].value} else {0}
+    if held =? 0 {
+        let t=ForkWord(locals.ptr[record[0]].type)
+        held=fact_new(@s fact_domain(t) FactTerm(type=t))
+        fact_bind(@s p held)
+    }
+    let args=fact_field_args(@s held)
+    loop atom in ref_predicates[ForkWord(types.ptr[record[1]].st)] {
+        if not ref_sib_atom(atom) or atom.b.kind not=? 5 {continue}
+        let limit=ref_sib_limit(atom args @s)
+        if limit not=? 0 {fact_difference(@s value limit 0 0 16)}
+    }
 }
 # Every element is at most top + k: a row to each captured value top is within a known
 # distance of. O(captures).
@@ -347,6 +394,8 @@ fact_fork_seed=(f:ForkWord @s:FactState):>void=>$unsafe {
         fact_bind(@s PlaceIdentity('local' f l) value)
         let et=fact_key_elements.get(f) ?? 0
         if et >? 0 {ref_assume(et value [] @s)}
+        let record=fact_key_records.get(f) ?? [0 0]
+        if record[0] >? 0 {fact_key_sibling(@s f record value)}
         loop r in key.rows {
             if r.b >=? 0 and r.b <? values.length {fact_difference(@s value values[r.b] r.limit 0 16)}
         }

@@ -1,0 +1,13 @@
+# An index table in a record, sorted by what it indexes: the key callback's copy of the
+# record holds the same sibling, so its parameter is below that sibling's length.
+Table:type = [words:array<string> order:array<int64<(<? words.length)>>]
+main = ():>void => {
+    let t = Table[["pear" "apple" "fig"] [0 1 2]]
+    t.order.sort(key=(i) => t.words[i])
+    loop i in t.order { printl(t.words[i]) }
+    t.words.push("kiwi")
+    t.order.push(t.words.length - 1)
+    t.order.sort(key=(i:int64) => t.words[i].length)
+    printl(t.order)
+    printl(t.order.sorted(key=(i) => t.words[i]))
+}
