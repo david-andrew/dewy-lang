@@ -856,6 +856,9 @@ def tail(text: str, lines: int = 25) -> str:
 DEFINES_MAIN = re.compile(r'^(?:(?:let|const)\s+)?main\s*[:=]', re.MULTILINE)
 MAIN_WITH_PARAMS = re.compile(r'^(?:(?:let|const)\s+)?main\s*=\s*(?:<[^>]*>\s*)?\([^)\s]', re.MULTILINE)
 ALLOCATION_COUNTER = re.compile(r'\balloc_count\b')
+# C exit handlers print after main returns: in a batch they could be judged before the
+# process ends (a GPU case failing mid-batch did that once, 11-28).
+EXIT_HANDLER = re.compile(r'\b(?:atexit|on_exit)\s*\(')
 RUNTIME_CHECKS_CASE = re.compile(
     r'\$runtime_checks\b|\$prototype\b|\$allow_panics\b|\$runtime_assert\b|\bpanic\s*\('
 )
@@ -873,7 +876,7 @@ def exits_process(source: str) -> bool:
 def needs_own_process(case: Case) -> bool:
     source = case.path.read_text()
     return DEFINES_MAIN.search(source) is None or MAIN_WITH_PARAMS.search(source) is not None \
-        or ALLOCATION_COUNTER.search(source) is not None
+        or ALLOCATION_COUNTER.search(source) is not None or EXIT_HANDLER.search(source) is not None
 
 
 def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
