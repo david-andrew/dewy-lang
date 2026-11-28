@@ -39,11 +39,13 @@ targ = (t: int, i: int) -> int: T_INT
     'util.jo': r'''use 'source_types.dewy'
 files: SrcFile[] = [SrcFile(is_dewy=true)]
 pos_file = (p: int) -> int: 0
+name_of = (n: int) -> str: ""
 ''',
     'check.jo': r'''use 'driver.jo'
 use 'checker_state.dewy'
 decl_infos: DeclInfo[] = [DeclInfo()]
 fns: FnInst[] = [FnInst()]
+lib_dir = "/lib"
 decl_info = (d: int) -> int: int(nodes[d].aux)
 get_fn_inst = (d: int, bs: int[], pos: int) -> int:
     let bs = bs
