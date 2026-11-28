@@ -1,0 +1,220 @@
+# An event-sourced bank. Stdin holds commands, one per line: `open NAME
+# AMOUNT`, `deposit NAME AMOUNT`, `withdraw NAME AMOUNT`, `transfer FROM TO
+# AMOUNT`, `close NAME` and `freeze NAME`. Each command is decided against the
+# current state; an accepted one becomes an event appended to the log, a
+# refused one is reported with its reason. The state is never stored, only
+# derived: applying the log from the start rebuilds it. Every N events a
+# snapshot keeps a copy of the state, so a replay to any point starts from the
+# nearest snapshot at or before it. The run checks that both replays agree,
+# and answers balance queries as of earlier points in the log.
+#
+# Usage: event_bank [every=N] [at=K]...
+
+Cents:type = int64<c => 0 <=? c and c <=? 100000000000>
+
+Opened:type = [name:string amount:Cents]
+Deposited:type = [name:string amount:Cents]
+Withdrew:type = [name:string amount:Cents]
+Moved:type = [source:string target:string amount:Cents]
+Closed:type = [name:string]
+Frozen:type = [name:string]
+Event:type = Opened | Deposited | Withdrew | Moved | Closed | Frozen
+
+Account:type = [balance:int frozen:bool]
+State:type = dict<string Account>
+
+Refused:type = type of error & [reason:string]
+BadLine:type = [line:int text:string why:string]
+
+Snapshot:type = [at:int64 state:State]
+
+# "12", "12.5" or "12.50" as whole cents; anything else is refused.
+cents = (text:string):>Cents | Refused => {
+    let parts = text.split(".")
+    if parts.length >? 2 or parts[0] =? "" return Refused["`{text}` is not an amount"]
+    let whole = to_int(parts[0]) ?? return Refused["`{text}` is not an amount"]
+    let frac = parts.get(1) ?? "0"
+    if frac.length >? 2 or frac =? "" return Refused["`{text}` has more than two decimals"]
+    let part = to_int(frac) ?? return Refused["`{text}` is not an amount"]
+    if whole <? 0 or part <? 0 return Refused["`{text}` is not an amount"]
+    let total = whole * 100 + part * (if frac.length =? 1 10 else 1)
+    if total >? 100000000000 return Refused["`{text}` is out of range"]
+    int64(total)
+}
+
+money = (c:int):>string => {
+    let sign = if c <? 0 "-" else ""
+    let m = if c <? 0 -c else c
+    "{sign}{m // 100}.{fmt'02'(m % 100)}"
+}
+
+# One command line as the event it asks for, before any decision.
+parse = (n:int line:string):>Event | BadLine => {
+    let w = line.split
+    let amount = (i:int64):>Cents | Refused => cents(w.get(i) ?? "")
+    let bad = (why:string) => BadLine[n line why]
+    match w.get(0) ?? "" {
+        <"open"> => if w.length =? 3 Opened[w[1] amount(2) ?? return bad("bad amount")] else bad("usage: open NAME AMOUNT")
+        <"deposit"> => if w.length =? 3 Deposited[w[1] amount(2) ?? return bad("bad amount")] else bad("usage: deposit NAME AMOUNT")
+        <"withdraw"> => if w.length =? 3 Withdrew[w[1] amount(2) ?? return bad("bad amount")] else bad("usage: withdraw NAME AMOUNT")
+        <"transfer"> => if w.length =? 4 Moved[w[1] w[2] amount(3) ?? return bad("bad amount")] else bad("usage: transfer FROM TO AMOUNT")
+        <"close"> => if w.length =? 2 Closed[w[1]] else bad("usage: close NAME")
+        <"freeze"> => if w.length =? 2 Frozen[w[1]] else bad("usage: freeze NAME")
+        _ => bad("unknown command")
+    }
+}
+
+usable = (state:State name:string):>Account | Refused => {
+    let a = state.get(name) ?? return Refused["no account `{name}`"]
+    if a.frozen return Refused["`{name}` is frozen"]
+    a
+}
+
+# Whether the event may happen now; the reason it may not.
+decide = (state:State e:Event):>void | Refused => {
+    match e {
+        o:Opened => if state.has(o.name) return Refused["`{o.name}` already exists"]
+        d:Deposited => {usable(state d.name) or_throw;}
+        w:Withdrew => {
+            let a = usable(state w.name) or_throw
+            if a.balance <? w.amount return Refused["`{w.name}` has only {money(a.balance)}"]
+        }
+        m:Moved => {
+            if m.source =? m.target return Refused["a transfer needs two accounts"]
+            let a = usable(state m.source) or_throw
+            usable(state m.target) or_throw;
+            if a.balance <? m.amount return Refused["`{m.source}` has only {money(a.balance)}"]
+        }
+        c:Closed => {
+            let a = state.get(c.name) ?? return Refused["no account `{c.name}`"]
+            if a.balance not=? 0 return Refused["`{c.name}` still holds {money(a.balance)}"]
+        }
+        f:Frozen => {usable(state f.name) or_throw;}
+    }
+}
+
+# The state after an event already decided: total, never refused (an account
+# it names and does not find is left alone).
+change = (@state:State name:string amount:int):>void => {
+    let a = state.get(name) ?? return
+    state[name] = Account[a.balance + amount a.frozen]
+}
+apply = (@state:State e:Event):>void => {
+    match e {
+        o:Opened => {state[o.name] = Account[o.amount false]}
+        d:Deposited => change(@state d.name d.amount)
+        w:Withdrew => change(@state w.name -w.amount)
+        m:Moved => {
+            change(@state m.source -m.amount)
+            change(@state m.target m.amount)
+        }
+        c:Closed => {state.remove(c.name);}
+        f:Frozen => {
+            let a = state.get(f.name) ?? return
+            state[f.name] = Account[a.balance true]
+        }
+    }
+}
+
+show = (e:Event):>string => match e {
+    o:Opened => "open {o.name} {money(o.amount)}"
+    d:Deposited => "deposit {d.name} {money(d.amount)}"
+    w:Withdrew => "withdraw {w.name} {money(w.amount)}"
+    m:Moved => "transfer {m.source} -> {m.target} {money(m.amount)}"
+    c:Closed => "close {c.name}"
+    f:Frozen => "freeze {f.name}"
+}
+
+# The state after the first k events, from the nearest snapshot at or before k.
+replay = (log:array<Event> snaps:array<Snapshot> k:int64):>State => {
+    let base = Snapshot[0 []]
+    loop s in snaps {
+        if s.at <=? k base = s
+    }
+    let state = base.state
+    loop e in log[$clamp base.at..k) apply(@state e)
+    state
+}
+
+balances = (state:State):>string => {
+    let names = state.keys.sorted
+    if names.is_empty return "(no accounts)"
+    [loop name in names {
+        let a = state[name]
+        "{name}={money(a.balance)}{if a.frozen "*" else ""}"
+    }].join(" ")
+}
+
+# FNV-1a over the shown events, wrapping by design: a fingerprint of the log.
+Word:type = uint64<overflow='wrap'>
+fingerprint = (log:array<Event>):>Word => {
+    let h:Word = 14695981039346656037
+    loop e in log {
+        loop b in (show(e) as array<uint8>) {
+            h = (h xor Word(b)) * 1099511628211
+        }
+        h = (h xor 10) * 1099511628211
+    }
+    h
+}
+
+main = (argv:array<string>) => {
+    let every:int64 = 3
+    let points:array<int64> = []
+    loop arg in argv[$clamp 1..] {
+        let parts = arg.split("=")
+        let key = parts[0]
+        let n = to_int(parts.get(1) ?? "") ?? -1
+        if key =? "every" and n >=? 1 and n <=? 1000 every = int64(n)
+        else if key =? "at" and n >=? 0 and n <=? 1000000 points.push(int64(n))
+        else printl"ignored `{arg}`"
+    }
+    let log:array<Event> = []
+    let snaps:array<Snapshot> = []
+    let state:State = []
+    let refused = 0
+    loop n in 1.. and raw in (read_stdin or_throw).lines {
+        let line = raw.trim
+        if line =? "" or line.startswith("#") continue
+        let e = match parse(n line) {
+            bad:BadLine => {
+                printl"line {bad.line}: {bad.why}: `{bad.text}`"
+                continue
+            }
+            ok:Event => ok
+        }
+        match decide(state e) {
+            no:Refused => {
+                refused += 1
+                printl"line {n}: refused {show(e)}: {no.reason}"
+            }
+            _ => {
+                apply(@state e)
+                log.push(e)
+                printl"#{log.length} {show(e)}"
+                if log.length % every =? 0 snaps.push(Snapshot[log.length state])
+            }
+        }
+    }
+    printl"{log.length} events, {refused} refused, {snaps.length} snapshots every {every}"
+    printl"now: {balances(state)}"
+    let total = sum([loop [_ a] in state a.balance])
+    let opened = sum([loop e in log if e is? Opened int(e.amount)])
+    let added = sum([loop e in log if e is? Deposited int(e.amount)])
+    let gone = sum([loop e in log if e is? Withdrew int(e.amount)])
+    let kept = if total =? opened + added - gone "conserved" else "LOST"
+    printl"held {money(total)}: opened {money(opened)}, deposited {money(added)}, withdrawn {money(gone)} ({kept})"
+    # Both replays must give what the live state became.
+    let full = replay(log [] log.length)
+    let fast = replay(log snaps log.length)
+    printl"replay from the start {if balances(full) =? balances(state) "matches" else "DIFFERS"}, from snapshots {if balances(fast) =? balances(state) "matches" else "DIFFERS"}"
+    loop k in points {
+        let past = replay(log snaps k)
+        let slow = replay(log [] k)
+        let agree = if balances(past) =? balances(slow) "" else " (snapshot replay DIFFERS)"
+        printl"as of #{min(k log.length)}: {balances(past)}{agree}"
+    }
+    # A snapshot is a copy: later events never reach it.
+    if snaps.length >? 0 printl"first snapshot, at #{snaps[0].at}: {balances(snaps[0].state)}"
+    printl"fingerprint {fmt'016x'(fingerprint(log))}"
+}

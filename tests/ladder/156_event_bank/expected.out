@@ -1,0 +1,39 @@
+#1 open alice 100.00
+#2 open bob 20.50
+#3 open carol 0.00
+#4 deposit alice 50.25
+line 6: refused withdraw bob 30.00: `bob` has only 20.50
+#5 transfer alice -> bob 70.00
+line 8: refused transfer bob -> bob 1.00: a transfer needs two accounts
+line 9: refused open alice 5.00: `alice` already exists
+line 10: refused deposit dave 10.00: no account `dave`
+line 11: refused withdraw carol 0.01: `carol` has only 0.00
+line 12: bad amount: `deposit carol 12.345`
+line 13: bad amount: `deposit carol abc`
+#6 transfer alice -> carol 30.25
+#7 freeze bob
+line 16: refused deposit bob 1.00: `bob` is frozen
+line 17: refused transfer carol -> bob 5.00: `bob` is frozen
+line 18: refused close carol: `carol` still holds 30.25
+#8 withdraw carol 30.25
+#9 close carol
+#10 open erin 1000.00
+#11 transfer erin -> alice 250.75
+line 23: unknown command: `fly away`
+line 24: usage: close NAME: `close`
+#12 withdraw alice 0.50
+#13 open frank 99.99
+#14 transfer frank -> erin 99.99
+#15 close frank
+#16 deposit erin 0.01
+16 events, 8 refused, 4 snapshots every 4
+now: alice=300.25 bob=90.50* erin=849.25
+held 1240.00: opened 1220.49, deposited 50.26, withdrawn 30.75 (conserved)
+replay from the start matches, from snapshots matches
+as of #0: (no accounts)
+as of #5: alice=80.25 bob=90.50 carol=0.00
+as of #9: alice=50.00 bob=90.50*
+as of #13: alice=300.25 bob=90.50* erin=749.25 frank=99.99
+as of #16: alice=300.25 bob=90.50* erin=849.25
+first snapshot, at #4: alice=150.25 bob=20.50 carol=0.00
+fingerprint ed16c6878fb56b10

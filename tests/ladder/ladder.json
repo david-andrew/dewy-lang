@@ -768,6 +768,18 @@
     "radius=1"
    ],
    "note": "Image kernels over a plain PGM file read through an argparse Positional<Path>: levels rescaled into a `Level` refinement, a box blur and Sobel strengths collected with `[parallel i in [0..n) ...]` over border-clamped neighbors, a fixed 256-bin histogram indexed by `Level`, Otsu's threshold by exact rational variance, an in-place `parallel @v` contrast stretch, and four-connected regions through a stack whose elements index the pixels."
+  },
+  "156_event_bank": {
+   "milestone": 14,
+   "args": [
+    "every=4",
+    "at=0",
+    "at=5",
+    "at=9",
+    "at=13",
+    "at=99"
+   ],
+   "note": "Event-sourced bank over stdin commands: each parsed into an `Opened | Deposited | Withdrew | Moved | Closed | Frozen` event union (malformed lines and amounts reported), decided against the derived state with `Refused` error values forwarded by or_throw, applied through an `@` dictionary of account records, snapshots every N events kept as value copies later events never reach, replays from the start and from the nearest snapshot compared, balances as of earlier points, a conserved total, and an FNV-1a fingerprint of the log in wrapping uint64."
   }
  },
  "design_passing": [
