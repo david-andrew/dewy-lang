@@ -1,18 +1,18 @@
 $runtime_checks
 from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INCLUSIVE NF_STEP has_flag kid kids nkids nodes)
-from p"check.jo" import (FK_NORMAL LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_MUTPARAM LF_PARAM fns locals)
+from p"check.jo" import (FK_NORMAL LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_MUTPARAM LF_PARAM LF_VALUECAP fns locals)
 from p"checker_generators.dewy" import (GenFusePlan GenFuseSource GenFuseWhileInfo gen_fuse_plan gen_type_contains)
 from p"copies.jo" import (copies_on)
 from p"copy_ops.dewy" import (copies_prepare copy_capture_ids own_at)
 from p"diagnostic_exit.dewy" import (fatal ice)
 from p"expression_types.dewy" import (ntype)
 from p"ir.jo" import (VI ir ir_pos)
-from p"ir_builders.dewy" import (e_addi e_bin e_brtable e_call0 e_call1 e_calli e_copy e_iconst e_load e_mov e_ret e_slot e_store e_zero ir_set_pos new_slot vreg)
-from p"lower.jo" import (HK LoopInfo VC_AGG VC_VOID Val building ctl cur_fn env_v loops lower_epoch scope_locals tl_items)
+from p"ir_builders.dewy" import (e_addi e_bin e_brtable e_call0 e_call1 e_call2 e_calli e_copy e_iconst e_load e_mov e_ret e_slot e_store e_zero ir_set_pos new_slot vreg)
+from p"lower.jo" import (HK LoopInfo VC_AGG VC_VOID Val building ctl cur_fn env_v loops lower_entry lower_epoch lower_zeros scope_locals tl_items)
 from p"lower_group.dewy" import (emit_scope_exit gen_block_stmts gen_expr gen_match_test gen_owned gen_place gen_stmt local_place scope_pop)
 from p"lower_helpers.dewy" import (drop_embedded helper_params)
 from p"lower_primitives.dewy" import (e_faddr lf_helper rt tuple_off)
-from p"lower_storage.dewy" import (V arr_len blk borrow br_to brif_to cell_place drop_at drop_held els endc iff is_shared load_val lop new_temp opt_has opt_value own read_place release retain scope_add_local scope_push stmt_begin stmt_end store_type store_val vc vt_of write_place zero_declare)
+from p"lower_storage.dewy" import (V arr_len blk borrow br_to brif_to cell_place check_cell_type drop_at drop_held els endc iff is_shared load_val lop new_cell new_temp opt_has opt_value own read_place release retain scope_add_local scope_push stmt_begin stmt_end store_type store_val vc vt_of write_place zero_declare)
 from p"math_ops.dewy" import (math_binary math_compare math_word)
 from p"ownership_types.dewy" import (ownership_type)
 from p"type_constructors.dewy" import (tb_generators_seen)
@@ -52,6 +52,7 @@ GenLayout:type=[
     frame_size:int64=0
     state_off:int64=0
     cap_locals:array<int64>=[]
+    frame_locals:dict<int64 bool>=dict<int64 bool>()
     managed_locals:array<int64>=[]
     live_offs:dict<int64 int64>=dict<int64 int64>()
     for_slots:dict<int64 GenForSlot>=dict<int64 GenForSlot>()
@@ -124,6 +125,71 @@ gen_needs_sm=(s:LGnWord plain_loops:LGnWord):>bool=>$unsafe {
     false
 }
 
+gen_collect_sm_locals=(s:LGnWord @sm_locals:dict<int64 bool>):>void=>$unsafe {
+    if s =? 0 {return}
+    let k=nodes.ptr[s].kind
+    if k =? 'lambda' or k =? 'lazy_' or k =? 'defer_' {return}
+    if k =? 'vardecl' {
+        let bv=LGnWord(nodes.ptr[s].b)
+        if bv not=? 0 and nodes.ptr[bv].kind =? 'block' and gen_needs_sm(bv 0) {
+            loop i in [0..nkids(bv) - 1) {gen_collect_sm_locals(kid(bv i) @sm_locals)}
+        }
+        if nodes.ptr[s].nlist >? 0 {
+            loop i in [0..nkids(s)) {
+                let id=kid(s i)
+                if nodes.ptr[id].kind not=? 'hole' and nodes.ptr[id].sym >? 0 {
+                    sm_locals[LGnWord(nodes.ptr[id].sym)]=true
+                }
+            }
+        } else if nodes.ptr[s].sym >? 0 {
+            sm_locals[LGnWord(nodes.ptr[s].sym)]=true
+        }
+        return
+    }
+    if k =? 'exprstmt' {
+        let a=LGnWord(nodes.ptr[s].a)
+        if a =? 0 {return}
+        let ak=nodes.ptr[a].kind
+        if ak =? 'match_' and gen_needs_sm(s 0) {
+            if nodes.ptr[a].sym >? 0 {sm_locals[LGnWord(nodes.ptr[a].sym)]=true}
+            loop i in [0..nkids(a)) {gen_collect_sm_locals(LGnWord(nodes.ptr[kid(a i)].b) @sm_locals)}
+        } else if (ak =? 'block' or ak =? 'if_' or ak =? 'iflet') and gen_needs_sm(a 0) {
+            gen_collect_sm_locals(a @sm_locals)
+        }
+        return
+    }
+    if k =? 'block' {
+        if not gen_needs_sm(s 0) {return}
+        loop i in [0..nkids(s)) {gen_collect_sm_locals(kid(s i) @sm_locals)}
+        return
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        if not gen_needs_sm(s 0) {return}
+        if k =? 'iflet' and nodes.ptr[s].sym >? 0 {sm_locals[LGnWord(nodes.ptr[s].sym)]=true}
+        gen_collect_sm_locals(LGnWord(nodes.ptr[s].b) @sm_locals)
+        gen_collect_sm_locals(LGnWord(nodes.ptr[s].c) @sm_locals)
+        return
+    }
+    if k =? 'while_' {
+        if not gen_needs_sm(s 0) {return}
+        if nodes.ptr[s].aux =? 1 and nodes.ptr[s].sym >? 0 {sm_locals[LGnWord(nodes.ptr[s].sym)]=true}
+        gen_collect_sm_locals(LGnWord(nodes.ptr[s].b) @sm_locals)
+        return
+    }
+    if k =? 'for_' {
+        if not gen_needs_sm(s 0) {return}
+        if nodes.ptr[s].sym >? 0 {sm_locals[LGnWord(nodes.ptr[s].sym)]=true}
+        if nodes.ptr[s].c >? 0 {sm_locals[LGnWord(nodes.ptr[s].c)]=true}
+        gen_collect_sm_locals(LGnWord(nodes.ptr[s].b) @sm_locals)
+        return
+    }
+    if k =? 'match_' {
+        if nodes.ptr[s].sym >? 0 {sm_locals[LGnWord(nodes.ptr[s].sym)]=true}
+        loop i in [0..nkids(s)) {gen_collect_sm_locals(LGnWord(nodes.ptr[kid(s i)].b) @sm_locals)}
+        return
+    }
+}
+
 gen_record_unwind_local=(@lay:GenLayout l:LGnWord):>void=>{
     if l >? 0 and lay.live_offs.has(l) and not lay.unwind_seen_locals.has(l) {
         lay.unwind_seen_locals[l]=true
@@ -161,6 +227,7 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
         return
     }
     if k =? 'for_' {
+        if not gen_needs_sm(s 0) {return}
         let aux=LGnWord(nodes.ptr[s].aux)
         let fs=GenForSlot[aux=aux]
         if aux =? 0 or aux =? 4 {
@@ -216,18 +283,29 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
         return
     }
     if k =? 'while_' {
+        if not gen_needs_sm(s 0) {return}
         if nodes.ptr[s].aux =? 1 {gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].sym))}
         gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
         return
     }
     if k =? 'if_' or k =? 'iflet' {
+        if not gen_needs_sm(s 0) {return}
         if k =? 'iflet' {gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].sym))}
         gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
         gen_layout_walk(LGnWord(nodes.ptr[s].c) @lay @off)
         return
     }
     if k =? 'exprstmt' {
-        gen_layout_walk(LGnWord(nodes.ptr[s].a) @lay @off)
+        let a=LGnWord(nodes.ptr[s].a)
+        if a =? 0 {return}
+        let ak=nodes.ptr[a].kind
+        if ak =? 'yield_' {
+            gen_layout_walk(a @lay @off)
+        } else if ak =? 'match_' and gen_needs_sm(s 0) {
+            gen_layout_walk(a @lay @off)
+        } else if (ak =? 'block' or ak =? 'if_' or ak =? 'iflet') and gen_needs_sm(a 0) {
+            gen_layout_walk(a @lay @off)
+        }
         return
     }
     if k =? 'match_' {
@@ -238,13 +316,14 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
         return
     }
     if k =? 'block' {
+        if not gen_needs_sm(s 0) {return}
         loop i in [0..nkids(s)) {gen_layout_walk(kid(s i) @lay @off)}
         return
     }
     if k =? 'vardecl' {
         let b=LGnWord(nodes.ptr[s].b)
-        if b not=? 0 and nodes.ptr[b].kind =? 'block' {
-            gen_layout_walk(b @lay @off)
+        if b not=? 0 and nodes.ptr[b].kind =? 'block' and gen_needs_sm(b 0) {
+            loop i in [0..nkids(b) - 1) {gen_layout_walk(kid(b i) @lay @off)}
         }
         if nodes.ptr[s].nlist >? 0 {
             loop i in [0..nkids(s)) {
@@ -270,9 +349,11 @@ gen_frame_layout=(f:LGnWord):>GenLayout=>$unsafe {
     loop cap in fns.ptr[f].caps {
         let inn=LGnWord(cap.inner)
         cap_set[inn]=true
+        lay.frame_locals[inn]=true
         lay.cap_locals.push(inn)
         let t=store_type(inn)
         if is_shared(inn) {
+            check_cell_type(inn);
             off=align_up(off ptr_size)
             locals[inn].env_off=LGnI32(off)
             locals[inn].offset=-1
@@ -289,13 +370,17 @@ gen_frame_layout=(f:LGnWord):>GenLayout=>$unsafe {
             off += 1
         }
     }
+    let sm_locals=dict<int64 bool>()
+    gen_collect_sm_locals(LGnWord(fns.ptr[f].body) @sm_locals)
     loop l in fns.ptr[f].locals {
-        if cap_set.has(l) {continue}
+        if cap_set.has(l) or not sm_locals.has(l) {continue}
         let fl=LGnWord(locals.ptr[l].flags)
         if fl & LF_ALIAS not=? 0 {continue}
+        lay.frame_locals[l]=true
         let t=store_type(l)
         layout(t);
         if is_shared(l) {
+            check_cell_type(l);
             off=align_up(off ptr_size)
             locals[l].flags=LGnI32(fl | LF_CAPTURE)
             locals[l].env_off=LGnI32(off)
@@ -337,14 +422,22 @@ gen_lazy=(e:LGnWord):>Val=>$unsafe {
         let inn_l=LGnWord(cap.inner)
         let off=LGnWord(locals.ptr[inn_l].env_off)
         let t=store_type(inn_l)
-        if is_shared(inn_l) {
+        if is_shared(inn_l) and LGnWord(locals.ptr[inn_l].flags) & LF_VALUECAP =? 0 {
             let cell=read_place(cell_place(out_l) t)
             retain(cell t);
             e_store(frame off cell ptr_size);
         } else {
             let cid=cap_ids.ptr[ci]
-            let val=own_at(cid gen_expr(cid) t)
-            store_val(t frame off val.v);
+            let vt=LGnWord(locals.ptr[inn_l].type)
+            let val=own_at(cid gen_expr(cid) vt)
+            if is_shared(inn_l) {
+                check_cell_type(inn_l);
+                let cell=e_call2(rt("__arr_repeat") e_iconst(1) e_iconst(max(1 tsize(vt))) VI)
+                store_val(vt cell 24 val.v);
+                e_store(frame off cell ptr_size);
+            } else {
+                store_val(t frame off val.v);
+            }
         }
         if lay.live_offs.has(inn_l) {
             e_store(frame lay.live_offs[inn_l] e_iconst(1) 1);
@@ -685,6 +778,8 @@ sm_compile_stmt=(@b:GenBuilder cur_s0:int64 s:LGnWord):>int64=>$unsafe {
         sm_push_scope(@b)
         let el_l=LGnWord(nodes.ptr[s].sym)
         if el_l >? 0 and b.lay.live_offs.has(el_l) {b.scopes[b.scopes.length - 1].locals_.push(el_l)}
+        let idx_l=LGnWord(nodes.ptr[s].c)
+        if idx_l >? 0 and b.lay.live_offs.has(idx_l) {b.scopes[b.scopes.length - 1].locals_.push(idx_l)}
         let body_end=sm_compile_stmt(@b body_s LGnWord(nodes.ptr[s].b))
         let exit_act=sm_pop_scope_action(@b)
         b.sm_loops.pop();
@@ -755,7 +850,11 @@ gen_emit_drop_local=(l:LGnWord lay:GenLayout):>void=>$unsafe {
     let t=store_type(l)
     iff(e_bin('ne' VI e_load(VI env_v loff 1) e_iconst(0)));
     e_store(env_v loff e_iconst(0) 1);
-    drop_embedded(e_addi(env_v LGnWord(locals.ptr[l].env_off)) t);
+    if is_shared(l) {
+        release(e_load(VI env_v LGnWord(locals.ptr[l].env_off) ptr_size) t);
+    } else {
+        drop_embedded(e_addi(env_v LGnWord(locals.ptr[l].env_off)) t);
+    }
     endc();
 }
 
@@ -827,6 +926,7 @@ gen_emit_sm_vardecl=(s:LGnWord lay:GenLayout):>void=>$unsafe {
                 drop_embedded(ea el);
             } else {
                 let l=LGnWord(nodes.ptr[id].sym)
+                if is_shared(l) {new_cell(l);}
                 write_place(local_place(l true) el load_val(el ea 0));
                 if lay.live_offs.has(l) {e_store(env_v lay.live_offs[l] e_iconst(1) 1);}
             }
@@ -835,7 +935,9 @@ gen_emit_sm_vardecl=(s:LGnWord lay:GenLayout):>void=>$unsafe {
         return
     }
     let l=LGnWord(nodes.ptr[s].sym)
-    let t=store_type(l)
+    let sh=is_shared(l)
+    if sh {new_cell(l);}
+    let t=if sh {LGnWord(locals.ptr[l].type)} else {store_type(l)}
     let pl=local_place(l true)
     if nodes.ptr[s].b not=? 0 {
         let val=gen_owned(LGnWord(nodes.ptr[s].b))
@@ -959,6 +1061,7 @@ gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_
                 endc();
             }
             retain(ctr T_MATH_INT);
+            if is_shared(l) {new_cell(l);}
             write_place(local_place(l true) T_MATH_INT ctr);
             if lay.live_offs.has(l) {e_store(env_v lay.live_offs[l] e_iconst(1) 1);}
             e_store(env_v lay.state_off e_iconst(body_s) 8);
@@ -987,7 +1090,9 @@ gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_
         e_store(env_v lay.state_off e_iconst(after_s) 8);
         br_to(dispatch_lvl);
         endc();
+        if is_shared(l) {new_cell(l);}
         write_place(local_place(l true) lt ctr);
+        if lay.live_offs.has(l) {e_store(env_v lay.live_offs[l] e_iconst(1) 1);}
         e_store(env_v lay.state_off e_iconst(body_s) 8);
         br_to(dispatch_lvl);
         return
@@ -1000,7 +1105,11 @@ gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_
         br_to(dispatch_lvl);
         endc();
         let idx_l=LGnWord(nodes.ptr[s].c)
-        if idx_l >? 0 {write_place(local_place(idx_l true) T_INT idx);}
+        if idx_l >? 0 {
+            if is_shared(idx_l) {new_cell(idx_l);}
+            write_place(local_place(idx_l true) T_INT idx);
+            if lay.live_offs.has(idx_l) {e_store(env_v lay.live_offs[idx_l] e_iconst(1) 1);}
+        }
         let el_l=LGnWord(nodes.ptr[s].sym)
         let et=prune(LGnWord(locals.ptr[el_l].type))
         let st=fs.snap_type
@@ -1014,6 +1123,7 @@ gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_
         let ea=e_bin('add' VI base e_bin('mul' VI idx e_iconst(tsize(et))))
         let raw=load_val(et ea 0)
         let owned_v=own(V(raw false) et)
+        if is_shared(el_l) {new_cell(el_l);}
         write_place(local_place(el_l true) et owned_v.v);
         if lay.live_offs.has(el_l) {e_store(env_v lay.live_offs[el_l] e_iconst(1) 1);}
         e_store(env_v lay.state_off e_iconst(body_s) 8);
@@ -1023,13 +1133,19 @@ gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_
     if aux =? 5 {
         let el_l=LGnWord(nodes.ptr[s].sym)
         let et=prune(LGnWord(locals.ptr[el_l].type))
+        let el_sh=is_shared(el_l)
         stmt_begin();
         let g_val=gen_expr(LGnWord(nodes.ptr[s].a))
         let step_fn=e_load(VI g_val.v 0 ptr_size)
+        if el_sh {
+            new_cell(el_l);
+            if lay.live_offs.has(el_l) {e_store(env_v lay.live_offs[el_l] e_iconst(1) 1);}
+        }
         let out_addr=local_place(el_l true).v
         let has=e_calli(step_fn [g_val.v out_addr] VI false)
         stmt_end();
         iff(e_bin('eq' VI has e_iconst(0)));
+        if el_sh {gen_emit_drop_local(el_l lay);}
         e_store(env_v lay.state_off e_iconst(after_s) 8);
         br_to(dispatch_lvl);
         endc();
@@ -1038,7 +1154,9 @@ gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_
         if idx_l >? 0 {
             let next_i=e_bin('add' VI e_load(VI env_v fs.idx_off 8) e_iconst(1))
             e_store(env_v fs.idx_off next_i 8);
+            if is_shared(idx_l) {new_cell(idx_l);}
             write_place(local_place(idx_l true) T_INT next_i);
+            if lay.live_offs.has(idx_l) {e_store(env_v lay.live_offs[idx_l] e_iconst(1) 1);}
         }
         e_store(env_v lay.state_off e_iconst(body_s) 8);
         br_to(dispatch_lvl);
@@ -1070,6 +1188,42 @@ gen_emit_for_step=(s:LGnWord lay:GenLayout check_s:int64 dispatch_lvl:int64):>vo
     br_to(dispatch_lvl);
 }
 
+gen_alloc_step_locals=(f:LGnWord lay:GenLayout):>void=>$unsafe {
+    # Allocate step-local IR storage for non-SM locals (e.g. comprehension / non-yielding loop vars).
+    loop l in fns.ptr[f].locals {
+        if lay.frame_locals.has(l) {continue}
+        let fl=LGnWord(locals.ptr[l].flags)
+        if fl & LF_ALIAS not=? 0 {continue}
+        locals[l].offset=-1
+        if fl & LF_BYREF not=? 0 {
+            locals[l].vreg=LGnI32(vreg(VI))
+            continue
+        }
+        let lt=store_type(l)
+        if vc(lt) =? VC_AGG or (fl & LF_ADDR not=? 0) or ownership_type(lt) {
+            let sl=new_slot(max(tsize(lt) 1) max(talign(lt) 1))
+            locals[l].offset=LGnI32(sl)
+            locals[l].vreg=-1
+            if is_managed(lt) {e_zero(e_slot(sl) tsize(lt));}
+        } else if vc(lt) not=? VC_VOID {
+            let vr=vreg(vt_of(lt))
+            locals[l].vreg=LGnI32(vr)
+            locals[l].offset=-1
+            if is_managed(lt) {e_mov(vr e_iconst(0));}
+        }
+    }
+}
+
+gen_splice_entry=(entry_start:int64):>void=>$unsafe {
+    if lower_entry.length >? 0 {
+        loop i in [0..lower_zeros.length) {
+            if lower_zeros.ptr[i].mark >> 32 >=? entry_start {lower_zeros.ptr[i].mark += lower_entry.length << 32;}
+        }
+        ir.code=[ir.code[..entry_start)... lower_entry... ir.code[entry_start..]...]
+        lower_entry=[]
+    }
+}
+
 # Lower the generator's step function: `(frame: *u8, out: *T) -> i64` (1 = yielded, 0 = done).
 helper_gen_step=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
     let ps=helper_params(2)
@@ -1081,6 +1235,10 @@ helper_gen_step=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
     cur_fn=f
     env_v=frame
     if copies_on {copies_prepare(f);}
+
+    gen_alloc_step_locals(f lay)
+    lower_entry=[]
+    let entry_start=ir.code.length
 
     # Build the flat state graph from fns[f].body.
     let b=GenBuilder[lay=lay]
@@ -1216,6 +1374,7 @@ helper_gen_step=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
             iff(has);
             let inner_v=opt_value(ov.v inner_t)
             let owned_v=own(V(inner_v false) inner_t)
+            if is_shared(bl) {new_cell(bl);}
             write_place(local_place(bl true) inner_t owned_v.v);
             if lay.live_offs.has(bl) {e_store(frame lay.live_offs[bl] e_iconst(1) 1);}
             e_store(frame lay.state_off e_iconst(st.next_s) 8);
@@ -1268,6 +1427,7 @@ helper_gen_step=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
     endc();
     gen_emit_full_cleanup(lay)
     e_ret(e_iconst(0));
+    gen_splice_entry(entry_start)
 }
 
 # Lower the generator's drop function: `(frame: *u8) -> void`.
@@ -1277,6 +1437,9 @@ helper_gen_drop=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
     let lay=gen_frame_layout(f)
     cur_fn=f
     env_v=frame
+    if lay.defer_nodes.length >? 0 {gen_alloc_step_locals(f lay)}
+    lower_entry=[]
+    let entry_start=ir.code.length
 
     # If generator was not finished yet, unwind active defers, children, snapshots, and live locals.
     iff(e_bin('ges' VI e_load(VI frame lay.state_off 8) e_iconst(0)));
@@ -1309,6 +1472,7 @@ helper_gen_drop=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
     }
     e_call1(rt("__free") frame -1);
     e_ret(-1);
+    gen_splice_entry(entry_start)
 }
 
 # Lower `loop x in g` and `loop i in 0.. and x in g` (`for_` with `aux == 5`).
@@ -1519,6 +1683,11 @@ gen_fuse_run_producer_ex=(sidx:int64 el_l:LGnWord idx_l:LGnWord consumer_body:LG
         if fl & LF_ALIAS not=? 0 {continue}
         locals[l].flags=LGnI32(fl & ~LF_CAPTURE)
         locals[l].env_off=0
+        if fl & LF_BYREF not=? 0 {
+            locals[l].vreg=LGnI32(vreg(VI))
+            locals[l].offset=-1
+            continue
+        }
         let lt=store_type(l)
         if vc(lt) =? VC_AGG or (fl & LF_ADDR not=? 0) {
             let sl=new_slot(max(tsize(lt) 1) max(talign(lt) 1))

@@ -3,7 +3,7 @@ $runtime_checks
 from p"ast.jo" import nkids2
 from p"ast.jo" import (NF_GENERIC NF_GLOBAL has_flag kid kid2 lists nkids nodes)
 from p"callback_specialize.jo" import (callback_calls callback_counts callback_targets callback_versions)
-from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED fns locals)
+from p"check.jo" import (FK_GENERATOR FK_LAMBDA LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED fns locals)
 from p"expr.jo" import (CV)
 from p"ir.jo" import (ir)
 from p"lower.jo" import (HK LFunc LK_INST lfuncs)
@@ -112,7 +112,7 @@ callback_bindings=(root:CallbackWord @known:dict<int64 int64> @calls:array<int64
 }
 callback_request=(f:CallbackWord targets:array<int64> depth:CallbackWord):>CallbackWord=>$unsafe {
     if depth >=? 4 or callback_versions.length >=? 128 {return -1}
-    if fns.ptr[f].cabi or fns.ptr[f].has_env or fns.ptr[f].noinline or (fns.ptr[f].export_name as array<uint8>).length >? 0 or fns.ptr[f].body =? 0 {return -1}
+    if fns.ptr[f].kind =? FK_GENERATOR or fns.ptr[f].cabi or fns.ptr[f].has_env or fns.ptr[f].noinline or (fns.ptr[f].export_name as array<uint8>).length >? 0 or fns.ptr[f].body =? 0 {return -1}
     if callback_size(CallbackWord(fns.ptr[f].body) 180) <? 0 {return -1}
     let key="{f}:{targets}"
     let version=callback_versions.get(key)
@@ -172,6 +172,7 @@ callback_prepare=():>void=>$unsafe {
     let known=dict<int64 int64>()
     let calls:array<int64>=[]
     loop f in [1..fns.length) {
+        if fns.ptr[f].kind =? FK_GENERATOR {continue}
         let d=CallbackWord(fns.ptr[f].decl)
         if d =? 0 {continue}
         let fi=pos_file(nodes.ptr[d].pos)

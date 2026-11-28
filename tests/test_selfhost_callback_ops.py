@@ -12,6 +12,7 @@ use 'ir_types.dewy'
 const NF_GENERIC = 1
 const NF_GLOBAL = 2
 const FK_LAMBDA = 1
+const FK_GENERATOR = 5
 const LF_ASSIGNED = 1
 const LF_ADDR = 2
 const LF_EXPOSED = 4

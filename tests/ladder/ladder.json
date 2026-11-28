@@ -787,7 +787,7 @@
     "workers=2",
     "age=3"
    ],
-   "note": "Job scheduler over stdin jobs: lines parsed by a generator that yields malformed ones as values, refined priorities and times, repeated and unknown dependencies reported, a `lazy` simulation yielding a `Started | Finished | Stuck` union that the report consumes as it runs, a Heap of running jobs keyed by finish time and worker, ready jobs chosen by aged urgency with arrival and name ties, a `set<string>` of finished jobs, a dependency cycle left stuck, utilization as an exact percentage and waits by priority. Held: the generator's ready-job filter is a callback capturing the generator's own `done` set, which lowering cannot yet yield past (`unsupported yield_ outside fused generator`; a smaller form is an internal error, `assignment to a constant vreg`)."
+   "note": "Job scheduler over stdin jobs: lines parsed by a generator that yields malformed ones as values, refined priorities and times, repeated and unknown dependencies reported, a `lazy` simulation yielding a `Started | Finished | Stuck` union that the report consumes as it runs, a Heap of running jobs keyed by finish time and worker, ready jobs chosen by aged urgency with arrival and name ties, a `set<string>` of finished jobs, a dependency cycle left stuck, utilization as an exact percentage and waits by priority."
   }
  },
  "design_passing": [
@@ -861,6 +861,7 @@
   "154_rate_limiter",
   "155_image_kernels",
   "156_event_bank",
+  "157_job_scheduler",
   "15_expression_parser",
   "16_json_roundtrip",
   "17_fixed_ring",

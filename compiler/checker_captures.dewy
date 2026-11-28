@@ -67,7 +67,7 @@ capture_in=(c:CaptureWord l:CaptureWord):>CaptureWord=>{
         locals[outer].flags |= int32<overflow='wrap'>(LF_ADDR | LF_CAPTURED)
     } else {
         let r=outer
-        loop CaptureWord(locals[r].flags) & LF_CAPTURE not=? 0 and CaptureWord(locals[r].flags) & LF_VALUECAP =? 0 {r=CaptureWord(locals[r].outer)}
+        loop CaptureWord(locals[r].flags) & LF_CAPTURE not=? 0 and CaptureWord(locals[r].flags) & LF_VALUECAP =? 0 and locals[r].outer >? 0 {r=CaptureWord(locals[r].outer)}
         let d=CaptureWord(fns[inst].decl)
         if d not=? 0 and files[pos_file(nodes[d].pos)].is_dewy {
             task_copy_shared(r nodes[d].pos)

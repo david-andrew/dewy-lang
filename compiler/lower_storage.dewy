@@ -761,7 +761,7 @@ field_place=(f:LSWord addr:LSWord write:bool slot:bool):>Place=>$unsafe {
 }
 share_root=(l:LSWord):>int64=>$unsafe {
     let r=l
-    loop LSWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and LSWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 {r=LSWord(locals.ptr[r].outer)}
+    loop LSWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and LSWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 and locals.ptr[r].outer >? 0 {r=LSWord(locals.ptr[r].outer)}
     return r
 }
 is_shared=(l:LSWord):>bool=>$unsafe {

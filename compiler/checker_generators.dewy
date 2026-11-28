@@ -1,6 +1,6 @@
 $runtime_checks
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (NF_ALIASDECL NF_CHECKED NF_COMPREHENSION NF_DISCARD NF_GLOBAL NF_LITERAL NF_LOOP_SETUP NF_MUT NF_SOA NF_SPREAD NF_SQUOTE NF_STMT NF_UNSCOPED TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
+from p"ast.jo" import (NF_ALIASDECL NF_CHECKED NF_COMPREHENSION NF_DISCARD NF_GLOBAL NF_LITERAL NF_LOOP_SETUP NF_MUT NF_SOA NF_SPREAD NF_SQUOTE NF_STMT NF_UNSCOPED TUPLE_VALUES add_flag clear_flag has_flag kid kid2 kids mk nkids nkids2 nodes set_kid set_list)
 from p"check.jo" import (FK_GENERATOR FK_NORMAL LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_DECL LF_MUTPARAM LF_PARAM LF_QUIET LF_SHARED LF_VALUECAP SINK_GENERATOR check_scopes ctxs cx fns globals locals loop_serial_next loop_serials sink_body_mode sink_fn sinks throwing_iters)
 from p"checker_block_entries.dewy" import (check_block)
 from p"checker_contexts.dewy" import (cur_mod)
@@ -28,7 +28,7 @@ from p"sibling_types.jo" import (sibling_block sibling_index)
 from p"types.jo" import (T_BOOL T_INT T_NEVER T_NONE T_VOID fields has_var is_union prune structs targ telem tkind type_eq types union_members variants)
 from p"type_ops.dewy" import (dt is_managed is_values mk_generator mk_union mk_var unify zonk)
 from p"util.jo" import (intern name_of)
-from p"node_store.dewy" import (node_aux2 node_sval node_with_aux2 node_with_sval)
+from p"node_store.dewy" import (node_aux2 node_d node_sval node_with_aux2 node_with_sval)
 
 GenWord:type=int64<overflow='wrap'>
 GenI32:type=int32<overflow='wrap'>
@@ -1215,7 +1215,7 @@ gen_local_is_shared=(l:GenWord):>bool=>$unsafe {
     let fl=GenWord(locals.ptr[l].flags)
     if fl & LF_CAPTURE =? 0 or fl & LF_VALUECAP not=? 0 {return fl & LF_SHARED not=? 0}
     let r=l
-    loop GenWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and GenWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 {
+    loop GenWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and GenWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 and locals.ptr[r].outer >? 0 {
         r=GenWord(locals.ptr[r].outer)
     }
     GenWord(locals.ptr[r].flags) & LF_SHARED not=? 0
@@ -1307,9 +1307,15 @@ gen_fuse_walk_eligible=(n:GenWord @ncount:int64 @ycount:int64):>bool=>$unsafe {
     }
     if nodes.ptr[n].a not=? 0 and not gen_fuse_walk_eligible(GenWord(nodes.ptr[n].a) @ncount @ycount) {return false}
     if nodes.ptr[n].b not=? 0 and not gen_fuse_walk_eligible(GenWord(nodes.ptr[n].b) @ncount @ycount) {return false}
-    if nodes.ptr[n].c not=? 0 and k not=? 'for_' and not gen_fuse_walk_eligible(GenWord(nodes.ptr[n].c) @ncount @ycount) {return false}
+    if k not=? 'for_' {
+        if nodes.ptr[n].c not=? 0 and not gen_fuse_walk_eligible(GenWord(nodes.ptr[n].c) @ncount @ycount) {return false}
+        if k not=? 'partial' and node_d(nodes.ptr[n].op_ext) not=? 0 and not gen_fuse_walk_eligible(GenWord(node_d(nodes.ptr[n].op_ext)) @ncount @ycount) {return false}
+    }
     loop i in [0..nkids(n)) {
         if not gen_fuse_walk_eligible(kid(n i) @ncount @ycount) {return false}
+    }
+    loop i in [0..nkids2(n)) {
+        if not gen_fuse_walk_eligible(kid2(n i) @ncount @ycount) {return false}
     }
     true
 }
