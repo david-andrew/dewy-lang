@@ -1,0 +1,12 @@
+# A parallel range's positions are known inside call arguments too.
+f = (i:int64):>int64 => i
+g = (i:int32):>int32 => i
+main = ():>void => {
+    let n = 50
+    let zs = [parallel i in [0..2000) f(1000 - i)]
+    let ys = [parallel i in [3..n) f(i - 1)]
+    let ws = [parallel i in [0..n] g(int32(n - i))]
+    let vs = [parallel i in [10,8..0] g(int32(i))]
+    parallel i in [-5..5) { let q = f(i * 3); }
+    printl"{zs[1999]} {ys.length} {ws.length} {vs}"
+}

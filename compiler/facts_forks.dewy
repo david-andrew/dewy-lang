@@ -24,7 +24,7 @@ from p"facts_ranges.dewy" import (fact_refinement_covers)
 from p"facts_routes.dewy" import (fact_route fact_route_bounds fact_route_values)
 from p"facts_elements.dewy" import (fact_inventory)
 from p"facts_joins.dewy" import (fact_hull)
-from p"facts_library.dewy" import (fact_element_hull)
+from p"facts_library.dewy" import (fact_element_hull fact_library_call)
 from p"facts_probes.dewy" import (fact_probe_route)
 from p"facts_text.dewy" import (fact_string_call)
 from p"isolation_ops.dewy" import (isolation_children)
@@ -156,7 +156,47 @@ fact_parallel_array=(n:ForkWord):>bool=>$unsafe {
     let d=ForkWord(fns.ptr[ForkWord(nodes.ptr[n].sym)].decl)
     if d =? 0 {return false}
     if fact_name_parallel_arrays.length =? 0 {fact_name_parallel_arrays=[intern("__dewy_parallel_collect") intern("__dewy_parallel_each") intern("parallel_map")]}
-    ForkWord(nodes.ptr[d].name) in? fact_name_parallel_arrays and pos_in_lib(nodes.ptr[d].pos) and tkind(fact_type(ntype(kid(n 0)))) =? 'array'
+    if not (ForkWord(nodes.ptr[d].name) in? fact_name_parallel_arrays and pos_in_lib(nodes.ptr[d].pos)) {return false}
+    if tkind(fact_type(ntype(kid(n 0)))) =? 'array' {return true}
+    # (`[parallel i in [a..b) e]`: a range's positions, not parallel_map's)
+    ForkWord(nodes.ptr[d].name) not=? fact_name_parallel_arrays[2] and fact_parallel_range_source(kid(n 0))
+}
+fact_parallel_range_source=(r:ForkWord):>bool=>$unsafe {
+    nodes.ptr[r].kind =? 'call' and nkids(r) =? 5 and fact_library_call(r "__dewy_range")
+}
+# An endpoint read again for the range's positions: a literal or a name (reading it twice
+# gives what the range read), else 0.
+fact_parallel_endpoint=(e0:ForkWord):>ForkWord=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'conv' {e=ForkWord(nodes.ptr[e].a)}
+    if nodes.ptr[e].kind =? 'int_lit' or nodes.ptr[e].kind =? 'ident' {return e}
+    0
+}
+fact_parallel_endpoint_bound=(e:ForkWord @s:FactState):>FactBound=>$unsafe {
+    if nodes.ptr[e].kind =? 'int_lit' {return FactBound(nodes.ptr[e].ival nodes.ptr[e].ival)}
+    fact_bound(s fact_capture(e @s))
+}
+# The positions `__dewy_range(first second last stepped inclusive)` visits: from first up to
+# last (before it unless inclusive), or, stepped, between the two. O(1).
+fact_parallel_range_bound=(r:ForkWord @s:FactState t:ForkWord):>FactBound=>$unsafe {
+    let domain=fact_domain(t)
+    let first=fact_parallel_endpoint(kid(r 0))
+    let last=fact_parallel_endpoint(kid(r 2))
+    if first =? 0 or last =? 0 {return domain}
+    let a=fact_parallel_endpoint_bound(first @s)
+    let b=fact_parallel_endpoint_bound(last @s)
+    if a.wide or b.wide {return domain}
+    let stepped=kid(r 3)
+    let inclusive=kid(r 4)
+    let plain=nodes.ptr[stepped].kind =? 'bool_lit' and nodes.ptr[stepped].ival =? 0
+    let closed=nodes.ptr[inclusive].kind not=? 'bool_lit' or nodes.ptr[inclusive].ival not=? 0
+    let lo=if plain {a.lo} else {min(a.lo b.lo)}
+    let hi=if plain {b.hi} else {max(a.hi b.hi)}
+    if plain and not closed {
+        if hi =? int64.min {return domain}
+        hi=hi - 1
+    }
+    FactBound(max(lo domain.lo) min(hi domain.hi))
 }
 fact_parallel_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
     if fact_speculating not=? 0 or fact_summary_owner not=? 0 or not fact_parallel_array(n) {return}
@@ -165,12 +205,15 @@ fact_parallel_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
     let t=fact_type(ForkWord(locals.ptr[fns.ptr[f].params[0]].type))
     if not fact_scalar(t) or t =? T_U64 {return}
     let bound=fact_domain(t)
-    let pi=fact_projection_find(s base FACT_ELEMENT_VALUE false)
-    if pi >=? 0 {bound=fact_bound(s s.projections[pi].value)}
-    let parts=fact_inventory(s base)
-    if parts.length >? 0 {
-        bound=fact_bound(s parts[0])
-        loop i in [1..parts.length) {bound=fact_hull(bound fact_bound(s parts[i]) n)}
+    if tkind(fact_type(ntype(kid(n 0)))) not=? 'array' {bound=fact_parallel_range_bound(kid(n 0) @s t)}
+    else {
+        let pi=fact_projection_find(s base FACT_ELEMENT_VALUE false)
+        if pi >=? 0 {bound=fact_bound(s s.projections[pi].value)}
+        let parts=fact_inventory(s base)
+        if parts.length >? 0 {
+            bound=fact_bound(s parts[0])
+            loop i in [1..parts.length) {bound=fact_hull(bound fact_bound(s parts[i]) n)}
+        }
     }
     let previous=fact_parallel_bounds.get(f)
     if previous not=? none {bound=fact_hull(previous bound n)}

@@ -1,0 +1,7 @@
+# Positions up to a long range's end do not fit an int32 argument.
+g = (i:int32):>int32 => i
+main = ():>void => {
+    let n = 5000000000
+    let ws = [parallel i in [0..n) g(int32(i))]
+    printl(ws.length)
+}
