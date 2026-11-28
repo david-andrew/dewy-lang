@@ -9,7 +9,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 | Measure | Now (2026-11-07) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 147/147 (+1 held on D40) | all |
+| Acceptance ladder, design surface | 150/150 (+1 held on D40) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,073 sites in 929 of 2,252 programs (11-21, `tools/compiler/census.py`), down from 3,600 on 10-26 | ordinary code proves without opt-ins |
 | Compile throughput, single thread, default build, every processed line | flagships 371.6k lines/s total, every flagship ≥ 300k (11-27, moonshot slices) | 200–250k on every flagship |
