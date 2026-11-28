@@ -7,7 +7,7 @@ from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (type_node_of)
 
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (NF_CHECKED NF_STMT add_flag kid kids mk nkids nkids2 nodes)
+from p"ast.jo" import (NF_CHECKED NF_SPREAD NF_STMT add_flag kid kids mk nkids nkids2 nodes)
 from p"check.jo" import (FK_INIT FK_LAMBDA check_scopes ctxs cx fns modules or_throw_returns universe)
 from p"checker_body_end.dewy" import (union_has_void void_arm_end)
 from p"checks_thin.dewy" import (new_inst resolve_type set_block_value)
@@ -455,7 +455,10 @@ forward_member=(n:ErrWord receiver:ErrWord t:ErrWord expected:ErrWord):>ErrWord=
         j -= 1
     }
     let lowered=bc_block([bc_let(name receiver pos) bc_stmt(chain pos)] pos)
+    # (a spread, `[d.keys...]` of a `dict | Canceled`, stays one)
+    let spread=nodes.ptr[n].flags & int32(NF_SPREAD)
     nodes.ptr[n]=nodes.ptr[lowered]
+    nodes.ptr[n].flags=nodes.ptr[n].flags | spread
     let result=check_expr(n 0)
     let direct=true
     loop selection in selections {

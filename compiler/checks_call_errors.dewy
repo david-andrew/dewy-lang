@@ -8,7 +8,7 @@ from p"@lib/core/rt.jo" import (__str_slice)
 from p"expr.jo" import (IN)
 from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/str.jo" import (replace starts_with)
-from p"ast.jo" import (NF_CHECKED add_flag kid kid2 kids mk nkids nkids2 nodes set_list)
+from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag has_flag kid kid2 kids mk nkids nkids2 nodes set_list)
 from p"check.jo" import (fns syms)
 from p"checker_startup.dewy" import (load_game_for_name load_std_for_name)
 from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
@@ -312,6 +312,7 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
         if (failure.last_err as array<uint8>).length =? 0 {failure.last_err="arguments do not match"}
         let ep=nodes.ptr[n].pos
         if failure.last_err_pos >? 0 {ep=failure.last_err_pos}
+        if name_of(name) =? "__dewy_make_set" and args.length =? 1 {set_spread_failure(unnamed(args[0]))}
         fatal(ep call_error_text(decls[0] failure.last_err))
     }
     let ts=""
@@ -340,6 +341,18 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
 }
 # (how an error names the call it is in: a call the compiler made for a form the program
 # wrote is named by that form)
+# (`set[r...]` with r an `Oops | array<int64>`: the spread is what does not fit)
+set_spread_failure=(literal:CallErrorWord):>void=>$unsafe {
+    if nodes.ptr[literal].kind not=? 'array' {return}
+    loop element in kids(literal) {
+        if not has_flag(element NF_SPREAD) or nodes.ptr[element].type =? 0 or not is_union(prune(ntype(element))) {continue}
+        let failures=""
+        loop m in value_members(prune(ntype(element))) {
+            if exception_member(m) {failures=if failures =? "" {dt(m)} else {"{failures} | {dt(m)}"}}
+        }
+        if failures not=? "" {fatal(nodes.ptr[element].pos "this spread may be {failures}, carried along from where the value was made: handle that there, with `if x is? exception ...`, `or_throw` or `?? fallback`")}
+    }
+}
 call_error_text=(d:CallErrorWord err:string):>string=>$unsafe {
     let nm=name_of(CallErrorWord(nodes.ptr[d].name))
     if nm =? "__dewy_make_set" {return "in this `set[...]`: {replace(replace(err "argument 'values' has" "its elements have") "argument 'values'" "its elements")}"}

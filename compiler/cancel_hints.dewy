@@ -102,7 +102,14 @@ cancel_reject=(n:CancelWord coalesce:bool what0:string):>never=>$unsafe {
     }
     # (an array a collector takes whole: a spread forwards per element; a `parallel` body
     # cannot forward yet)
-    if what =? "this collector" and ends_with(text "...") {
+    # (a spread whose whole value may be Canceled: forwarded before it is spread)
+    if what =? "a spread's value" {
+        let source=if ends_with(text "...") {__str_slice(text 0 (text as array<uint8>).length - 3)} else {text}
+        shown="`{source}`"
+        fix="`({source} or_throw<Canceled>)...`"
+        what="this spread"
+    }
+    else if what =? "this collector" and ends_with(text "...") {
         let source=__str_slice(text 0 (text as array<uint8>).length - 3)
         shown="`{source}`"
         fix="`[loop v in {source} v or_throw<Canceled>]...`"

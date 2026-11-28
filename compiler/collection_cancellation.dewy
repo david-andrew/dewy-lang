@@ -23,19 +23,23 @@ collection_check=(n:CollectWord expected:CollectWord):>CollectWord=>$unsafe {
     collection_contributions.remove(n);
     clear_flag(n NF_CABI)
     let t=check_expr(n expected)
-    if pack {collection_array(n t)} else {collection_value(n t)}
+    if not pack {return collection_value(n t)}
+    # (a spread that may itself be Canceled, `[d.keys...]` of a `dict | Canceled`:
+    # forwarded as a direct contribution is, then its elements are spread)
+    if is_union(prune(t)) {t=collection_value(n t "a spread's value")}
+    collection_array(n t)
 }
 
 # A collector's direct contribution forwards cancellation, never storing it as
 # an element. Indexed type membership is demand-only; O(type members + rewrite).
-collection_value=(n:CollectWord t:CollectWord):>CollectWord=>$unsafe {
+collection_value=(n:CollectWord t:CollectWord what:string="this collector"):>CollectWord=>$unsafe {
     if not dewy_at(nodes.ptr[n].pos) {return t}
     if not is_union(t) and tkind(t) not=? 'opt' and tkind(t) not=? 'struct_' {return t}
     let canceled=CollectWord(syms.ptr[universe[intern("Canceled")]].ref)
     let members=value_members(t)
     if not members.contains(int64(canceled)) {return t}
     let pos=nodes.ptr[n].pos
-    if dir_explicit_cancellation(pos) {cancel_reject(n false "this collector")}
+    if dir_explicit_cancellation(pos) {cancel_reject(n false what)}
     let inner=nodes.length
     nodes.push(nodes[n])
     add_flag(inner NF_CHECKED)

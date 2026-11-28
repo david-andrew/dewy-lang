@@ -314,10 +314,13 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
                         if ctx_dependent(element) or is_lit(element) {continue}
                         let inferred:CVWord=prune(ntype(element))
                         if has_flag(element NF_SPREAD) {
+                            inferred=spread_source(inferred)
                             if is_dewy_set_type(inferred) {inferred=struct_targ(CVWord(types.ptr[inferred].st) 0)}
                             else if types.ptr[inferred].kind =? 'array' or types.ptr[inferred].kind =? 'fixed' {inferred=CVWord(types.ptr[inferred].elem)}
                             else {continue}
                         }
+                        # (a collector never holds Canceled: it forwards it, collection_cancellation.dewy)
+                        inferred=spread_source(inferred)
                         if match_type(et inferred @binds 1) <? 0 {return -1}
                         break
                     }
@@ -334,8 +337,13 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
                     if has_flag(element NF_SPREAD) and dewy_set_literal(element) {
                         r=arg_cost(kid(element 0) ep @binds)
                     }
-                    else if has_flag(element NF_SPREAD) and is_dewy_set_type(ntype(element)) {
-                        r=match_type(et struct_targ(CVWord(types.ptr[prune(ntype(element))].st) 0) @binds 0)
+                    else if has_flag(element NF_SPREAD) and is_dewy_set_type(spread_source(ntype(element))) {
+                        r=match_type(et struct_targ(CVWord(types.ptr[spread_source(ntype(element))].st) 0) @binds 0)
+                    }
+                    # (an element or spread that may be Canceled: its collector forwards that,
+                    # collection_cancellation.dewy)
+                    else if nodes.ptr[element].type not=? 0 and spread_source(ntype(element)) not=? prune(ntype(element)) {
+                        r=match_type(ep spread_source(ntype(element)) @binds 0)
                     }
                     else if types.ptr[prune(ep)].kind =? 'param' and binds.ptr[CVWord(types.ptr[prune(ep)].id)] =? 0 and not ctx_dependent(element) {
                         if is_lit(element) {r=if lit_default(element) =? T_MATH_INT {2} else {1}}
@@ -578,4 +586,21 @@ arg_finish_rest=(a:CVWord pt:CVWord is_mut:bool):>void=>$unsafe {
     refine_arg_target=prune(pt)
     coerce(a pt);
     refine_arg_target=saved
+}
+# What a spread element of type t gives its collector: t, or the one other member of a
+# `T | Canceled`, whose Canceled the collector forwards. O(union members).
+spread_source=(t0:CVWord):>CVWord=>$unsafe {
+    let t=prune(t0)
+    if not is_union(t) {return t}
+    let rest:CVWord=0
+    let seen=false
+    let si=CVWord(types.ptr[t].st)
+    loop i in [0..CVWord(structs.ptr[si].ntargs)) {
+        let m=struct_targ(si i)
+        # (the library's cancellation, a struct of its own name)
+        if types.ptr[prune(m)].kind =? 'struct_' and structs.ptr[CVWord(types.ptr[prune(m)].st)].name =? "Canceled" {seen=true}
+        else if rest =? 0 {rest=prune(m)}
+        else {return t}
+    }
+    if seen and rest not=? 0 {rest} else {t}
 }
