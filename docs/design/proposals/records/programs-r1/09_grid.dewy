@@ -10,10 +10,15 @@ at = (g:[w:Dim h:Dim cells:array<bool>] x:int64 y:int64):>bool => {
 
 step = (g:[w:Dim h:Dim cells:array<bool>]) => {
     let next = grid(g.w g.h)                                     # g.w is a Dim here under every option (a parameter)
-    loop y in [0..g.h) and x in [0..g.w) {
-        let n = [loop dy in [-1..1] and dx in [-1..1] if (dx not=? 0 or dy not=? 0) and at(g x + dx y + dy) 1].length
-        let i = y * g.w + x
-        if i <? next.cells.length next.cells[i] = n =? 3 or n =? 2 and at(g x y)   # the same length relation
+    loop y in [0..g.h) {
+        loop x in [0..g.w) {
+            let n = 0
+            loop dy in [-1..1] {
+                loop dx in [-1..1] { if (dx not=? 0 or dy not=? 0) and at(g x + dx y + dy) n += 1 }
+            }
+            let i = y * g.w + x
+            if i <? next.cells.length next.cells[i] = n =? 3 or n =? 2 and at(g x y)
+        }
     }
     next                                                         # (b): returns [w:int64 h:int64 cells:array<bool>]
 }
