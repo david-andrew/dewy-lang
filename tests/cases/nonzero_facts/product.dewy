@@ -1,0 +1,6 @@
+# So does a product of nonzero factors, however large.
+inverse = (a:int b:int):>rational => {
+    if a =? 0 or b =? 0 return 0
+    rational(1) / (a * b)
+}
+main = ():>void => printl(inverse(2 3))

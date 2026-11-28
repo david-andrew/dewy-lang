@@ -1,0 +1,7 @@
+# Values a guard keeps apart have a nonzero difference.
+Level:type = int64<v => 0 <=? v and v <=? 255>
+share = (v:Level lo:Level hi:Level):>int64 => {
+    if hi =? lo return 0
+    v * 10 // (hi - lo)
+}
+main = ():>void => printl(share(30 10 40))

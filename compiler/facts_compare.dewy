@@ -737,6 +737,16 @@ fact_compare=(s:FactState op0:Tok a0:CompareWord b0:CompareWord):>int64=>$unsafe
     else if op =? 'ne' {op='eq'; invert=true}
     let x=fact_bound(s a)
     let y=fact_bound(s b)
+    # (`a - b` or `a * b` against zero: a difference is zero only where its operands are
+    # equal, a product only where a factor is. On demand, O(the operands' comparisons))
+    if op =? 'eq' and a not=? 0 and not x.nz and not y.wide and y.lo =? 0 and y.hi =? 0 and (x.wide or x.lo <=? 0 and x.hi >=? 0) {
+        let t=fact_terms.ptr[a]
+        if t.op =? 'minus' and t.a not=? 0 and t.b not=? 0 {
+            let r=fact_compare(s 'eq' t.a t.b)
+            if r >=? 0 {return if invert {1 - r} else {r}}
+        }
+        else if t.op =? 'star' and t.a not=? 0 and t.b not=? 0 and fact_compare(s 'eq' t.a b) =? 0 and fact_compare(s 'eq' t.b b) =? 0 {return int64(invert)}
+    }
     if x.wide or y.wide {
         if (op =? 'lt' or op =? 'le') and fact_guard_compare(s a b (if op =? 'lt' {-1} else {0})) {return 1}
         # (a wide value marked nonzero still differs from a zero)

@@ -1,0 +1,6 @@
+# Without the guard the difference can be zero.
+share = (v:int64 lo:int64 hi:int64):>int64 => {
+    if lo <? 0 or lo >? 255 or hi <? 0 or hi >? 255 or v <? 0 or v >? 255 return 0
+    v // (hi - lo)
+}
+main = ():>void => printl(share(30 10 40))

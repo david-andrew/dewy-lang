@@ -11,7 +11,7 @@ from p"exact_fact_transfer.dewy" import (exact_unsigned_fact)
 from p"expr.jo" import (CV)
 from p"facts.jo" import (FactDifference FactState fact_shared_literals fact_sum_operand fact_terms)
 from p"facts_values.dewy" import (fact_domain fact_literal fact_type fact_unmodeled fact_project)
-from p"facts_compare.dewy" import (fact_open_endpoint fact_shortest fact_sum_rows fact_add_fits)
+from p"facts_compare.dewy" import (fact_compare fact_open_endpoint fact_shortest fact_sum_rows fact_add_fits)
 from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_index_writes.dewy" import (fact_constant fact_new fact_set_bound)
 from p"facts_value_queries.dewy" import (fact_bound fact_slot)
@@ -191,7 +191,16 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
         let least:ArithWord=if x.lo =? FACT_MIN {FACT_MIN} else {x.lo - 1}
         return fact_new(@s FactBound(least FACT_MAX x.lo >? 1 wide=true) FactTerm(op a b n ntype(n)))
     }
-    if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
+    if x.wide or y.wide {
+        let unknown=fact_unmodeled(@s n 'unsupported')
+        # (exact `int` factors that are both nonzero, however large: so is their product)
+        if op =? 'star' and unknown not=? 0 and fact_type(ntype(n)) =? T_MATH_INT and (x.nz or not x.wide and (x.lo >? 0 or x.hi <? 0)) and (y.nz or not y.wide and (y.lo >? 0 or y.hi <? 0)) {
+            let held=fact_bound(s unknown)
+            held.nz=true
+            fact_set_bound(@s unknown held)
+        }
+        return unknown
+    }
     if op not=? 'star' {
         # An interval beyond the host word may still be bounded through rows (a
         # lockstep counter stepping after its partner's guard).
@@ -340,6 +349,15 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
     if (lo_open or hi_open) and exact_has_node(n) {term_type=T_MATH_INT}
     if not lo_open and not hi_open {term_type=fact_word_type(s n a b lo hi)}
     let value=fact_new(@s fact_open_bound(lo hi lo_open and lo =? FACT_MIN hi_open and hi =? FACT_MAX) FactTerm(op a b n term_type))
+    # (a difference of values a guard keeps apart is nonzero, `if hi =? lo return` before
+    # `hi - lo`, so a closure capturing it knows. O(1) unless both have comparisons)
+    if op =? 'minus' and value not=? 0 and a not=? 0 and b not=? 0 and (s.cmp_mask & (ArithWord(1) << (a & 63))) not=? 0 and (s.cmp_mask & (ArithWord(1) << (b & 63))) not=? 0 {
+        let held=fact_bound(s value)
+        if not held.nz and held.lo <=? 0 and held.hi >=? 0 and fact_compare(s 'ne' a b) =? 1 {
+            held.nz=true
+            fact_set_bound(@s value held)
+        }
+    }
     # (zero plus or minus a nonzero value is nonzero: `-s` of an `s:-1|1`. O(1))
     if value not=? 0 and (x.lo =? 0 and x.hi =? 0 and y.nz or y.lo =? 0 and y.hi =? 0 and x.nz) {
         let held=fact_bound(s value)
