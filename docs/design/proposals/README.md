@@ -39,5 +39,6 @@ These folders record, for each design decision, what was considered and why one 
 | [function-inspection/](function-inspection/) | Compile-time typed function descriptions with original execution as fallback | Rounds 1–3 and review; database-filter pilot only, broader consumers deferred. Shared-budget must-fix recorded; names have not been cold-read. Open (D43 Q2). |
 | [argparse/](argparse/) | Command-line arguments: text readers, subcommands, environment fallbacks, rules across arguments | Round 1: the landed library's provisional choices, 12 dogfood programs (`programs-r1/`), three cold reads. Open (D48). |
 | [friction/](friction/) | Newcomer friction from decided rules: `end` fields, one-assignment `=>` bodies, bare literal arms, callback widening, loop `??` | Round 1: two-question test per snag, 13 dogfood programs (`programs-r1/`), one cold read. Callback widening taken; loop `??` answered (2026-10-23). Open (D49). |
+| [records/](records/) | Record literals: an inferred field keeps its value's declared refinement | Refinements round 1: options A–C2, 13 dogfood programs (`programs-r1/`). Option A passes the two-question test and the design implies it; no open decision. |
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.

@@ -1,0 +1,26 @@
+# Conway's life on a torus; the grid's size is chosen once and its cells indexed everywhere.
+Dim:type = int64<n => 1 <=? n and n <=? 1024>
+
+grid = (w:Dim h:Dim) => [w = w h = h cells = fill(false w * h)]
+
+at = (g:[w:Dim h:Dim cells:array<bool>] x:int64 y:int64):>bool => {
+    let i = ((y % g.h + g.h) % g.h) * g.w + (x % g.w + g.w) % g.w   # (b): four `%` need w and h nonzero
+    if i <? g.cells.length g.cells[i] else false               # cells.length =? w * h is a relation no field type carries
+}
+
+step = (g:[w:Dim h:Dim cells:array<bool>]) => {
+    let next = grid(g.w g.h)                                     # g.w is a Dim here under every option (a parameter)
+    loop y in [0..g.h) and x in [0..g.w) {
+        let n = [loop dy in [-1..1] and dx in [-1..1] if (dx not=? 0 or dy not=? 0) and at(g x + dx y + dy) 1].length
+        let i = y * g.w + x
+        if i <? next.cells.length next.cells[i] = n =? 3 or n =? 2 and at(g x y)   # the same length relation
+    }
+    next                                                         # (b): returns [w:int64 h:int64 cells:array<bool>]
+}
+
+main = () => {
+    let g = grid(40 20)
+    loop i in [0..20) g.cells[i * 41 % g.cells.length] = true
+    loop generation in [1..50] g = step(g)                     # (b): step(g) needs g.w and g.h proven 1..1024: grid and
+    printl([loop c in g.cells if c 1].length)                   # step declare their results, or Grid:type is declared
+}

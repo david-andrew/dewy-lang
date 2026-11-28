@@ -1,0 +1,22 @@
+# A terminal progress bar whose style is set once from the terminal's width.
+Width:type = int64<n => 10 <=? n and n <=? 300>
+
+style = (columns:int64) => {
+    let width:Width = max(10 min(300 columns - 20))
+    [width = width done = "#" left = "."]
+}
+
+render = (s:[width:Width done:string left:string] done:int64<(>=? 0)> total:int64<(>? 0)>):>string => {
+    let filled = min(s.width done * s.width // total)
+    "[{s.done * filled}{s.left * (s.width - filled)}] {done * 100 // total}%"
+}
+
+main = () => {
+    let s = style(terminal_columns() ?? 80)
+    let total = 137
+    loop done in [0..total] {
+        print("\r{render(s done total)}")                       # (b): s.width is int64: the call needs 10..300
+        sleep(20ms) or_throw
+    }
+    printl()
+}

@@ -1,0 +1,33 @@
+# Server settings from the environment, with checked fallbacks, handed to the server.
+#   PORT=9000 WORKERS=16 ./serve
+Port:type = int64<n => 1 <=? n and n <=? 65535>
+Workers:type = int64<n => 1 <=? n and n <=? 64>
+Backlog:type = int64<n => 1 <=? n and n <=? 4096>
+
+# One place reads and checks everything; a bad value is reported, not ignored.
+settings = ():>[port:Port workers:Workers backlog:Backlog host:string] | ValidationError => {
+    # (a) and (c1) need no result annotation: the inferred record is the same type.
+    # (b) needs exactly this annotation, or every field comes back a plain int64.
+    let port = Port(env("PORT") ?? "8080") or_throw
+    let workers = Workers(env("WORKERS") ?? "4") or_throw
+    let backlog = Backlog(env("BACKLOG") ?? "128") or_throw
+    [port = port workers = workers backlog = backlog host = env("HOST") ?? "0.0.0.0"]
+}
+
+# (the network library) listen = (host:string port:Port backlog:Backlog):>Listener | NetError
+serve = (cfg:[port:Port workers:Workers backlog:Backlog host:string]) => {
+    let listener = listen(cfg.host cfg.port cfg.backlog) or_throw
+    let busy = fill(0 cfg.workers)
+    let next = 0
+    loop conn in listener.accept_all {
+        busy[next] += 1
+        next = (next + 1) % cfg.workers                      # Workers is never 0
+        # ... hand conn to worker `next`
+    }
+}
+
+main = () => {
+    let cfg = settings() ?? { printl("bad setting" file=stderr); exit(2) }
+    printl"listening on {cfg.host}:{cfg.port} with {cfg.workers} workers"
+    serve(cfg)
+}

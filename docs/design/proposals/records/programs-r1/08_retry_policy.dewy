@@ -1,0 +1,29 @@
+# A retry policy built once and used by every request. One field is computed, so it shows
+# what no option carries: arithmetic gives a fact, never a field type.
+Attempts:type = int64<n => 1 <=? n and n <=? 10>
+Millis:type = int64<n => 1 <=? n and n <=? 60000>
+
+policy = (attempts:Attempts base:Millis) => [
+    attempts = attempts                                      # Attempts under (a)
+    base = base                                              # Millis under (a)
+    cap = min(60000 base * 32)                               # int64 under every option (a fact inside policy)
+]
+
+with_retries = <T E>(p:[attempts:Attempts base:Millis cap:int64] @work:() => T | E):>T | E => {
+    let wait = p.base
+    loop try_no in [1..p.attempts] {
+        match work() {
+            e:E => if try_no =? p.attempts return e
+            ok => return ok
+        }
+        sleep(Duration(ms=wait + random_below(p.base)))       # (b): random_below needs p.base >? 0
+        wait = min(p.cap wait * 2)
+    }
+    work()
+}
+
+main = () => {
+    let p = policy(4 250)                                     # (b): fine here, then every use re-guards
+    let page = with_retries(p @() => http.get("https://example.org/status")) ?? "unreachable"
+    printl(page)
+}

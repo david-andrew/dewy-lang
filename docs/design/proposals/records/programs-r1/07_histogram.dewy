@@ -1,0 +1,34 @@
+# histogram: count numbers from standard input into equal-width buckets.
+#   seq 1 1000 | histogram buckets=20 lo=0 hi=1000
+import argparse
+
+Buckets:type = int64<n => 1 <=? n and n <=? 1000>
+Args:type = [
+    buckets = argparse.Named<Buckets>(default=10 short='b' help="how many buckets")
+    lo = argparse.Named<int64>(default=0 help="the smallest value counted")
+    hi = argparse.Named<int64>(default=100 help="the value the last bucket ends below")
+    width = argparse.Named<int64<n => 10 <=? n and n <=? 200>>(default=60 help="the widest bar")
+]
+
+span_check = (a:argparse.Parsed<Args>):>string | none => if a.hi <=? a.lo "hi= must be above lo=" else none
+
+bucket_of = (v:int64 a:argparse.Parsed<Args>):>int64 | none => {
+    if v <? a.lo or v >=? a.hi return none
+    (v - a.lo) * a.buckets // (a.hi - a.lo)                   # hi >? lo follows from the guard, under every option
+}
+
+bar = (n:int64 most:int64<(>? 0)> a:argparse.Parsed<Args>):>string =>
+    "#" * (n * a.width // most)                               # width's range keeps the bar sane; none needed here
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv check=@span_check about="count numbers into buckets")
+    let counts = fill(0 args.buckets)                         # (b): fill wants a nonnegative length
+    loop line in stdin.lines {
+        let b = bucket_of(int64(line) ?? continue args) ?? continue
+        if b <? counts.length counts[b] += 1
+    }
+    let most = max(1 counts.max ?? 1)
+    loop c in counts and i in 0.. {
+        printl"{fmt'>6'(args.lo + i * (args.hi - args.lo) // args.buckets)} {bar(c most args)}"   # (b): // needs buckets not=? 0
+    }
+}

@@ -1,0 +1,50 @@
+# ring_traffic: ladder 151 written as its author first wrote it, with the helpers taking the
+# parsed record. Every range below was checked by argparse.
+#   ring_traffic cells=80 cars=20 limit=5 --quiet
+import argparse
+
+Count:type = int64<n => 1 <=? n and n <=? 400>
+Speed:type = int64<s => 0 <=? s and s <=? 9>
+
+Args:type = [
+    cells = argparse.Named<Count>(default=60 help="cells on the ring")
+    cars = argparse.Named<Count>(default=18 help="cars on the road")
+    steps = argparse.Named<Count>(default=30 help="steps to run")
+    limit = argparse.Named<int64<n => 1 <=? n and n <=? 9>>(default=5 help="the speed limit")
+    dawdle = argparse.Named<int64<n => 0 <=? n and n <=? 100>>(default=25 help="percent chance a car slows")
+    quiet = argparse.Flag(help="leave out the diagram")
+]
+Car:type = [id:int64 speed:Speed]
+
+start = (a:argparse.Parsed<Args>):>array<Car?> => {
+    let road:array<Car?> = fill(none a.cells)                 # (b): a.cells is int64: fill wants length >=? 0
+    let id = 0
+    loop at in [0..a.cells) {
+        if id <? a.cars and at * a.cars >=? id * a.cells { road[at] = Car[id 0]; id += 1 }
+    }
+    road
+}
+
+step = (road:array<Car?> a:argparse.Parsed<Args> roll:int64):>array<Car?> => {
+    let next:array<Car?> = fill(none a.cells)
+    loop i in [0..road.length) {
+        let car = road[i] ?? continue
+        let speed = min(car.speed + 1 a.limit)                # (b): Speed store needs a.limit <=? 9
+        if speed >? 0 and roll <? a.dawdle speed -= 1
+        next[(i + speed) % a.cells] = Car[car.id speed]       # (b): % needs a.cells not=? 0
+    }
+    next
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="traffic on a ring road")
+    # (b), as ladder 151 does today: re-establish every range argparse already checked
+    #     if args.cells <? 1 or args.cells >? 400 or args.limit <? 1 or args.limit >? 9 return
+    # and, because a guard in main proves nothing inside start and step, pass the guarded
+    # numbers (cells limit dawdle) to each helper instead of the record.
+    let road = start(args)
+    loop t in [0..args.steps) {
+        road = step(road args (t * 37) % 100)
+        if not args.quiet printl"{fmt'>3'(t)} {[loop s in road if s is? Car "{s.speed}" else "."].join("")}"
+    }
+}

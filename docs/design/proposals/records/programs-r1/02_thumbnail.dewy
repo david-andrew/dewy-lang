@@ -1,0 +1,35 @@
+# thumbnail: shrink images to a width, keeping their shape.
+#   thumbnail photos/*.jpg width=320 quality=85 out=thumbs
+import argparse
+
+Side:type = int64<n => 1 <=? n and n <=? 8192>
+Percent:type = int64<n => 0 <=? n and n <=? 100>
+
+Args:type = [
+    images = argparse.Positional<array<Path>>(help="the images to shrink")
+    width = argparse.Named<Side>(default=256 short='w' help="the thumbnail width in pixels")
+    quality = argparse.Named<Percent>(default=80 short='q' help="JPEG quality")
+    out = argparse.Named<Path>(default=p"thumbs" help="where to write them")
+]
+
+# (the image library's own signatures)
+#   decode = (bytes:array<uint8>):>Image | ImageError
+#   resize = (img:Image width:Side height:Side):>Image
+#   encode_jpeg = (img:Image quality:Percent):>array<uint8>
+
+target_height = (img:Image a:argparse.Parsed<Args>):>Side =>
+    max(1 min(8192 img.height * a.width // img.width))        # same under every option: arithmetic is clamped
+
+shrink = (path:Path a:argparse.Parsed<Args>):>void | ImageError | FileError => {
+    let img = decode(path.read_bytes or_throw) or_throw
+    let small = resize(img a.width target_height(img a))       # (b): a.width is int64; prove 1..8192 again
+    p"{a.out}/{path.name}".write_bytes(encode_jpeg(small a.quality)) or_throw   # (b): and 0..100
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="shrink images")
+    args.out.make_dirs or_throw
+    loop path in args.images {
+        match shrink(path args) { e:ImageError | FileError => printl("{path}: {e.message}" file=stderr) _ => {} }
+    }
+}

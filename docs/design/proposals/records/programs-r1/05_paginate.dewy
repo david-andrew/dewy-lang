@@ -1,0 +1,24 @@
+# A page of results: the query fixes the window once, the views use it.
+PerPage:type = int64<n => 1 <=? n and n <=? 200>
+PageNo:type = int64<n => 1 <=? n and n <=? 100000>
+
+window = (total:int64<(>=? 0)> per:PerPage page:PageNo) => [
+    per = per                                                 # PerPage under (a)
+    page = page                                               # PageNo under (a)
+    pages = max(1 (total + per - 1) // per)                   # computed: plain under every option
+]
+
+footer = (w:[per:PerPage page:PageNo pages:int]):>string => "page {w.page} of {w.pages}, {w.per} a page"
+
+rows_for = (all:array<string> w:[per:PerPage page:PageNo pages:int]):>array<string> => {
+    let first = (w.page - 1) * w.per                          # at most 19,999,800: fits, from the two field types
+    all[$clamp first..first + w.per)
+}
+
+main = (argv:array<string>) => {
+    let names = [loop i in [1..523] "user{i}"]
+    let page = PageNo(if argv.length >? 1 argv[1] else "1") ?? 1
+    let w = window(names.length 25 page)
+    loop row in rows_for(names w) printl(row)                 # (b): w.per and w.page are int64: guard, or annotate window
+    printl(footer(w))
+}

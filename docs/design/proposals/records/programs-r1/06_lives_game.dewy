@@ -1,0 +1,30 @@
+# A guessing game whose state starts from checked options and then changes.
+# This is the case option (a) makes worse: state.lives is a Lives, so it can't reach 0.
+#   guess lives=3 top=100
+import argparse
+
+Lives:type = int64<n => 1 <=? n and n <=? 9>
+Top:type = int64<n => 2 <=? n and n <=? 1000000>
+Args:type = [
+    lives = argparse.Named<Lives>(default=5 help="wrong guesses allowed")
+    top = argparse.Named<Top>(default=100 help="the largest secret")
+]
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="guess the number")
+    let secret = random_below(args.top) + 1                      # (b): random_below wants n >? 0: guard args.top
+    # (a): `lives = args.lives` would make state.lives a Lives, and `state.lives -= 1` below
+    # an error ("state.lives can't go below 1: it took the type of args.lives at line 21;
+    # write `lives = args.lives as int64` to let it hold any int64").
+    # (a2) is worse: `score = 0` would be the type 0, so `state.score += 1` fails too.
+    # (b), (c1) and (c2) need no `as`.
+    let state = [lives = args.lives as int64  score = 0]
+    loop state.lives >? 0 {
+        let guess = int64(input("guess: ")) ?? continue
+        if guess =? secret { printl"yes, with {state.lives} lives left"; return }
+        printl(if guess <? secret "higher" else "lower")
+        state.lives -= 1
+        state.score += 1
+    }
+    printl"it was {secret}"
+}

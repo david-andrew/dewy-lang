@@ -1,0 +1,27 @@
+# Settings chosen between a checked option and a fallback: how a field's type is decided when
+# the value has more than one source.
+import argparse
+
+Jobs:type = int64<n => 1 <=? n and n <=? 64>
+Args:type = [
+    jobs = argparse.Named<Jobs?>(help="builds at once (default 4, or the config file's)")
+    serial = argparse.Flag(help="one build at a time")
+]
+
+plan = (a:argparse.Parsed<Args> targets:array<string>) => [
+    jobs = if a.serial 1 else a.jobs ?? 4      # the arms are a Jobs and literals inside Jobs: the field is a Jobs
+    targets = targets
+]
+
+# A literal that isn't inside the others' type makes the field plain, never an error here:
+#     [jobs = if a.serial 0 else a.jobs ?? 4]      gives jobs:int64, and the error is at the use:
+#     "p.jobs may be 0: plan's `if` mixes a Jobs with 0, so the field is an int64;
+#      parallel_map's limit= wants 1 to 64"
+# A computed arm, `min(64 cpu_count())`, is plain too: arithmetic gives facts, not types.
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="build everything")
+    let p = plan(args ["lexer" "parser" "checker" "backend"])
+    let results = parallel_map(p.targets limit=p.jobs (t:string) => build(t))   # (b): limit= needs 1..64 again
+    loop t in p.targets and r in results printl"{t}: {r}"
+}

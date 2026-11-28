@@ -1,0 +1,22 @@
+# Layout arithmetic over sizes that are positive by construction.
+Positive:type = int64<(>? 0)>
+
+size = (w:Positive h:Positive) => [w = w h = h]              # [w:Positive h:Positive] under (a)
+square = (side:Positive) => size(side side)
+
+aspect = (s:[w:Positive h:Positive]):>rational => rational(s.w) / s.h
+tiles_across = (s:[w:Positive h:Positive] tile:Positive):>int64 => (s.w + tile - 1) // tile
+fit = (inner:[w:Positive h:Positive] outer:[w:Positive h:Positive]):>rational =>
+    min(rational(outer.w) / inner.w rational(outer.h) / inner.h)
+
+main = () => {
+    let screen = size(1920 1080)
+    let icon = square(48)
+    printl"aspect {screen.w}:{screen.h} is {fmt'.3f'(aspect(screen))}"   # (b): screen.h is int64 here: not provably >? 0
+    printl"{tiles_across(screen icon.w)} icons across"     # (b): and icon.w
+    printl"scale {fmt'.2f'(fit(icon screen))}"              # (b): and both records again
+    # (b) writes `size = (w:Positive h:Positive):>[w:Positive h:Positive] => [w = w h = h]`
+    # (or declares Size:type = [w:Positive h:Positive]), and then everything above works.
+    # (c1): works here (the call sites see size's result facts), but not once screen is
+    # stored in an array of layouts or read back from a dictionary.
+}

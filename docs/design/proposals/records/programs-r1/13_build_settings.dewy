@@ -1,0 +1,26 @@
+# Settings assembled in one function, adjusted there, and handed back: a write that keeps the
+# value in range must keep the field's type, or the record stops fitting what it is passed to.
+#   build jobs=8 --serial
+import argparse
+
+Jobs:type = int64<n => 1 <=? n and n <=? 64>
+Args:type = [
+    jobs = argparse.Named<Jobs>(default=4 short='j' help="builds at once")
+    serial = argparse.Flag(help="one build at a time, for readable logs")
+    out = argparse.Named<Path>(default=p"build" help="where builds go")
+]
+
+configure = (args:argparse.Parsed<Args>) => {
+    let cfg = [jobs = args.jobs  out = args.out  log = not args.serial]
+    if args.serial cfg.jobs = 1                                # (a): a store into a Jobs field, proven: 1 is a Jobs
+    cfg                                                        # (a): [jobs:Jobs out:Path log:bool]
+}   # (c2): the write above makes cfg.jobs a plain int64, so this returns [jobs:int64 out:Path log:bool]
+    # (b), (c1): plain already, since args is a parameter
+
+# (the build library) run_all = (targets:array<string> jobs:Jobs out:Path log:bool):>Report
+build = (cfg:[jobs:Jobs out:Path log:bool] targets:array<string>) => run_all(targets cfg.jobs cfg.out cfg.log)
+
+main = (argv:array<string>) => {
+    let cfg = configure(argparse.parse(Args argv about="build every target"))
+    printl(build(cfg ["lexer" "parser" "checker"]))          # (c2), (b), (c1): cfg.jobs is int64 here: an error at
+}                                                            # this call, about a write in configure
