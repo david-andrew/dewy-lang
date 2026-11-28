@@ -131,6 +131,15 @@ ref_resolve_atoms=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string
         ref_add((if (nodes[b].flags & 2) not=? 0 'le' else 'lt') value hi @out)
         return
     }
+    if int64(node_op(nodes[n].op_ext)) =? REF_RESOLVE_KW_IN and nodes[a].kind =? 'ident' and int64(nodes[a].name) =? binder and binder not=? 0 and (nodes[b].kind =? 'ident' or nodes[b].kind =? 'field') {
+        # `<(in? c)>`: the value is a member of c by c's `contains` (facts_membership).
+        # One atom, the value on the left, the container on the right. O(1).
+        let value=ref_resolve_term(@nodes @types @names @bindings @host a binder)
+        let container=ref_resolve_term(@nodes @types @names @bindings @host b binder)
+        if container.kind =? 0 or container.kind =? 1 or container.kind =? 4 or container.offset not=? 0 or container.path.length >? 0 and container.path[container.path.length - 1] =? -1 {host.fatal(nodes[b].pos "a membership refinement names its container: `<(in? w)>`, `<(in? w.bodies)>`")}
+        out.push(RefAtom[op='kw_in' a=value b=container])
+        return
+    }
     if op =? 'eof' {host.fatal(nodes[n].pos "unsupported refinement predicate; expected an integer comparison")}
     if nodes[a].kind =? 'binary' {
         let earlier=ref_resolve_op(node_op(nodes[a].op_ext))

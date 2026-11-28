@@ -222,6 +222,12 @@ ref_signature_type=(params:array<int64> t0:int64 i:int64 mask:int64 pos:int64):>
     let t=prune(t0)
     if types.ptr[t].kind not=? 'refined' {return false}
     loop atom in ref_predicates[RefineWord(types.ptr[t].st)] {
+        # (a membership names its container, any value: a `@` one's entry value on a
+        # parameter, its final value on the result, as `addr<(<? xs.length)>` does)
+        if atom.op =? 'kw_in' {
+            if atom.b.kind =? 2 and atom.b.value >=? params.length {fatal(pos "missing refinement parameter");}
+            continue
+        }
         ref_signature_term(params t i atom.a mask pos)
         ref_signature_term(params t i atom.b mask pos)
     }

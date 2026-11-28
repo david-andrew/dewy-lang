@@ -1,0 +1,336 @@
+$runtime_checks
+# Handle validity (docs/design/proposals/handles/round1.md): `h in? c` is a
+# membership atom, an opaque fact over the values of c and h whose meaning is
+# c's `contains(c h)`. The atom is the element projection of c's value at h's
+# value, at least 1 while h is a member: the bundled Pool's model
+# (facts_pools.dewy) uses the same representation, so a Pool's add, remove,
+# `has` and `[]` and an `in?` on it are one fact.
+#
+# A `contains` whose body is one membership of projections of its parameters,
+# `contains = (w:World b:Body):>bool => b.h in? w.bodies`, delegates: its atom
+# is the inner one, on `w.bodies` at `b.h`, so what keeps or removes Pool
+# members keeps or removes the World's, and a write to `w.gravity` keeps it.
+#
+# Everything here is demanded: a `contains` call in a static fact pass, or an
+# `<(in? c)>` refinement (refine_transfers). Costs: recognizing a callee is
+# O(1) after its first visit (cached per function); a delegation is read once
+# per `contains` from at most 16 body nodes; an atom is at most 4 delegation
+# steps of O(path) projections; finding the `contains` a refinement means by
+# its types scans each function once over the compilation (an indexed list of
+# the functions named `contains`), then O(1) per (container, handle) type pair.
+from p"expression_types.dewy" import (ntype)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (LF_MUTPARAM fns locals)
+from p"directive_rules.dewy" import (dir_defer)
+from p"effect_control.dewy" import (effects_demand)
+from p"effect_lattice.dewy" import (place_base)
+from p"effects.jo" import (effect_summaries)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"facts.jo" import (FactState fact_terms)
+from p"facts_values.dewy" import (fact_domain fact_type fact_project)
+from p"facts_index_writes.dewy" import (fact_constant fact_new)
+from p"facts_compare.dewy" import (fact_assume)
+from p"facts_value_queries.dewy" import (fact_bound)
+from p"facts_pools.dewy" import (fact_pool_type)
+from p"predicate_summaries.dewy" import (fact_predicate_apply fact_predicate_summary)
+from p"refinement_types.dewy" import (FactTerm RefAtom)
+from p"types.jo" import (T_BOOL T_INT prune types)
+from p"util.jo" import (err_notes intern name_of)
+from p"witness_nodes.dewy" import (wit_text)
+from p"witness_ops.dewy" import (wit_context wit_fail)
+
+MemWord:type=int64<overflow='wrap'>
+
+# A parameter of a `contains` and the fields read from it, with each field's type.
+MemPath:type=[param:int64=-1 path:array<int64>=[] types:array<int64>=[]]
+# A delegating `contains`: the membership it is, and its two operands.
+MemDelegate:type=[callee:int64=0 container:MemPath=MemPath[] handle:MemPath=MemPath[]]
+
+# (per function: 1 a membership `contains`, 2 not one; a pure one also 3 when
+# its effects were read: 3 pure, 4 not)
+let mem_kinds:dict<int64 int64>=dict<int64 int64>()
+let mem_delegates:dict<int64 MemDelegate>=dict<int64 MemDelegate>()
+let mem_name:int64=0
+# (the functions named `contains`, scanned up to mem_scanned, and the answer per type pair)
+let mem_named:array<int64>=[]
+let mem_scanned:int64=0
+let mem_by_types:dict<[int64 int64] int64>=dict<[int64 int64] int64>()
+
+mem_reset=():>void=>{
+    mem_kinds=dict<int64 int64>()
+    mem_delegates=dict<int64 MemDelegate>()
+    mem_named=[]
+    mem_scanned=0
+    mem_by_types=dict<[int64 int64] int64>()
+}
+
+# A record type's identity for matching (an instance's struct), or the pruned type.
+mem_type_key=(t0:MemWord):>MemWord=>$unsafe {
+    let t=fact_type(t0)
+    if types.ptr[t].kind =? 'struct_' {return MemWord(types.ptr[t].st) + (1 << 40)}
+    t
+}
+
+# Whether f is a membership `contains(c h):>bool`: two by-value parameters, no
+# captures, the container a record (not a dictionary, whose keys keep their own
+# rules). O(parameters), once per function.
+mem_contains_fn=(f:MemWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? fns.length {return false}
+    let known=mem_kinds.get(f) ?? 0
+    if known not=? 0 {return known not=? 2}
+    let d=MemWord(fns.ptr[f].decl)
+    if mem_name =? 0 {mem_name=intern("contains")}
+    let ok=d not=? 0 and MemWord(nodes.ptr[d].name) =? mem_name and fns.ptr[f].params.length =? 2 and fns.ptr[f].ptypes.length =? 2 and fns.ptr[f].caps.length =? 0 and prune(MemWord(fns.ptr[f].ret)) =? T_BOOL
+    if ok {
+        loop l in fns.ptr[f].params {
+            if MemWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {ok=false}
+        }
+        let ct=fact_type(fns.ptr[f].ptypes[0])
+        if types.ptr[ct].kind not=? 'struct_' or is_map_type(ct) {ok=false}
+    }
+    mem_kinds[f]=if ok {1} else {2}
+    ok
+}
+
+# Whether call n is one of a membership `contains`, for the fact slice: O(1),
+# an interned name test before the cached one.
+mem_call=(n:MemWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
+    let f=MemWord(nodes.ptr[n].sym)
+    let d=MemWord(fns.ptr[f].decl)
+    if mem_name =? 0 {mem_name=intern("contains")}
+    d not=? 0 and MemWord(nodes.ptr[d].name) =? mem_name and mem_contains_fn(f)
+}
+
+# Whether a membership `contains` is a function of its two values alone: it
+# writes nothing, does no I/O and reads no global (its settled effect row).
+# A delegating one is as pure as its delegate; the bundled Pool's is reviewed
+# (docs/design/assumptions.md). O(events), once per function.
+mem_pure=(f:MemWord):>bool=>$unsafe {
+    let known=mem_kinds.get(f) ?? 0
+    if known >=? 3 {return known =? 3}
+    if fns.ptr[f].body =? 0 or fns.ptr[f].state not=? 2 or not effects_demand(f true) {return false}
+    let ok=true
+    loop e in effect_summaries.ptr[f].events {
+        let kind=e.atom.kind
+        if kind =? 'read' {
+            if place_base(e.atom.place).root =? 'global' {ok=false}
+        }
+        else if kind not=? 'alloc' and kind not=? 'panic' {ok=false}
+    }
+    mem_kinds[f]=if ok {3} else {4}
+    ok
+}
+
+# An operand of a delegation: fields read from a parameter, or from a local
+# bound once to such a read. O(path), at most 16 steps.
+mem_path=(e0:MemWord params:dict<int64 int64> env:dict<int64 MemPath>):>MemPath=>$unsafe {
+    let e=e0
+    let names:array<int64>=[]
+    let tys:array<int64>=[]
+    loop _ in [0..16) {
+        if e <=? 0 {return MemPath[]}
+        let k=nodes.ptr[e].kind
+        if k =? 'addr' {
+            e=MemWord(nodes.ptr[e].a)
+            continue
+        }
+        if k =? 'field' {
+            names.push(MemWord(nodes.ptr[e].name))
+            tys.push(ntype(e))
+            e=MemWord(nodes.ptr[e].a)
+            continue
+        }
+        if k =? 'ident' and nodes.ptr[e].aux =? 1 {
+            let l=MemWord(nodes.ptr[e].sym)
+            let out=MemPath[]
+            if params.has(l) {out.param=params[l]}
+            else if env.has(l) {out=env[l]}
+            else {return MemPath[]}
+            loop i in [0..names.length) {
+                out.path.push(names[names.length - 1 - i])
+                out.types.push(tys[tys.length - 1 - i])
+            }
+            return out
+        }
+        return MemPath[]
+    }
+    MemPath[]
+}
+
+# The membership a `contains` is, when its body is one: `b.h in? w.bodies`,
+# `w.bodies.has(b.h)` or `contains(w.bodies b.h)`, maybe after `let`s naming
+# field reads. callee 0 for none. Once per function, at most 16 statements.
+mem_delegate=(f:MemWord):>MemDelegate=>$unsafe {
+    let known=mem_delegates.get(f)
+    if known not=? none {return known}
+    let none_=MemDelegate[]
+    if fns.ptr[f].body =? 0 or fns.ptr[f].state not=? 2 {return none_}
+    mem_delegates[f]=none_
+    let params=dict<int64 int64>()
+    loop i in 0.. and l in fns.ptr[f].params {params[l]=i}
+    let env=dict<int64 MemPath>()
+    let e=MemWord(fns.ptr[f].body)
+    loop _ in [0..16) {
+        if e <=? 0 {return none_}
+        let k=nodes.ptr[e].kind
+        if k =? 'return_' or k =? 'exprstmt' {
+            e=MemWord(nodes.ptr[e].a)
+            continue
+        }
+        if k =? 'block' {
+            if nkids(e) =? 0 {return none_}
+            loop i in [0..nkids(e) - 1) {
+                let c=kid(e i)
+                if nodes.ptr[c].kind not=? 'vardecl' or nkids(c) not=? 0 or nodes.ptr[c].b =? 0 {return none_}
+                let p=mem_path(MemWord(nodes.ptr[c].b) params env)
+                if p.param <? 0 {return none_}
+                env[MemWord(nodes.ptr[c].sym)]=p
+            }
+            e=kid(e nkids(e) - 1)
+            continue
+        }
+        break
+    }
+    if e <=? 0 or nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux not=? 0 or nodes.ptr[e].sym <=? 0 or nkids(e) not=? 2 {return none_}
+    let g=MemWord(nodes.ptr[e].sym)
+    let first=if fns.ptr[g].ptypes.length >? 0 {MemWord(fns.ptr[g].ptypes[0])} else {0}
+    let inner=mem_contains_fn(g) or fns.ptr[g].decl not=? 0 and fact_pool_type(first) and name_of(MemWord(nodes.ptr[MemWord(fns.ptr[g].decl)].name)) =? "has"
+    if not inner {return none_}
+    let c=mem_path(kid(e 0) params env)
+    let h=mem_path(kid(e 1) params env)
+    if c.param <? 0 or h.param <? 0 {return none_}
+    let out=MemDelegate[g c h]
+    mem_delegates[f]=out
+    out
+}
+
+mem_follow=(@s:FactState p:MemPath c:MemWord h:MemWord):>MemWord=>{
+    let v=if p.param =? 0 {c} else {h}
+    loop i in [0..p.path.length) {
+        if v =? 0 {return 0}
+        v=fact_project(@s v p.path[i] false p.types[i])
+    }
+    v
+}
+
+# The atom `h in? c` for the membership function f (0 when f is unknown: an
+# opaque atom on the two values). Delegations are followed at most 4 deep.
+mem_atom=(@s:FactState f0:MemWord c0:MemWord h0:MemWord):>MemWord=>$unsafe {
+    let f=f0
+    let c=c0
+    let h=h0
+    loop depth in [0..4) {
+        if c =? 0 or h =? 0 {return 0}
+        if f =? 0 {break}
+        let d=mem_delegate(f)
+        if d.callee =? 0 {break}
+        let c2=mem_follow(@s d.container c h)
+        let h2=mem_follow(@s d.handle c h)
+        c=c2
+        h=h2
+        f=d.callee
+    }
+    if c =? 0 or h =? 0 {return 0}
+    fact_project(@s c h true T_INT)
+}
+
+# The value of a call of the membership `contains` f: true exactly when the
+# atom is at least 1. A predicate summary of its body (predicate_summaries)
+# also holds on the true edge. A `contains` that may read more than its two
+# values gives no atom. O(atom).
+mem_capture=(n:MemWord @s:FactState values:array<int64> f:MemWord):>MemWord=>{
+    if values.length not=? 2 {return 0}
+    let d=mem_delegate(f)
+    if d.callee =? 0 and not fact_pool_type(fact_terms[values[0]].type) and not mem_pure(f) {return 0}
+    let atom=mem_atom(@s f values[0] values[1])
+    if atom =? 0 {return 0}
+    let member=fact_new(@s fact_domain(T_BOOL) FactTerm('gt' atom fact_constant(@s 0)))
+    let predicate=fact_predicate_summary(f)
+    if predicate =? 0 {return member}
+    let unfolded=fact_predicate_apply(predicate values @s)
+    if unfolded =? 0 {return member}
+    fact_new(@s fact_domain(T_BOOL) FactTerm('kw_and' member unfolded))
+}
+
+# The `contains` for a container and handle type: the one function named
+# `contains` taking exactly them. 0 when none (or several). Indexed: each
+# function is looked at once in a compilation.
+mem_find=(ct:MemWord ht:MemWord):>MemWord=>$unsafe {
+    let ck=mem_type_key(ct)
+    let hk=mem_type_key(ht)
+    if mem_scanned =? fns.length {
+        let known=mem_by_types.get([ck hk])
+        if known not=? none {return known}
+    }
+    if mem_name =? 0 {mem_name=intern("contains")}
+    loop mem_scanned <? fns.length {
+        let d=MemWord(fns.ptr[mem_scanned].decl)
+        if d not=? 0 and MemWord(nodes.ptr[d].name) =? mem_name {mem_named.push(mem_scanned)}
+        mem_scanned += 1
+    }
+    let found:MemWord=0
+    loop f in mem_named {
+        if not mem_contains_fn(f) {continue}
+        if mem_type_key(fns.ptr[f].ptypes[0]) =? ck and mem_type_key(fns.ptr[f].ptypes[1]) =? hk {
+            if found not=? 0 and found not=? f {
+                found=0
+                break
+            }
+            found=f
+        }
+    }
+    mem_by_types[[ck hk]]=found
+    found
+}
+
+# The atom a refinement `<(in? c)>` on a value h names. O(atom).
+mem_refined_atom=(@s:FactState h:MemWord c:MemWord base:MemWord):>MemWord=>$unsafe {
+    if h =? 0 or c =? 0 {return 0}
+    mem_atom(@s mem_find(fact_terms[c].type base) c h)
+}
+
+# A refinement assumed: the atom is at least 1, and the body of the container's
+# `contains` holds as facts (its predicate summary), so its own indexing proves.
+mem_assume=(@s:FactState h:MemWord c:MemWord base:MemWord):>void=>$unsafe {
+    let atom=mem_refined_atom(@s h c base)
+    if atom =? 0 {return}
+    fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('gt' atom fact_constant(@s 0))) true)
+    let f=mem_find(fact_terms[c].type base)
+    if f =? 0 {return}
+    let predicate=fact_predicate_summary(f)
+    if predicate =? 0 {return}
+    let unfolded=fact_predicate_apply(predicate [c h] @s)
+    if unfolded not=? 0 {fact_assume(@s unfolded true)}
+}
+
+# 1 proven, 0 refuted, -1 unknown.
+mem_truth=(@s:FactState h:MemWord c:MemWord base:MemWord):>MemWord=>{
+    let atom=mem_refined_atom(@s h c base)
+    if atom =? 0 {return -1}
+    let b=fact_bound(s atom)
+    if b.wide {return -1}
+    if b.lo >=? 1 {return 1}
+    if b.hi <=? 0 {return 0}
+    -1
+}
+
+# An unproven or refuted membership at check n (the converted value is n's
+# operand), named by the handle and the container as written (round1 §4.7).
+mem_fail=(n:MemWord container:string refuted:bool):>void=>$unsafe {
+    let h=wit_text(MemWord(nodes.ptr[n].a))
+    let named=h not=? "" and container not=? ""
+    let shown=if h not=? "" {"`{h}`"} else {"this value"}
+    let c=if container not=? "" {"`{container}`"} else {"its container"}
+    wit_context(0)
+    if refuted {
+        if named {err_notes.push([(-1) "help: `{container}.get({h})` gives none for a missing one"])}
+        wit_fail(nodes.ptr[n].pos "{shown} is no longer in {c}")
+        return
+    }
+    let what="cannot prove {shown} is in {c}"
+    if dir_defer(n what true) {return}
+    if named {err_notes.push([(-1) "help: test it with `if {h} in? {container}`, require it with a `<(in? {container})>` parameter, or take it as a value with `{container}.get({h})`"])}
+    else {err_notes.push([(-1) "help: name it and test it with `in?`, or require it with a `<(in? ...)>` parameter"])}
+    wit_fail(nodes.ptr[n].pos what)
+}

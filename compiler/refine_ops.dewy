@@ -33,7 +33,8 @@ from p"lower_storage.dewy" import (load_val arr_len endc field_val_addr freeze_s
 from p"ir.jo" import (VI)
 from p"ir_builders.dewy" import (e_bin e_call e_iconst)
 from p"ir_types.dewy" import (Op)
-from p"lower_primitives.dewy" import (e_call_nr e_daddr loc_data rt str_data)
+from p"lower_primitives.dewy" import (e_call_nr e_daddr lf_of_inst loc_data rt str_data)
+from p"facts_membership.dewy" import (mem_find)
 from p"math_ops.dewy" import (math_binary math_compare math_word)
 from p"secrets.jo" import (secret_checks)
 from p"witness.jo" import (wit_holder_text)
@@ -252,6 +253,20 @@ ref_gen_check=(n:int64 self:int64 args:array<int64> arg_types:array<int64>):>voi
         }
         if atom.a.kind =? 6 {
             ref_self_gen(n atom self)
+            continue
+        }
+        if atom.op =? 'kw_in' {
+            # (a membership: the container's own `contains`, called on the two values)
+            let container=ref_ir_term(atom.b self args RefineOpWord(types.ptr[t].elem) arg_types)
+            let f=mem_find(ref_term_type RefineOpWord(types.ptr[t].elem))
+            let named=wit_ref_text(atom.b shown)
+            if f =? 0 {fatal(nodes.ptr[n].pos "cannot check that `{shown}` is in its container when it runs: no one `contains` takes these two types")}
+            let member=e_call(lf_of_inst(f) [container self] VI)
+            iff(e_bin('eq' VI member e_iconst(0)));
+            let what=if shown =? "the value" {shown} else {"`{shown}`"}
+            let message=if named =? "" {"refinement failed: {what} is not in the container its contract names"} else {"refinement failed: {what} is not in `{named}`"}
+            e_call_nr(rt("__requirement_fail") [e_daddr(str_data(message)) e_daddr(loc_data(nodes.ptr[n].pos)) e_daddr(str_data("")) e_iconst(0) e_daddr(str_data("")) e_iconst(0)] (-1));
+            endc();
             continue
         }
         let a=ref_ir_term(atom.a self args RefineOpWord(types.ptr[t].elem) arg_types)

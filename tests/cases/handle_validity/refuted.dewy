@@ -1,0 +1,14 @@
+# A handle removed from the pool its wrapper delegates to is refuted: an error
+# even under `$runtime_checks`.
+Thing:type=[hp:int64]
+World:type=[gravity:int64 things:Pool<Thing>]
+Body:type=[h:Handle]
+contains=(w:World b:Body):>bool=>b.h in? w.things
+add=(@w:World hp:int64):>Body<(in? w)>=>Body[w.things.add(Thing[hp])]
+hp=(w:World b:Body<(in? w)>):>int64=>w.things[b.h].hp
+main=():>void=>{
+    let w=World[10 Pool<Thing>[]]
+    let a=w.add(3)
+    w.things.remove(a.h);
+    printl(w.hp(a))
+}

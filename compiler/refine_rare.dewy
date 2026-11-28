@@ -1199,6 +1199,12 @@ resolve_refinement=(n:int64):>int64=>$unsafe {
     let rep=representation_type(base)
     let expected=if tkind(rep) =? 'array' or tkind(rep) =? 'str_' {T_INT} else {rep}
     loop atom in atoms {
+        # (a membership's container is any value: its `contains` decides, facts_membership)
+        if atom.op =? 'kw_in' {
+            if refine_bindings.fields.length >? 0 and atom.b.kind =? 2 {fatal(nodes.ptr[n].pos "record field refinement dependencies must name siblings or stable lexical bindings");}
+            if atoms.length not=? 1 {fatal(nodes.ptr[n].pos "a membership refinement stands alone: `<(in? w)>`, with no other condition")}
+            continue
+        }
         loop term in [atom.a atom.b] {
             if refine_bindings.fields.length >? 0 and term.kind =? 2 {fatal(nodes.ptr[n].pos "record field refinement dependencies must name siblings or stable lexical bindings");}
             let root:RefineRareWord=0

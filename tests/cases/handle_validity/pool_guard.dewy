@@ -1,0 +1,10 @@
+# `h in? pool` is the Pool's membership: the same fact `add`, `remove` and `pool[h]` use.
+main=():>void=>{
+    let pool:Pool<int64>=Pool<int64>[]
+    let h=pool.add(5)
+    let g=pool.add(6)
+    pool.remove(g);
+    if g in? pool {printl(pool[g])} else {printl("g is gone")}
+    if h in? pool {printl(pool[h])}
+    printl(pool[h])
+}

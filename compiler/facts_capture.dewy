@@ -38,6 +38,7 @@ from p"facts_maps.dewy" import (fact_ensured_close fact_keys_copy fact_keys_elem
 from p"facts_members.dewy" import (fact_member_block fact_member_literal)
 from p"facts_numeric.dewy" import (fact_abs fact_abs_call fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
 from p"facts_pools.dewy" import (fact_pool_call fact_pool_capture)
+from p"facts_membership.dewy" import (mem_capture mem_contains_fn)
 from p"facts_probes.dewy" import (fact_probe_divisor fact_probe_index fact_probe_record)
 from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first)
 from p"facts_pushes.dewy" import (fact_counted_lengths fact_counted_pushes fact_counted_sums fact_growing_lengths fact_growing_pushes fact_iterate fact_push_close fact_push_open fact_push_record fact_scaled_lengths fact_scaled_pushes)
@@ -1585,6 +1586,11 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     capture_sum_operand[0]=sum_operand
     capture_route_call[0]=outer_call
     if wi_fact_calls.length >? 0 and wi_fact_calls.has(n) {wi_fact_check(n values @s)}
+    # (`h in? c` by c's `contains`: a membership atom, facts_membership)
+    if values.length =? 2 and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and ntype(n) =? T_BOOL and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and mem_contains_fn(CaptureWord(nodes.ptr[n].sym)) {
+        let member=mem_capture(n @s values CaptureWord(nodes.ptr[n].sym))
+        if member not=? 0 {return member}
+    }
     if not lib_sp {
         if fact_speculating =? 0 and values.length =? 2 and fact_divisors.length >? 0 {
             let obligation=fact_divisors.get(n) ?? 0

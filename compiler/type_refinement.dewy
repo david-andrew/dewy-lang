@@ -80,7 +80,9 @@ tr_make=(base0:RWord predicate0:RWord position:RWord=(-1)):>RWord=>$unsafe {
     }
     predicate=tr_intern(normalized)
     tr_host[0].copy_span(declared  predicate)
-    if not tr_is_int(base) and tr_types[0].ptr[base].kind not=? 'array' and not tu_has_var(base) and not tr_is_nd(base) and not(tr_types[0].ptr[base].kind =? 'str_' and tr_length_only(predicate)) {tr_host[0].fatal(-1  "refinement requires an integer, array or string base")}
+    # (a membership, `Body<(in? w)>`, refines any value: its container's `contains` decides)
+    let membership=tr_predicates[0][predicate].length =? 1 and tr_predicates[0][predicate][0].op =? 'kw_in'
+    if not membership and not tr_is_int(base) and tr_types[0].ptr[base].kind not=? 'array' and not tu_has_var(base) and not tr_is_nd(base) and not(tr_types[0].ptr[base].kind =? 'str_' and tr_length_only(predicate)) {tr_host[0].fatal(-1  "refinement requires an integer, array or string base")}
     if not tu_has_var(base) and tr_is_int(base) {
         loop atom in tr_predicates[0][predicate] {
             loop term in [atom.a  atom.b] {

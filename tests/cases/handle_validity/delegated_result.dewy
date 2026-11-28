@@ -1,0 +1,16 @@
+# A wrapper's `contains` that is one membership of its fields delegates: `b in? w`
+# is `b.h in? w.things`, so the Pool's `add` establishes the wrapper's result
+# contract, and the caller's use is proven.
+Thing:type=[hp:int64]
+World:type=[gravity:int64 things:Pool<Thing>]
+Body:type=[h:Handle]
+contains=(w:World b:Body):>bool=>b.h in? w.things
+add=(@w:World hp:int64):>Body<(in? w)>=>Body[w.things.add(Thing[hp])]
+hp=(w:World b:Body<(in? w)>):>int64=>w.things[b.h].hp
+main=():>void=>{
+    let w=World[10 Pool<Thing>[]]
+    let a=w.add(3)
+    printl(w.hp(a))
+    let c=Body[a.h]
+    if c in? w {printl(w.hp(c) + 1)}
+}

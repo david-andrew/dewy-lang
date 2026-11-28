@@ -1,0 +1,14 @@
+# `h in? s` by the record's own `contains`: the guard proves the requirement
+# `<(in? s)>`, and the callee gets the body of `contains` as facts, so its
+# indexing proves with no check.
+Store:type=[xs:array<int64> live:array<bool>]
+Slot:type=[i:int64]
+contains=(s:Store h:Slot):>bool=>h.i >=? 0 and h.i <? s.live.length and h.i <? s.xs.length and s.live[h.i]
+get=(s:Store h:Slot<(in? s)>):>int64=>s.xs[h.i]
+main=():>void=>{
+    let s=Store[[10 20 30] [true true false]]
+    loop i in [0..4) {
+        let h=Slot[i]
+        if h in? s {printl(get(s h))} else {printl("slot {i} is free")}
+    }
+}

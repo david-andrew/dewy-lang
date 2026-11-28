@@ -100,3 +100,6 @@ clear[T] = (p: mut Pool[T]):
             p.__free.push(h.slot)
     p.items.clear()
     p.handles.clear()
+
+# whether h's thing is still there, as `h in? pool` (the same as has)
+contains[T] = (p: Pool[T], h: Handle) -> bool: has(p, h)

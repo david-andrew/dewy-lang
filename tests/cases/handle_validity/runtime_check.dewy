@@ -1,0 +1,16 @@
+# exit: 101
+# Under `$runtime_checks` an unproven membership is checked when it runs, by
+# the container's own `contains`.
+$runtime_checks
+
+Store:type=[live:array<bool>]
+Slot:type=[i:int64]
+contains=(s:Store h:Slot):>bool=>h.i >=? 0 and h.i <? s.live.length and s.live[h.i]
+get=(s:Store h:Slot<(in? s)>):>int64=>h.i
+main=():>void=>{
+    let s=Store[[true false]]
+    let used=Slot[0]
+    let free=Slot[1]
+    printl(get(s used))
+    printl(get(s free))
+}

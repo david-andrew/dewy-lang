@@ -80,6 +80,7 @@ from p"facts_arrays.dewy" import (fact_array_call)
 from p"facts_maps.dewy" import (fact_map_call)
 from p"facts_numeric.dewy" import (fact_power_call fact_rational_constructor fact_rational_divmod fact_shift_obliged)
 from p"facts_pools.dewy" import (fact_pool_call)
+from p"facts_membership.dewy" import (mem_reset)
 from p"facts_ranges.dewy" import (fact_floor_call fact_open_range fact_range_call fact_stepped_loop)
 from p"facts_text.dewy" import (fact_string_call)
 from p"float_ops.dewy" import (ff_integer_demand)
@@ -447,6 +448,7 @@ facts_finalize=():>void=>$unsafe {
 }
 facts_reset=():>void=>{
     sum_refined_reset()
+    mem_reset()
     fact_predicates=dict<int64 int64>()
     fact_predicate_nodes=[FactPredicate()]
     fact_shared_literals=[]

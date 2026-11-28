@@ -14,7 +14,7 @@ from p"facts_index_writes.dewy" import (fact_constant fact_new)
 from p"ownership.jo" import (ownership_fact_cleanup)
 from p"facts_forgets.dewy" import (fact_drop_pending)
 from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
-from p"refine_metadata.dewy" import (ref_encoded)
+from p"refine_metadata.dewy" import (ref_encoded refine_storage)
 from p"refinement_types.dewy" import (FactTerm)
 from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_U64 is_int tkind)
 from p"node_store.dewy" import (node_aux2 node_op)
@@ -78,6 +78,13 @@ fact_predicate_tree=(n:PredicateWord params:dict<int64 int64> @budget:PredicateW
         term.b=fact_predicate_tree(index params @budget)
         if term.a =? 0 or term.b =? 0 {return 0}
     }
+    else if k =? 'field' and nodes.ptr[n].aux >=? 0 and tkind(fact_type(ntype(PredicateWord(nodes.ptr[n].a)))) =? 'struct_' {
+        # (a record field, read as fc_field reads it: a projection of the record's value)
+        term.field=PredicateWord(nodes.ptr[n].name)
+        term.field_type=refine_storage(n ntype(n))
+        term.a=fact_predicate_tree(PredicateWord(nodes.ptr[n].a) params @budget)
+        if term.a =? 0 {return 0}
+    }
     else if k =? 'not_' {
         term.op='kw_not'
         term.a=fact_predicate_tree(PredicateWord(nodes.ptr[n].a) params @budget)
@@ -129,6 +136,7 @@ fact_predicate_apply=(root:PredicateWord values:array<int64> @s:FactState):>Pred
     let a=fact_predicate_apply(term.a values @s)
     if a =? 0 {return 0}
     if term.length {return fact_project(@s a (-1) false T_INT)}
+    if term.field not=? 0 {return fact_project(@s a term.field false term.field_type)}
     let b=if term.b =? 0 {0} else {fact_predicate_apply(term.b values @s)}
     if term.b not=? 0 and b =? 0 {return 0}
     if term.element not=? 0 {return fact_project(@s a b true term.element)}

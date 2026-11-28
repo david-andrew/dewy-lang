@@ -36,6 +36,7 @@ fact_comparison_raw = (raw: i32) -> bool:
     op == .lt or op == .eq or op == .le
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 ref_encoded = (x: int, t: int) -> int: x * 2 + t
+refine_storage = (n: int, t: int) -> int: t
 cx_token = (value: int) -> Tok: value as Tok
 fact_domain = (t: int, reason: FactReason = .missing, at: int = 0) -> FactBound: FactBound(wide=true)
 '''

@@ -29,7 +29,8 @@ from p"types.jo" import (T_BOOL T_INT T_U64 fields prune structs types)
 from p"util.jo" import (err_notes)
 from p"witness.jo" import (wit_holder_text)
 from p"witness_nodes.dewy" import (wit_text)
-from p"witness_ops.dewy" import (wit_refinement)
+from p"witness_ops.dewy" import (wit_ref_side wit_refinement)
+from p"facts_membership.dewy" import (mem_assume mem_fail mem_truth)
 from p"node_store.dewy" import (node_aux2 node_with_aux2)
 
 # Checks and entries write Jo's holder, holder text and entry through places bound once;
@@ -112,6 +113,10 @@ ref_assume=(t0:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsafe {
         }
         # (a store's element type says nothing without the array it is stored in)
         if atom.b.kind =? 6 and ref_fact_holder =? 0 {continue}
+        if atom.op =? 'kw_in' {
+            mem_assume(@s self ref_value(atom.b self args base @s) base)
+            continue
+        }
         let a=ref_value(atom.a self args base @s)
         let b=ref_value(atom.b self args base @s)
         let v=fact_new(@s fact_domain(T_BOOL) FactTerm(atom.op a b))
@@ -172,6 +177,19 @@ ref_check_held=(n:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsaf
             if truth <? 0 {
                 proven=false
                 if fact_policy =? 'RequireStatic' {ref_self_fail(n t self s false)}
+            }
+            continue
+        }
+        if atom.op =? 'kw_in' {
+            let container=ref_value(atom.b self args base @s)
+            let member=mem_truth(@s self container base)
+            if member <=? 0 {
+                let text=wit_ref_side(atom.b container n "").text
+                if member =? 0 {mem_fail(n text true)}
+                else {
+                    proven=false
+                    if fact_policy =? 'RequireStatic' {mem_fail(n text false)}
+                }
             }
             continue
         }
