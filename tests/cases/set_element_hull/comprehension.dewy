@@ -1,0 +1,26 @@
+# A set made of refined elements keeps what held of every one of them,
+# through a loop over it, its members and its sorted members.
+Count:type = int64<n => 1 <=? n and n <=? 400>
+need = (c:Count):>int64 => c
+total = (xs:array<Count>):>int => {
+    let seen = set[loop x in xs if x >? 2 x]
+    let sum:int = 0
+    loop x in seen sum += need(x)
+    sum
+}
+smallest = (xs:array<Count>):>int64 => {
+    let seen = set[loop x in xs x]
+    let sorted = seen.sorted
+    if sorted.is_empty return 0
+    need(sorted[0]) + need(seen.values[end])
+}
+again = (xs:array<Count>):>int64 => {
+    let first = set[xs...]
+    let second = set[loop x in first x]
+    let last:int64 = 0
+    loop x in second last = need(x)
+    last
+}
+printl(total([4 1 4 9]))
+printl(smallest([7 3 7]))
+printl(again([5 6]))

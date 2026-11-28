@@ -156,6 +156,25 @@ fact_count_call=(n:LibraryWord):>bool=>$unsafe {
     let path=files[pos_file(nodes.ptr[d].pos)].path
     path =? "{lib_dir}/core/array.jo" or path =? "{lib_dir}/std/dewy.jo"
 }
+# A set made of an array's elements (`set[xs...]`, `set[loop ...]`:
+# lib/std/dewy_sets.jo): its members are some of them. O(1).
+fact_set_made_call=(n:LibraryWord):>bool=>$unsafe {
+    if nkids(n) not=? 1 or nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/std/dewy_sets.jo" {return false}
+    let name=name_of(LibraryWord(nodes.ptr[d].name))
+    name =? "__dewy_make_set" and tkind(fact_type(ntype(kid(n 0)))) =? 'array' and is_dewy_set_type(representation_type(ntype(n)))
+}
+# What holds of every element of before holds of every element of after, which
+# holds some of them (a set made of an array, a set's members as an array): the
+# element hull and a uniform fill's value, never positions. O(projections).
+fact_some_elements=(@s:FactState before:LibraryWord after:LibraryWord):>void=>{
+    if before =? 0 or after =? 0 {return}
+    loop selector in [FACT_ELEMENT_VALUE FACT_ELEMENT_COPY] {
+        let held=fact_projection_find(s before selector false)
+        if held >=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(after selector false s.projections[held].value))}
+    }
+}
 # Reviewed array (set, text) emptiness contract. O(1), only when a demanded
 # expression reads the result; mutation continues to invalidate the receiver
 # normally. A set's or dictionary's is its entry count's (fact_entry_count_call).

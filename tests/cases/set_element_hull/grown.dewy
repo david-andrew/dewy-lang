@@ -1,0 +1,11 @@
+# A member added afterwards need not be one of the elements.
+Count:type = int64<n => 1 <=? n and n <=? 400>
+need = (c:Count):>int64 => c
+last = (xs:array<Count> extra:int64):>int64 => {
+    let seen = set[loop x in xs x]
+    seen.push(extra)
+    let found:int64 = 0
+    loop x in seen found = need(x)
+    found
+}
+printl(last([1] 500))

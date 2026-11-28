@@ -31,7 +31,7 @@ from p"facts_forks.dewy" import (fact_call_arguments fact_fork_record fact_key_c
 from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound ft_back_only ft_begin ft_depth ft_is_active ft_rollback ft_set_back_only)
 from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_into fact_join_length)
 from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_max fact_shrunk_elements)
-from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_array_extremum fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
+from p"facts_library.dewy" import (fact_array_extremum fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call fact_set_made_call fact_some_elements)
 from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check fact_parallel_range_call fact_refinements_unreachable fact_scope_exit)
 from p"facts_loops.dewy" import (fact_generator_call fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
 from p"facts_maps.dewy" import (fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_map_value_refined fact_reflexive_key fact_snapshot_length)
@@ -66,6 +66,7 @@ from p"proofs.jo" import (proof_active proof_decls result_active)
 from p"refine.jo" import (fact_pair_transient ref_pair_stmts ref_self_active refine_active refine_owners)
 from p"refine_transfers.dewy" import (ref_assume ref_check ref_fact_current_entry)
 from p"refine_metadata.dewy" import (refine_storage representation_type str_set_of)
+from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"refine_rare.dewy" import (ref_self_place_read)
 from p"refine_siblings.dewy" import (ref_sib_contract ref_sib_map_read)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
@@ -1647,7 +1648,11 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
                         fact_project(@s source FACT_MAP_POSITIONS false T_INT);
                     }
                 }
-                else {fact_keys_copy(@s source fresh)}
+                else {
+                    fact_keys_copy(@s source fresh)
+                    # (a set's members as an array: its elements' hull)
+                    fact_some_elements(@s source fresh)
+                }
                 return fresh
             }
         }
@@ -1968,6 +1973,12 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
                 fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
                 fact_keys_copy(@s entry[0] result)
                 fact_permuted_elements(@s entry[0] result)
+                # (`s.sorted`: a set's members, whose hull its elements' is)
+                if is_dewy_set_type(representation_type(ntype(kid(n 0)))) {fact_some_elements(@s entry[0] result)}
+                contracted=true
+            }
+            if fact_set_made_call(n) {
+                fact_some_elements(@s entry[0] result)
                 contracted=true
             }
             if fact_words_call(n) {
