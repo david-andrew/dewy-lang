@@ -1,0 +1,55 @@
+# A small ECS: entities are Pool handles; each component is a dictionary keyed by entity.
+# Entity liveness is Pool membership; "has a Position" is dictionary key membership (today's rule).
+Entity:type = Handle
+World:type = [
+    alive:Pool<string>                      # entity -> its name
+    pos:dict<Entity vec2>
+    vel:dict<Entity vec2>
+    hp:dict<Entity int64>
+]
+
+spawn = (@w:World name:string at:vec2):>Entity<(in? w.alive)> => {
+    let e = w.alive.add(name)
+    w.pos[e] = at
+    e
+}
+
+despawn = (@w:World e:Entity):>void => {   # forgets e everywhere; keeps other entities alive
+    w.pos.pop(e default=vec2(0 0));
+    w.vel.pop(e default=vec2(0 0));
+    w.hp.pop(e default=0);
+    w.alive.remove(e);
+}
+
+# A two-component query: entities with both, each proven a key of both dictionaries.
+moving = (w:World):>array<Entity<e => e in? w.pos and e in? w.vel>> =>
+    [loop e in w.vel.keys.values if e in? w.pos e]
+
+movement = (@w:World dt:float64):>void => {
+    loop e in moving(w) w.pos[e] += w.vel[e] * dt    # no test: the query's element contract
+}
+
+damage = (@w:World e:Entity<(in? w.alive)> amount:int64):>void => {
+    if e not in? w.hp return
+    w.hp[e] -= amount
+    if w.hp[e] <=? 0 {
+        printl"{w.alive[e]} is down"          # proven: e is alive (the parameter's contract)
+        despawn(@w e)
+    }
+}
+
+main = () => {
+    let w = World[Pool<string>[] [] [] []]
+    let hero = w.spawn("hero" vec2(0 0))
+    let slime = w.spawn("slime" vec2(5 0))  # keeps hero (fresh)
+    w.vel[hero] = vec2(1 0)
+    w.hp[slime] = 3
+    loop _ in [0..3) {
+        movement(@w 0.5)                    # writes pos entries only: keeps both entities and their keys
+        if slime in? w.alive damage(@w slime 1)
+        # without the test: error: cannot prove `slime` is in `w.alive`
+        #   note: on the loop's next pass, `damage(@w slime 1)` (line 49) may have removed it
+        #   help: test it with `if slime in? w.alive`, or let `damage` take any entity
+    }
+    printl"{w.alive[hero]} at {w.pos[hero]}"  # damage keeps hero: only slime's slot was written
+}

@@ -65,6 +65,7 @@
   - D46 Q7: target words (`host_tuned`, `web`, `wasi`, `sim`, core names) and `$target` members.
   - D47 Q4: test clock names (`advance`, `simulate_suspend`, `simulate_wall_step`, `simulate_monotonic_reset`, `wake_order=`).
   - D48 Q7: `T.type_text` and the argparse names (`dispatch`, `Subcommand`, `env=`, `check=`, `Parsed`, `separator=`).
+  - D54 Q1: `h in? c` for handle membership; `pool.has` goes.
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -2298,6 +2299,37 @@ Give an integer range (`[0..n)`, `[a, b..c]`, `(0..n]`, a stored `IntRange`) `r.
 - **Unblocks:** ladder 153's `[pieces.length - 1, pieces.length - 2..0]` and `[n, n - 1..0]`; page and frame counts without the ceiling-division idiom.
 
 Dogfooded (13 programs, 65 of 65 marks at 5 after two changes: `.length` is an exact `int` rather than `uint64`, and `.reversed` is a range rather than an array, found when programs 4, 6, 8 and 12 scored 2 to 4). Programs and grades: [proposals/ranges/members-round1.md](proposals/ranges/members-round1.md).
+
+---
+
+### D54. Handle membership is written `in?`: `pool.has(h)` goes
+
+```dewy
+let h = enemies.add(Enemy[pos])
+enemies[h].hp -= 10                                              # proven: just added
+if bullet.target in? enemies { aim = enemies[bullet.target].pos }   # today: enemies.has(bullet.target)
+pos = (w:World b:Body<(in? w)>):>vec2 => w.bodies[b.h].pos       # a library requires a live handle
+```
+
+A library states when its handles are valid with the existing `in?` protocol (`contains`) and refinements that already parse:
+- `b:Body<(in? w)>` requires it;
+- `:>Body<(in? w)>` gives it;
+- `:>array<Body<(in? w)>>` gives it to every element.
+
+The compiler carries it across calls that can't remove the handle, derived from their bodies. The semantics pass both tests, so they are taken:
+- After `add` or `in?`, callers write nothing.
+- A stored handle takes one `in?` test or `w.get(h)`.
+
+`Pool` stops being recognized by its file path, and both physics examples drop `$runtime_checks`. The refinement forms are the decided partial-operator spelling with a dependent operand, so only the spelling below is asked.
+
+#### Q1 (c). `in?` for handles, everywhere
+
+Make `h in? c` the one spelling of "this handle is still in its container", as it is for dictionary keys? `pool.has(h)` is then removed, and D11's proposed `w.has(ball)` becomes `ball in? w`. The refinement `<(in? w)>` needs the operator form, so keeping `has` would leave two spellings of one test.
+
+- **Rec:** yes. **Reversible:** yes (a rename).
+- **Unblocks:** removing `has` when Pool moves to the general mechanism. Nothing else waits on it: the implementation uses `in?` either way.
+
+Dogfooded: 13 programs, 59 of 65 marks at 5. The six below 5 are explained: stored handles are tested on use, and cross-container invariants aren't facts. Names tested: three cold readers read every `in?` form correctly, and all three rated `pool.has` less clearly a proof than `in?`. Design, programs and grades: [proposals/handles/round1.md](proposals/handles/round1.md).
 
 ---
 

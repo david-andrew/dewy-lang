@@ -1,0 +1,39 @@
+# A node editor: edges name their end nodes. Removing a node removes its edges, so the library's
+# `remove_node` keeps other nodes and forgets every edge: an edge handle held across it is tested.
+Node:type = [h:Handle]
+Edge:type = [h:Handle]
+NodeData:type = [label:string at:vec2]
+EdgeData:type = [from:Node to:Node]
+Graph:type = [nodes:Pool<NodeData> edges:Pool<EdgeData>]
+
+contains = (g:Graph n:Node):>bool => n.h in? g.nodes
+contains = (g:Graph e:Edge):>bool => e.h in? g.edges
+
+add_node = (@g:Graph label:string at:vec2):>Node<(in? g)> => Node[g.nodes.add(NodeData[label at])]
+connect = (@g:Graph a:Node<(in? g)> b:Node<(in? g)>):>Edge<(in? g)> => Edge[g.edges.add(EdgeData[a b])]
+label = (g:Graph n:Node<(in? g)>):>string => g.nodes[n.h].label
+remove_node = (@g:Graph n:Node):>void => {
+    g.edges.retain((e) => e.from not=? n and e.to not=? n)
+    g.nodes.remove(n.h);
+}
+
+# The ends an edge names were nodes when it was made; a removed node took its edges with it,
+# so a live edge's ends are live. That is a library invariant the facts cannot see: `ends`
+# tests them and gives none, rather than claim it.
+ends = (g:Graph e:Edge<(in? g)>):>[Node<(in? g)> Node<(in? g)>]? => {
+    let d = g.edges[e.h]
+    if d.from in? g and d.to in? g [d.from d.to] else none
+}
+
+main = () => {
+    let g = Graph[Pool<NodeData>[] Pool<EdgeData>[]]
+    let a = g.add_node("load" vec2(0 0))
+    let b = g.add_node("blur" vec2(200 0))          # keeps a
+    let c = g.add_node("save" vec2(400 0))          # keeps a and b
+    let ab = g.connect(a b)                         # keeps the nodes (writes edges only)
+    let bc = g.connect(b c)                         # keeps ab
+    g.remove_node(b)                                # keeps a and c: fresh, so their slots differ from b's
+    printl(g.label(a) + " / " + g.label(c))         # proven
+    printl(g.ends(bc))                              # error: cannot prove `bc` is in `g`
+}   # note: `g.remove_node(b)` (line 35) may remove any edge: it calls `retain` with a callback
+    # help: test it with `if bc in? g`, or `g.edges.get(bc.h)` for a value

@@ -1,0 +1,43 @@
+# A slot map written from scratch by a user, not on Pool: the same mechanism proves it.
+# Keys stay valid while nothing removed them; `remove` keeps the other keys.
+Key:type = [index:int64 version:int64]
+Slot:type = <V>[value:V? version:int64]
+SlotMap:type = <V>[slots:array<Slot<V>> free:array<int64> count:int64]
+
+contains = <V>(m:SlotMap<V> k:Key):>bool =>
+    k.index >=? 0 and k.index <? m.slots.length and m.slots[k.index].version =? k.version and m.slots[k.index].value isnt? none
+
+insert = <V>(@m:SlotMap<V> v:V):>Key<(in? m)> => {
+    let i = if m.free.length >? 0 {m.free.pop()} else {m.slots.length}
+    if i >=? m.slots.length or m.slots[i].value isnt? none {    # never reuse a full slot: this O(1)
+        i = m.slots.length                                      # test is what makes `fresh` a fact
+        m.slots.push(Slot<V>[none 0])
+    }
+    m.slots[i] = Slot<V>[v m.slots[i].version + 1]
+    m.count += 1
+    Key[i m.slots[i].version]
+}
+
+# k's slot is full (the entry facts say so), so the narrowing is proven.
+__index__ = <V>(m:SlotMap<V> k:Key<(in? m)>):>V => m.slots[k.index].value as V
+get = <V>(m:SlotMap<V> k:Key):>V? => if k in? m m[k] else none
+
+remove = <V>(@m:SlotMap<V> k:Key):>V? => {
+    if k not in? m return none
+    let old = m[k]
+    m.slots[k.index] = Slot<V>[none k.version + 1]    # one element: keeps keys at other indexes
+    m.free.push(k.index)
+    m.count -= 1
+    old
+}
+
+main = () => {
+    let names = SlotMap<string>[]
+    let ada = names.insert("Ada")
+    let bob = names.insert("Bob")              # keeps ada; bob's index is not ada's (fresh)
+    printl(names[ada])                         # proven
+    names.remove(bob);                         # keeps ada: their indexes differ
+    printl(names[ada])                         # proven
+    printl(names.get(bob) ?? "gone")           # the value form
+    printl(names[bob])                         # error: `bob` is no longer in `names`
+}                                              #   note: `names.remove(bob)` (line 39) removed it

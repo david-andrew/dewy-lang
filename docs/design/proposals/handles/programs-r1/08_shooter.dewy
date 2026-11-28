@@ -1,0 +1,45 @@
+# Homing bullets keep a handle to their target across frames; enemies come and go.
+Enemy:type = [pos:vec2 hp:int64]
+Bullet:type = [pos:vec2 vel:vec2 target:Handle?]
+
+let enemies = Pool<Enemy>[]
+let bullets = Pool<Bullet>[]
+
+spawn_wave = (n:int64):>void => {
+    loop i in [0..n) { enemies.add(Enemy[vec2(100+80*(i as float64) 80) 3]); }
+}
+
+fire = (from:vec2):>void => {
+    let ks = enemies.keys                                       # every element is in enemies
+    let target:Handle? = if ks.length >? 0 ks.min_by((h) => norm(enemies[h].pos - from)) else none
+    bullets.add(Bullet[from vec2(0 -400) target]);
+}
+
+update = (dt:float64):>void => {
+    if key_pressed(Key.space) fire(vec2(640 700))
+    loop mut b in bullets.items {
+        if b.target is? Handle and b.target in? enemies {       # across frames: tested
+            let to = enemies[b.target].pos - b.pos
+            b.vel = normalize(to) * 400.0
+        }
+        b.pos += b.vel * dt
+    }
+    loop h in bullets.keys {
+        let b = bullets[h]
+        loop e in enemies.keys {
+            if norm(enemies[e].pos - b.pos) <? 16.0 {
+                enemies[e].hp -= 1                              # keeps every enemy (items only)
+                bullets[h].pos = vec2(-100 -100)                # proven: h is from bullets.keys,
+            }                                                   #   and nothing removed a bullet
+        }
+    }
+    enemies.retain((e) => e.hp >? 0)                            # forgets enemies (a callback decides)
+    bullets.retain((b) => b.pos.y >? -50.0)
+    if enemies.length =? 0 spawn_wave(6)
+}
+
+draw = ():>void => {
+    clear(rgb(0.05 0.05 0.1))
+    loop e in enemies.items circle(e.pos 14 rgb(0.9 0.3 0.3))
+    loop b in bullets.items circle(b.pos 3 WHITE)
+}

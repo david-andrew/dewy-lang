@@ -1,0 +1,36 @@
+# A chat server's connection table: network events carry a connection id that may have closed
+# since, so handlers test it; code that just accepted one needs no test.
+import net
+
+Conn:type = [h:Handle]
+Client:type = [socket:net.Socket name:string]
+Server:type = [clients:Pool<Client>]
+
+contains = (s:Server c:Conn):>bool => c.h in? s.clients
+
+accept = (@s:Server socket:net.Socket):>Conn<(in? s)> => Conn[s.clients.add(Client[socket "guest"])]
+name = (s:Server c:Conn<(in? s)>):>string => s.clients[c.h].name
+send = (@s:Server c:Conn<(in? s)> text:string):>void | net.NetError => s.clients[c.h].socket.send(text)
+drop = (@s:Server c:Conn):>void => { if c in? s { s.clients[c.h].socket.close(); s.clients.remove(c.h); } }
+
+broadcast = (@s:Server text:string):>void => {
+    loop c in s.clients.keys {                      # each is in s.clients
+        s.clients[c].socket.send(text) ?? continue  # a send writes the socket, not the table: keeps the rest
+    }
+}
+
+handle = (@s:Server event:net.Event<Conn>):>void => {
+    match event {
+        e:net.Accepted => {
+            let c = s.accept(e.socket)
+            s.send(c "welcome, {s.name(c)}") ?? s.drop(c)    # proven: accepted just now
+        }
+        e:net.Received<Conn> => {
+            if e.who not in? s return                          # closed since the event was queued
+            if e.text.startswith("/nick ") s.clients[e.who.h].name = e.text[6..]
+            else s.broadcast("{s.name(e.who)}: {e.text}")      # proven: the argument runs before the call
+            s.send(e.who "sent") ?? s.drop(e.who)              # proven: broadcast keeps every client
+        }
+        e:net.Closed<Conn> => s.drop(e.who)
+    }
+}

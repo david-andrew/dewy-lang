@@ -1,0 +1,43 @@
+# A platformer whose player body is never removed: a record field's contract carries it
+# across frames, so no frame tests it. Enemies come and go and are tested.
+import physics
+
+Level:type = [
+    world:physics.World
+    player:physics.Body<(in? world)>       # checked on every store, and after every change of world
+    enemies:array<physics.Body>
+]
+
+load = ():>Level => {
+    let w = physics.World[]
+    w.add_box(vec2(640 700) vec2(1280 40) kind=physics.BodyKind.fixed);
+    let p = w.add_box(vec2(100 600) vec2(24 40))
+    w.set_fixed_rotation(p true)
+    let foes:array<physics.Body> = []
+    loop i in [0..4) foes.push(w.add_circle(vec2(400+150*(i as float64) 600) 14))   # keeps p
+    Level[w p foes]                                                              # proven: p is in w
+}
+
+let level = load
+
+update = (dt:float64):>void => {
+    let p = level.player
+    if key_down(Key.left) level.world.push(p vec2(-30 0))     # no test: the field's contract
+    if key_down(Key.right) level.world.push(p vec2(30 0))
+    level.world.step(dt)                                      # keeps every body, so the contract holds
+    loop e in level.enemies {
+        if e not in? level.world continue
+        if norm(level.world.pos(e) - level.world.pos(p)) <? 30.0 and e not=? level.player {
+            level.world.remove(e);                            # keeps the player: e is not it
+        }
+    }
+    # Without `e not=? level.player`: error: removing `e` may remove `level.player`, which must
+    # stay in `level.world`. note: nothing shows `e` differs from the player.
+    # help: test `e not=? level.player`, or keep the player out of `enemies`
+}
+
+draw = ():>void => {
+    let p = level.player
+    rect_centered(level.world.pos(p) vec2(24 40) rgb(0.3 0.8 0.4))
+    loop e in level.world.bodies() circle(level.world.pos(e) 14 rgb(0.9 0.3 0.3))
+}

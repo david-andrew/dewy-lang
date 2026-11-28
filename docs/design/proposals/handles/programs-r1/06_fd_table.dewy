@@ -1,0 +1,38 @@
+# A file-descriptor table for an interpreter (a toy shell's builtins): scripts name files by
+# number, the table maps them to open files. Closing twice is a compile error where provable,
+# and a value everywhere else.
+FileId:type = [h:Handle]
+Files:type = [open:Pool<OsFile> names:dict<int64 FileId>]
+
+contains = (fs:Files f:FileId):>bool => f.h in? fs.open
+
+open = (@fs:Files path:Path mode:Mode):>FileId<(in? fs)> | FileError => {
+    let os = os_open(path mode) or_throw
+    FileId[fs.open.add(os)]
+}
+read_line = (@fs:Files f:FileId<(in? fs)>):>string | EndOfInput | FileError => fs.open[f.h].read_line
+write = (@fs:Files f:FileId<(in? fs)> text:string):>void | FileError => fs.open[f.h].write(text)
+close = (@fs:Files f:FileId<(in? fs)>):>void | FileError => {
+    let os = fs.open[f.h]
+    fs.open.remove(f.h);
+    os.close or_throw
+}
+
+copy = (@fs:Files from:Path to:Path):>void | FileError => {
+    let src = fs.open(from Mode.read) or_throw
+    let dst = fs.open(to Mode.write) or_throw          # keeps src
+    loop {
+        let line = fs.read_line(src) ?? break           # read_line writes the OS file's state, not the table: keeps both
+        fs.write(dst line) or_throw
+    }
+    fs.close(src) or_throw                              # keeps dst: different slots (dst was fresh)
+    fs.close(dst) or_throw
+    fs.close(src) or_throw                              # error: `src` is no longer in `fs`
+}                                                       #   note: `fs.close(src)` (line 28) removed it
+
+# A script's `close 3`: the number comes from text, so it is tested.
+builtin_close = (@fs:Files n:int64):>void | FileError => {
+    let f = fs.names.get(n) ?? return
+    if f in? fs fs.close(f) or_throw else printl"close: {n}: not open"
+    fs.names.pop(n);
+}

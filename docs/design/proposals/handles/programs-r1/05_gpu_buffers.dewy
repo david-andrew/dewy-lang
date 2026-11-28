@@ -1,0 +1,48 @@
+# GPU buffer handles: a device owns its buffers; a frame draws with buffers proven live, and a
+# resize recreates the ones that depend on the window size.
+import gpu
+
+Mesh:type = [vertices:gpu.Buffer indices:gpu.Buffer count:int64]
+
+# library (lib/gpu), excerpt:
+#   Buffer:type = [h:Handle]
+#   contains = (d:Device b:Buffer):>bool => b.h in? d.buffers
+#   create_buffer = (@d:Device bytes:int64 usage:Usage):>Buffer<(in? d)> | OutOfMemory
+#   upload = (@d:Device b:Buffer<(in? d)> data:array<float32>):>void      # keeps every buffer
+#   draw = (@d:Device v:Buffer<(in? d)> i:Buffer<(in? d)> count:int64):>void
+#   destroy = (@d:Device b:Buffer):>bool                                  # keeps the others
+
+load_mesh = (@d:gpu.Device vs:array<float32> is:array<float32>):>Mesh | OutOfMemory => {
+    let v = d.create_buffer(vs.length * 4 gpu.Usage.vertex) or_throw
+    let i = d.create_buffer(is.length * 4 gpu.Usage.index) or_throw    # keeps v
+    d.upload(v vs)
+    d.upload(i is)
+    Mesh[v i is.length]
+}
+
+Renderer:type = [device:gpu.Device ship:Mesh target:gpu.Buffer]
+
+frame = (@r:Renderer):>void => {
+    let m = r.ship
+    if m.vertices in? r.device and m.indices in? r.device {    # stored handles: tested once a frame
+        r.device.draw(m.vertices m.indices m.count)
+    }
+}
+
+resize = (@r:Renderer width:int64 height:int64):>void | OutOfMemory => {
+    r.device.destroy(r.target);
+    r.target = r.device.create_buffer(width * height * 4 gpu.Usage.target) or_throw
+    r.device.upload(r.target fill(0.0 width * height))    # proven: just created, nothing removed since
+}
+
+main = () => {
+    let device = gpu.open() or_throw
+    let ship = load_mesh(@device [0.0 1.0 0.0  -1.0 -1.0 0.0  1.0 -1.0 0.0] [0.0 1.0 2.0]) or_throw
+    device.draw(ship.vertices ship.indices ship.count)   # proven: load_mesh's result fields are in
+    let r = Renderer[device ship gpu.Buffer[]]           #   device (inferred, as record-field lengths are)
+    r.resize(1280 720) or_throw
+    loop _ in [0..3) frame(@r)
+}
+# Where one owner holds a buffer for its whole life, an owning value with a drop hook
+# (ownership.md) is simpler still: nothing can name it after it is gone. Handles are for
+# resources many things name (meshes sharing a buffer, an asset table).

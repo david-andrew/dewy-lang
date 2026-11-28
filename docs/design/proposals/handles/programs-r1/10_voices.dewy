@@ -1,0 +1,35 @@
+# A mixer with a fixed number of voices: starting a sound may steal the oldest voice. The
+# library cannot promise that `play` keeps other voices, and the summary says so on its own:
+# `play` writes a slot it picks at run time, so it forgets every voice. Nobody wrote a tag.
+Voice:type = [slot:int64 serial:int64]
+Channel:type = [sound:Sound? serial:int64 volume:float64 started:int64]
+Mixer:type = [channels:array<Channel length=16> serial:int64]
+
+contains = (m:Mixer v:Voice):>bool =>
+    v.slot >=? 0 and v.slot <? 16 and m.channels[v.slot].serial =? v.serial and m.channels[v.slot].sound isnt? none
+
+play = (@m:Mixer s:Sound volume:float64 = 1.0):>Voice<(in? m)> => {
+    let slot = oldest_or_free(m)                  # (any of the 16)
+    m.serial += 1
+    m.channels[slot] = Channel[s m.serial volume m.serial]
+    Voice[slot m.serial]
+}
+set_volume = (@m:Mixer v:Voice<(in? m)> volume:float64):>void => { m.channels[v.slot].volume = volume }
+stop = (@m:Mixer v:Voice):>void => { if v in? m m.channels[v.slot].sound = none }
+
+let mixer = Mixer[fill(Channel[none 0 0.0 0] 16) 0]
+let engine:Voice? = none
+
+on_throttle = (t:float64):>void => {
+    if engine is? Voice and engine in? mixer mixer.set_volume(engine t)   # it may have been stolen: tested
+    else engine = mixer.play(engine_loop volume=t)
+}
+
+explode = ():>void => {
+    let boom = mixer.play(explosion)
+    let echo = mixer.play(explosion volume=0.3)    # forgets boom: this play may have stolen its voice
+    mixer.set_volume(echo 0.3)                     # proven: just started
+    mixer.set_volume(boom 0.8)                     # error: cannot prove `boom` is in `mixer`
+}   # note: `mixer.play(explosion volume=0.3)` (line 30) may replace any voice: it writes
+    #   `m.channels[slot]` for a `slot` it picks (line 14)
+    # help: set boom's volume before starting another sound, or test it with `if boom in? mixer`

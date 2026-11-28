@@ -1,0 +1,66 @@
+# The library side, in Dewy spelling (lib/std/pool.jo and lib/physics.jo are Jo today and change
+# the same way). Nothing here is new syntax: `contains` is the existing `in?` protocol, and
+# `<(in? w)>` is the decided partial-operator refinement with a dependent operand, as
+# `i:int64<(<? xs.length)>` is.
+
+# ---- lib/std/pool: an ordinary user of the mechanism (no file-path recognition) ----
+Handle:type = [slot:int64 gen:int64]
+Pool:type = <T>[items:array<T> handles:array<Handle> __where:array<int64> __gen:array<int64> __free:array<int64>]
+
+# The validity relation: one pure function, written once.
+contains = <T>(p:Pool<T> h:Handle):>bool =>
+    h.slot >=? 0 and h.slot <? p.__where.length and p.__gen[h.slot] =? h.gen and p.__where[h.slot] >=? 0
+
+# Establishes: the result is in p after the call. Keeps every earlier member, and the result is
+# fresh (its slot is no earlier member's): both are the call's summary, derived from this body.
+add = <T>(@p:Pool<T> x:T):>Handle<(in? p)> => {
+    let slot = if p.__free.length >? 0 {p.__free.pop()} else {p.__where.length}
+    if slot >=? p.__where.length or p.__where[slot] >=? 0 {   # (a live slot is never reused: the check
+        slot = p.__where.length                              #  that makes freshness a fact, O(1))
+        p.__where.push(-1)
+        p.__gen.push(0)
+    }
+    p.__gen[slot] += 1
+    p.__where[slot] = p.items.length
+    p.items.push(x)
+    p.handles.push(Handle[slot p.__gen[slot]])
+    Handle[slot p.__gen[slot]]
+}
+
+# Requires: the caller proves h is in p. The body gets the unfolded relation as facts.
+__index__ = <T>(p:Pool<T> h:Handle<(in? p)>):>T => p.items[p.__where[h.slot]]
+__setindex__ = <T>(@p:Pool<T> h:Handle<(in? p)> x:T):>void => { p.items[p.__where[h.slot]] = x }  # keeps: writes items only
+get = <T>(p:Pool<T> h:Handle):>T? => if h in? p p[h] else none
+
+# Removes h; keeps every member whose slot differs (the summary), so `remove(g)` keeps `h`
+# when the caller knows they differ (both from `add`, or `if h not=? g`).
+remove = <T>(@p:Pool<T> h:Handle):>bool => { ... }     # body as today, `has` spelled `in?`
+clear = <T>(@p:Pool<T>):>void => { ... }               # forgets every member: no summary keeps them
+keys = <T>(p:Pool<T>):>array<Handle<(in? p)>> => [loop h in p.handles if h in? p h]   # O(1) per element, visible
+
+# ---- lib/physics: handles on two pools, ground apart ----
+Body:type = [h:Handle]
+Joint:type = [h:Handle]
+Ground:type = 'ground'
+const ground:Ground = 'ground'
+Anchor:type = Body | Ground
+World:type = [gravity=vec2(0 980) bodies:Pool<__PBody> joints:Pool<__PJoint> ...]
+
+contains = (w:World b:Body):>bool => b.h in? w.bodies
+contains = (w:World j:Joint):>bool => j.h in? w.joints
+id = (b:Body):>int64 => b.h.slot                        # (a body's number: a dictionary key)
+
+add_circle = (@w:World pos:vec2 radius:float64 kind=BodyKind.dynamic ...):>Body<(in? w)> =>
+    Body[w.bodies.add(__circle(pos radius kind ...))]
+pos = (w:World b:Body<(in? w)>):>vec2 => w.bodies[b.h].pos
+set_velocity = (@w:World b:Body<(in? w)> v:vec2):>void => { w.bodies[b.h].vel = v }   # keeps (items only)
+get = (w:World b:Body):>BodyState? => if b in? w w.__state(b) else none
+bodies = (w:World):>array<Body<(in? w)>> => [loop h in w.bodies.keys if w.bodies[h].shaped Body[h]]
+bodies_at = (w:World p:vec2):>array<Body<(in? w)>> => ...
+step = (@w:World dt:float64):>void => { ... }           # writes bodies' items, arbiters, events: keeps both pools
+pin = (@w:World a:Body<(in? w)>|Ground b:Body<(in? w)> at:vec2 ...):>Joint<(in? w)> => { ... }
+ends = (w:World j:Joint<(in? w)>):>(vec2 vec2) => { ... }
+drag_to = (@w:World j:Joint<(in? w)> target:vec2):>void => { ... }
+# Removing a body removes its joints: the summary keeps other bodies and forgets every joint.
+remove = (@w:World b:Body):>bool => { ... }
+remove = (@w:World j:Joint):>bool => { ... }           # keeps bodies; keeps joints whose slot differs

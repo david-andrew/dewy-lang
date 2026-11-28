@@ -1,0 +1,39 @@
+# A per-frame arena of particles: references are valid until the next reset, not per slot.
+# The relation is an epoch, so the compiler proves `alloc` keeps every reference with
+# today's facts alone (a push keeps lower indexes; the epoch field is not written).
+Ref:type = [index:int64 epoch:int64]
+Arena:type = <T>[items:array<T> epoch:int64]
+
+contains = <T>(a:Arena<T> r:Ref):>bool => r.epoch =? a.epoch and r.index >=? 0 and r.index <? a.items.length
+
+alloc = <T>(@a:Arena<T> x:T):>Ref<(in? a)> => {
+    a.items.push(x)
+    Ref[a.items.length - 1 a.epoch]
+}
+__index__ = <T>(a:Arena<T> r:Ref<(in? a)>):>T => a.items[r.index]
+__setindex__ = <T>(@a:Arena<T> r:Ref<(in? a)> x:T):>void => { a.items[r.index] = x }
+reset = <T>(@a:Arena<T>):>void => {         # forgets every reference: the epoch changes
+    a.items.clear()
+    a.epoch += 1
+}
+
+Spark:type = [pos:vec2 vel:vec2 parent:Ref?]
+
+let sparks = Arena<Spark>[[] 0]
+
+update = (dt:float64):>void => {
+    sparks.reset()
+    let root = sparks.alloc(Spark[vec2(640 360) vec2(0 -200) none])
+    loop i in [0..12) {
+        let angle = (i as float64) * TAU / 12.0
+        let s = sparks.alloc(Spark[sparks[root].pos vec2(cos(angle) sin(angle)) * 90.0 root])  # alloc keeps root
+        sparks[s].pos += sparks[s].vel * dt
+    }
+}
+
+draw = ():>void => {
+    loop s in sparks.items {
+        let from = if s.parent is? Ref and s.parent in? sparks sparks[s.parent].pos else s.pos
+        line(from s.pos 1 rgb(1.0 0.8 0.3))
+    }
+}
