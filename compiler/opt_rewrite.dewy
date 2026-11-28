@@ -1696,7 +1696,8 @@ ow_transfer=(ins:ptr<Ins> simplify:bool):>void=>$unsafe {
             return
         }
         else if (((opt_decode[oc_tag(ins)] & 4) not=? 0) and (not (((op =? 'call') and (ins[0].c =? 1))))) {
-            ow_kill_all()
+            if op =? 'call' and ins[0].c =? 4 {ow_kill_mem(64)}
+            else {ow_kill_all()}
         }
     }
     else {
@@ -2593,6 +2594,8 @@ fl_pass1=():>void=>$unsafe {
                 let m=int64(p_ins[0].c)
                 let kill:OptWord=if opt_raw_mem {7} else if (m & 64) not=? 0 {4} else if (m & 32) not=? 0 {2} else {1}
                 lp_kills.ptr[active]=(lp_kills.ptr[active] or kill)
+            } else if p_ins[0].op =? 'call' and p_ins[0].c =? 4 {
+                lp_kills.ptr[active]=(lp_kills.ptr[active] or (if opt_raw_mem {7} else {4}))
             } else {
                 lp_kills.ptr[active]=(lp_kills.ptr[active] or 7)
             }
@@ -4122,7 +4125,9 @@ opt_rewrite=():>void=>$unsafe {
                     if (regs[u].first >? pos) {regs[u].first=pos32}
                     ilast[u]=pos32
                 }
-                if ((op not=? 'call') or (ins[0].c not=? 1)) {
+                if op =? 'call' and ins[0].c =? 4 {
+                    kill=if opt_raw_mem {7} else {4}
+                } else if ((op not=? 'call') or (ins[0].c not=? 1)) {
                     kill=7
                 }
             }

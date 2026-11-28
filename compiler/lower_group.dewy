@@ -10,7 +10,7 @@ from p"lower_primitives.dewy" import (rt_const rt_global rt_global_word bounds_c
 from p"lower_closures.dewy" import (closure_env_shareable closure_scalar_environment closure_size drop_stack_closure env_layout partial_layout spawn_body spawn_owned_capture stack_closure_local stack_closure_target)
 from p"lower_scalars.dewy" import (all_const byte_eq_type byte_offset_plain const_array f2i_i32 float_op gen_eq gen_match_lookup gen_value_dotname gen_value_float_lit gen_value_int_lit gen_value_none_lit int_op is_plain_ctor is_slice math_int_guard negate_cmp never_after never_value pat_int positive_modulus range_cmp range_tail same_range_read saturate_binary saturate_shift sdiv_wrap stepped_done text_source vec_comps wide_shift)
 from p"lower_views.dewy" import (bounded_open_for declared_in_scope fixed_path_of fp_end held_encode_addr held_opt_reg is_uniq_array plain_read reserve_comprehension simple_cond uq_end)
-from p"lower_storage.dewy" import (V arr_len arr_unique arr_unique_val blk borrow box_put box_val boxed_field_of br_to brif_to build_slot cell_place copy_at drop_at drop_held els endc enter_cond field_place field_store_type field_val_addr finish_call freeze_scalar hdr_load hdr_store iff is_shared leave_cond load_val lop new_cell new_temp norm opt_has opt_value own owner_array_from_fixed place_addr read_place reg_temp_slot reg_temp_vreg release release_arg_snapshots result_from_slot ret_vt retain retain_elems scope_add_local scope_push stmt_begin stmt_end store_field store_type store_val vc vt_of write_place zero_declare zero_note zero_val)
+from p"lower_storage.dewy" import (V arr_len arr_unique arr_unique_val blk borrow box_put box_val boxed_field_of br_to brif_to build_slot cell_place copy_at drop_at drop_held els endc enter_cond field_place field_store_type field_val_addr finish_call freeze_scalar hdr_load hdr_store iff is_shared leave_cond load_val lop new_cell new_temp norm opt_has opt_value own owner_array_from_fixed place_addr read_place reg_temp_slot reg_temp_vreg release release_arg_snapshots result_from_slot ret_vt retain retain_elems scope_add_local scope_push st_rc_only stmt_begin stmt_end store_field store_type store_val vc vt_of write_place zero_declare zero_note zero_val)
 from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change copy_through index_stable lm_change_at lm_resizing_call lpath_key lpath_root may_write_heap may_write_root mentions_local mut_alias_check mut_may_reach path_within place_steps place_text place_var same_var shares_mut_root unchanged_by write_root)
 from p"lower_helpers.dewy" import (field_list fixed_elem_addr fixed_loop_begin fixed_loop_end)
 from p"lower_generators.dewy" import (gen_for_generator gen_fuse_active gen_fuse_brk_scope gen_fuse_init_decl gen_fuse_try_while gen_fuse_yield gen_intrinsic_iter_done gen_intrinsic_iter_value gen_lazy)
@@ -109,7 +109,7 @@ gen_borrowed=(e:LGWord):>Val=>$unsafe {
     borrow(v ntype(e));
     return Val[v.v false -1]
 }
-emit_scope_exit=(i:LGWord):>void=>$unsafe {
+emit_scope_exit=(i:LGWord skip_local:LGWord=-1):>void=>$unsafe {
     let ds=scope_defers.ptr[i]
     let k=ds.length - 1
     loop k >=? 0 {
@@ -134,6 +134,7 @@ emit_scope_exit=(i:LGWord):>void=>$unsafe {
     k=ls.length - 1
     loop k >=? 0 {
         let l=ls.ptr[k]
+        if l =? skip_local {k -= 1; continue}
         let t=store_type(l)
         if parallel_owned.has(l) {
             loop value in parallel_scalars[l] {
@@ -595,12 +596,12 @@ once_place=(g:LGWord a:LGWord ut:LGWord):>Place=>{
     let val=gen_expr(a)
     borrow(val ut);
     e_mov(at val.v);
-    iff(e_bin('eq' VI rt_global("__mt_active") e_iconst(0)));
+    if not st_rc_only {iff(e_bin('eq' VI rt_global("__mt_active") e_iconst(0)));}
     e_copy(kept val.v tsize(ut));
     e_zero(val.v tsize(ut));
     e_store(built 0 e_iconst(1) 8);
     e_mov(at kept);
-    endc();
+    if not st_rc_only {endc();}
     leave_cond();
     ir_cold=was
     endc();
@@ -4794,14 +4795,46 @@ gen_return=(s:LGWord):>void=>$unsafe {
     let a:LGWord=LGWord(nodes.ptr[s].a)
     let rv:LGWord=-1
     let owner_result:LGWord=-1
+    let moved_local:LGWord=-1
     if a not=? 0 and vc(rtp) not=? VC_VOID {
         stmt_begin();
         let has_hook=ownership_decls.length not=? 0 and (ownership_hooks.get(LGWord(fns.ptr[cur_fn].decl)) ?? 0) >? 1
         if has_hook {
             owner_adopt_result(a);
         }
+        if not dbg_on and not copies_on and not has_hook and not ownership_type(rtp) and is_managed(rtp) and not ff_checks_any and not float_keys_any and not exact_map_active and not (exact_lower_active and exact_has_node(a)) and held_views.length =? 0 and ownership_decls.length =? 0 and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) {
+            let ml=LGWord(nodes.ptr[a].sym)
+            let mfl=LGWord(locals.ptr[ml].flags)
+            let rk=tkind(rtp)
+            if ml >? 0 and rk not=? 'fn_' and rk not=? 'polyfn' and mfl & (LF_CAPTURED | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_SHARED | LF_MUTPARAM | LF_PARAM | LF_EXPOSED | LF_OWNERBORROW | LF_PARTBORROW) =? 0 and not is_shared(ml) and not parallel_owned.has(ml) and type_eq(prune(store_type(ml)) rtp) and type_eq(prune(ntype(a)) rtp) {
+                let no_defers=true
+                loop di in [0..scope_defers.length) {
+                    if scope_defers.ptr[di].length >? 0 {no_defers=false; break}
+                }
+                if no_defers {
+                    loop si in [0..scope_locals.length) {
+                        let sl=scope_locals.ptr[si]
+                        loop li in [0..sl.length) {
+                            if sl.ptr[li] =? ml {moved_local=ml; break}
+                        }
+                        if moved_local >=? 0 {break}
+                    }
+                }
+            }
+        }
         let direct_sret=vc(rtp) =? VC_AGG and not ownership_type(rtp) and not has_hook and not ff_checks_any and not float_keys_any and not (exact_lower_active and exact_has_node(a))
-        if direct_sret and nodes.ptr[a].kind =? 'none_lit' {
+        if moved_local >=? 0 {
+            let lp=local_place(moved_local false)
+            if vc(rtp) =? VC_AGG {
+                let sz=tsize(rtp)
+                if sz >? 0 {e_copy(sret_v lp.v sz);}
+            }
+            else {
+                rv=vreg(vt_of(rtp))
+                e_mov(rv read_place(lp rtp));
+            }
+        }
+        else if direct_sret and nodes.ptr[a].kind =? 'none_lit' {
             e_zero(sret_v tsize(rtp));
         }
         else if direct_sret and nodes.ptr[a].kind =? 'conv' and (nodes.ptr[a].aux as CV) =? CV.opt and prune(ntype(a)) =? rtp and not math_optional(rtp) and not ptr_optional(rtp) and not ownership_type(LGWord(types.ptr[rtp].elem)) {
@@ -4842,7 +4875,7 @@ gen_return=(s:LGWord):>void=>$unsafe {
     drop_held(0 0);
     let i:LGWord=LGWord(scope_locals.length) - 1
     loop i >=? 0 {
-        emit_scope_exit(i);
+        emit_scope_exit(i moved_local);
         i -= 1;
     }
     if owner_result >=? 0 {owner_forget_slot(owner_result);}

@@ -5,7 +5,7 @@ from p"call_argument_checks.dewy" import (match_type)
 from p"expression_types.dewy" import (ntype)
 from p"checker_call_cost.dewy" import (Cand)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (syms)
+from p"check.jo" import (decl_infos syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin_expr.dewy" import (call_waits_binds call_waits_local call_waits_mark call_waits_skips expected_bind_fits subst_partial text_literal)
@@ -106,10 +106,11 @@ literal_typed_call=(e:WaitWord):>bool=>$unsafe {
 # type from where they go, as the text in an array literal, takes what the expected result
 # gives it, as such a literal written there would; only where the call as bound would not
 # give the expected type, so a call that fits keeps its types)
-expected_binds=(@cd:Cand expected:WaitWord given:array<int64>):>void=>{
+expected_binds=(@cd:Cand expected:WaitWord given:array<int64>):>void=>$unsafe {
     let held=cd.binds
-    if match_type(int64(cd.sig.ret) expected @held 0) >=? 0 {
-        let fitted=subst_partial(int64(cd.sig.ret) @held)
+    let sret=int64(decl_infos.ptr[cd.di].sig.ret)
+    if match_type(sret expected @held 0) >=? 0 {
+        let fitted=subst_partial(sret @held)
         if has_var(fitted) or can_coerce(0 fitted expected) {
             loop i in 0.. and b in held {
                 if cd.binds[i] =? 0 and expected_bind_fits(b) {cd.binds[i]=b}
@@ -117,15 +118,15 @@ expected_binds=(@cd:Cand expected:WaitWord given:array<int64>):>void=>{
             return
         }
     }
-    let ret=subst_partial(int64(cd.sig.ret) @cd.binds)
+    let ret=subst_partial(sret @cd.binds)
     if not has_var(ret) and can_coerce(0 ret expected) {return}
-    let eb:array<int64>=fill(0 int64(cd.sig.ntp))
+    let eb:array<int64>=fill(0 int64(decl_infos.ptr[cd.di].sig.ntp))
     loop i in 0.. and t in given {eb[i]=t}
     loop i in 0.. and a in cd.args {
         if a =? 0 or is_lit(a) or ctx_dependent(a) or nodes[a].type =? 0 or text_literal(a) {continue}
-        if match_type(cd.sig.params[i] ntype(a) @eb 0) <? 0 {return}
+        if match_type(decl_infos.ptr[cd.di].sig.params.ptr[i] ntype(a) @eb 0) <? 0 {return}
     }
-    if match_type(int64(cd.sig.ret) expected @eb 0) <? 0 {return}
+    if match_type(sret expected @eb 0) <? 0 {return}
     loop i in 0.. and b in eb {
         if expected_bind_fits(b) {cd.binds[i]=b}
     }

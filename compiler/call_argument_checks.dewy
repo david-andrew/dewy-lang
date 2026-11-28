@@ -262,8 +262,8 @@ call_map_candidate=(d:int64 args:array<int64> @cd:Cand kinds:array<int64> ufcs:b
             failure.last_err_map = d
         }
         if ufcs and not recv_fits and np >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 {
-            let rb:array<int64>=fill(0 CallArgWord(cd.sig.ntp))
-            if match_type(cd.sig.params[0] ntype(unnamed(args[0])) @rb 0) >=? 0 {recv_fits=true}
+            let rb:array<int64>=fill(0 CallArgWord(decl_infos.ptr[cd.di].sig.ntp))
+            if match_type(decl_infos.ptr[cd.di].sig.params.ptr[0] ntype(unnamed(args[0])) @rb 0) >=? 0 {recv_fits=true}
         }
         return false
     }
@@ -278,18 +278,18 @@ call_reject_candidate=(cd:Cand failed:int64 @failure:CallFailure):>void=>$unsafe
     if failed <? 0 {
         if failure.last_err_arg <? i + 1 {failure.rejected.clear()}
         failure.last_err_arg = i + 1
-        failure.rejected.push(Rejection(-cd.decl i 0 subst(cd.sig.params[i] cd.binds) cd))
+        failure.rejected.push(Rejection(-cd.decl i 0 subst(decl_infos.ptr[cd.di].sig.params.ptr[i] cd.binds) cd))
         return
     }
     # Of the candidates, blame the one that got furthest; among its literals,
     # a failure before this argument is the first mistake.
     let binds=cd.binds
     let fi=i
-    if not cd.sig.generic {
+    if not decl_infos.ptr[cd.di].sig.generic {
         loop j in [0..i) {
             let aj=cd.args[j]
             if aj =? 0 or not is_lit(aj) or ctx_dependent(aj) {continue}
-            if arg_cost(aj cd.sig.params.ptr[j] @binds) <? 0 {
+            if arg_cost(aj decl_infos.ptr[cd.di].sig.params.ptr[j] @binds) <? 0 {
                 fi=j
                 break
             }
@@ -298,7 +298,7 @@ call_reject_candidate=(cd:Cand failed:int64 @failure:CallFailure):>void=>$unsafe
     let a=cd.args[fi]
     if failure.last_err_arg <? i + 1 {failure.rejected.clear()}
     failure.last_err_arg = i + 1
-    let rejected=Rejection(d fi a subst(cd.sig.params.ptr[fi] binds) cd)
+    let rejected=Rejection(d fi a subst(decl_infos.ptr[cd.di].sig.params.ptr[fi] binds) cd)
     rejected.cd.binds=binds
     failure.rejected.push(rejected)
     failure.last_err_pos = nodes.ptr[a].pos

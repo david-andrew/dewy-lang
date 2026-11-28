@@ -143,6 +143,7 @@ V=(v:LSWord owned:bool):>Val=>$unsafe {
     return Val[v owned -1]
 }
 note_mt_active=():>void=>$unsafe {
+    if st_rc_only {return}
     # (a fused worker notes each function's use: fused.jo)
     if mt_active_off >=? 0 and not fused_on {return}
     let s=prelude.get(intern("__mt_active")) ?? 0
@@ -202,6 +203,7 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
 let release_expanded=false
 let rc_assume_st=false
 let rc_assume_mt=false
+let st_rc_only=false
 let lower_rc_epoch:int64=-1
 let lower_rc_dec_lf:int64=-1
 let lower_free_lf:int64=-1
@@ -220,7 +222,7 @@ release_element=(v:LSWord t:LSWord):>void=>$unsafe {
     iff(e_bin('gts' VI rc e_iconst(0)));
     if rc_assume_mt {
         release_call(v t);
-    } else if not rc_assume_st {
+    } else if not rc_assume_st and not st_rc_only {
         iff(rt_global("__mt_active"));
         release_call(v t);
         els();

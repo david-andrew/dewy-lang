@@ -9,7 +9,7 @@ from p"util.jo" import (intern)
 from p"lower_primitives.dewy" import (global_addr_off rt)
 from p"fused.jo" import (fz_layout)
 from p"ir_builders.dewy" import (vtype)
-from p"lower_storage.dewy" import (lower_free_target lower_rc_dec_target vc)
+from p"lower_storage.dewy" import (lower_free_target lower_rc_dec_target st_rc_only vc)
 from p"main.jo" import (repl_image)
 from p"x64_emit.dewy" import (nchk_fn nchk_rows dbg_epis dbg_pos pad_moves ra_save_cost ra_save_x ra_stat rsp_row uw_at uw_fo x64_emit x_int_fail x_loop_line xe_emit_error xe_free_lf xe_rc_dec_lf)
 from p"x64_encode.dewy" import (XMM b frame_size rsp_frame x_bytes x_encode_begin x_padding_cmov x_padding_floor)
@@ -165,7 +165,8 @@ x64_function=():>void=>$unsafe {
         loop xf_cabi[0].length <? lfuncs.length {xf_cabi[0].push(lf_is_cabi(xf_cabi[0].length))}
     }
     row_line=-1
-    let body_start=X64OpsWord(x64_emit(xf_ir fn_start dbg_on target_windows fz_layout mt_active_off pe_iat_off(0) xf_cabi xf_positions))
+    let mt_off=if st_rc_only {-1} else {mt_active_off}
+    let body_start=X64OpsWord(x64_emit(xf_ir fn_start dbg_on target_windows fz_layout mt_off pe_iat_off(0) xf_cabi xf_positions))
     if xe_emit_error not=? "" {ice(xe_emit_error)}
     if dbg_on {
         dbg_pos[ir.code.length]=code.length

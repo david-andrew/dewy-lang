@@ -49,6 +49,7 @@ from p"lower_entries.dewy" import (once_prepare)
 from p"lower_ffi.dewy" import (lower_extern_thunk)
 from p"lower_functions.dewy" import (lower_function)
 from p"lower_primitives.dewy" import (global_addr_off lf_helper lf_of_inst)
+from p"lower_storage.dewy" import (st_rc_only)
 from p"lower_views.dewy" import (find_unique_globals)
 from p"macho_output.dewy" import (macho_watch_loader macos_bundle write_macho)
 from p"main.jo" import (DEWY_CORE_VERSION bss_reserve debug_info debug_vars dump exit_codes_only host_ir img_data_addr img_ro_addr img_text_addr lower_only repl_image timing)
@@ -240,6 +241,17 @@ compile=(path:string out0:string):>string=>$unsafe {
         if cs not=? 0 and syms.ptr[cs].kind =? 'global' {global_addr_off(DriverWord(syms.ptr[cs].ref));}
         else {lx_vec_on_slot=false}
     }
+    # (single-threaded RC: omit __mt_active runtime checks when nothing writes __mt_active)
+    let st_ok=not watch_build and not repl_image and not host_ir and not target_wasm and not target_arm64
+    if st_ok {
+        let ms=prelude.get(intern("__mt_active")) ?? 0
+        if ms =? 0 or syms.ptr[ms].kind not=? 'global' {st_ok=false}
+        else {
+            let mg=DriverWord(syms.ptr[ms].ref)
+            if globals.ptr[mg].fn_written or globals.ptr[mg].init_written or globals.ptr[mg].exposed {st_ok=false}
+        }
+    }
+    st_rc_only=st_ok
     # (worker processes lower, optimize and emit most functions: fused.jo)
     fused_fork(pinit_lf);
     let bl_ok=not opt_release_slot and not dbg_on_slot and not target_wasm and not target_arm64 and not target_windows and not target_macos and not watch_build and not repl_image and not lower_only and not host_ir and not dump and not ra_stat_slot and (ra_dump_slot as array<uint8>).length =? 0 and not fz_layout

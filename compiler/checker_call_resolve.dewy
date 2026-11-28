@@ -184,6 +184,250 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
     let no_targs:array<int64>=[]
     resolve_fn_call_slow(n name decls args expected closure ufcs no_targs)
 }
+rfc_pick_best=(n:CRWord name:CRWord args:array<int64> @cands:array<Cand> @first:Cand @nfit:CRWord):>CRWord=>$unsafe {
+    # (overloads told apart by their constant checks: the argument chooses, constant_checks.dewy)
+    if cc_any {
+        let ds:array<int64>=[]
+        let xs:array<array<int64>>=[]
+        let ps:array<array<int64>>=[]
+        loop cd in cands {
+            ds.push(cd.decl)
+            xs.push(cd.args)
+            ps.push(decl_infos.ptr[cd.di].sig.params)
+        }
+        let kept=cc_choose(n ds xs ps)
+        if kept.length >? 0 {
+            let chosen:array<Cand>=[]
+            loop i in kept {chosen.push(cands[i])}
+            cands=chosen
+            nfit=chosen.length
+            first=chosen[0]
+            if nfit =? 1 {return 0}
+        }
+    }
+    let best:CRWord=-1
+    loop ci in [0..cands.length) and cd in cands {
+        if best <? 0 or cd.cost <? cands.ptr[best].cost {best=ci}
+        else if cd.cost =? cands.ptr[best].cost {
+            let bc=cands.ptr[best]
+            # (after a function that is not generic, one written for the count beats one with a
+            # rest parameter)
+            let rest_b=rest_bundles.length >? 0 and decl_has_rest(bc.decl)
+            let bc_gen=decl_infos.ptr[bc.di].sig.generic
+            let cd_gen=decl_infos.ptr[cd.di].sig.generic
+            if bc_gen and not cd_gen {best=ci}
+            else if bc_gen =? cd_gen and rest_bundles.length >? 0 and rest_b not=? decl_has_rest(cd.decl) {
+                if rest_b {best=ci}
+            }
+            else if bc_gen =? cd_gen and decl_in_prelude(bc.decl) and not decl_in_prelude(cd.decl) {best=ci}
+            else if bc_gen =? cd_gen and decl_in_prelude(bc.decl) and decl_in_prelude(cd.decl) and exact_args(cd) >? exact_args(bc) {best=ci}
+            else if bc_gen and cd_gen and decl_in_prelude(bc.decl) =? decl_in_prelude(cd.decl) and generic_specificity(cd) >? generic_specificity(bc) {best=ci}
+        }
+    }
+    if not decl_in_prelude(cands.ptr[best].decl) {call_tie_error(n name args cands best)}
+    first=cands.ptr[best]
+    best
+}
+
+rfc_resolve_binds=(n:CRWord name:CRWord @cd:Cand expected:CRWord closure:CRWord targs_here:array<int64> partial:bool):>void=>$unsafe {
+    let decl=cd.decl
+    let np:CRWord=nkids(decl)
+    # Bind holes, context-dependent arguments and expected result types.
+    if partial and expected not=? 0 and tkind(expected) =? 'fn_' {
+        let rb=cd.binds
+        let ok=true
+        let j:CRWord=0
+        loop i in [0..np) {
+            let a=cd.args.ptr[i]
+            if a =? 0 or nodes.ptr[a].kind not=? 'hole' {continue}
+            if j >=? CRWord(types.ptr[prune(expected)].nargs) or match_type(decl_infos.ptr[cd.di].sig.params.ptr[i] targ(prune(expected) j) @rb 0) <? 0 {ok=false}
+            j += 1
+        }
+        let sret=CRWord(decl_infos.ptr[cd.di].sig.ret)
+        if ok and sret not=? 0 and match_type(sret CRWord(types.ptr[prune(expected)].elem) @rb 0) <? 0 {ok=false}
+        if ok {cd.binds = rb}
+    }
+    # (a text literal is typed when it is read, so its call needs the expected result asked)
+    if expected not=? 0 and cd.plain and decl_infos.ptr[cd.di].sig.ret not=? 0 and decl_infos.ptr[cd.di].sig.ntp >? 0 {
+        loop a in cd.args {
+            if a not=? 0 and nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux not=? 1 {cd.plain=false}
+        }
+    }
+    if not cd.plain and not partial and expected not=? 0 and decl_infos.ptr[cd.di].sig.ret not=? 0 and decl_infos.ptr[cd.di].sig.ntp >? 0 {expected_binds(@cd expected targs_here)}
+    if not cd.plain {
+        loop i in [0..np) {
+            let a=cd.args.ptr[i]
+            if a =? 0 or not is_lit(a) {continue}
+            let p:CRWord=prune(decl_infos.ptr[cd.di].sig.params.ptr[i])
+            if types.ptr[p].kind =? 'param' and cd.binds.ptr[CRWord(types.ptr[p].id)] =? 0 {cd.binds.ptr[CRWord(types.ptr[p].id)] = lit_default(a)}
+        }
+        loop i in [0..np) {
+            let a=cd.args.ptr[i]
+            if a =? 0 or not ctx_dependent(a) or nodes.ptr[a].kind =? 'hole' {continue}
+            let pt:CRWord=subst_partial(decl_infos.ptr[cd.di].sig.params.ptr[i] @cd.binds)
+            if has_var(pt) and expected not=? 0 and decl_infos.ptr[cd.di].sig.ret not=? 0 {
+                let rb=cd.binds
+                if match_type(CRWord(decl_infos.ptr[cd.di].sig.ret) expected @rb 0) >=? 0 {
+                    cd.binds = rb
+                    pt=subst_partial(decl_infos.ptr[cd.di].sig.params.ptr[i] @cd.binds)
+                }
+            }
+            # (nothing gives the type of `[button("Play" "P")]`: its literals do, and then its
+            # other elements take that)
+            if has_var(pt) and nodes.ptr[a].kind =? 'array' {
+                loop e in [0..nkids(a)) {
+                    let element=kid(a e)
+                    if nodes.ptr[element].type =? 0 and nodes.ptr[element].kind =? 'call' and call_waits_hook(element) =? 2 {
+                        check_expr(element 0);
+                        add_flag(element NF_CHECKED)
+                        match_type(CRWord(types.ptr[prune(decl_infos.ptr[cd.di].sig.params.ptr[i])].elem) ntype(element) @cd.binds 1);
+                    }
+                }
+                pt=subst_partial(decl_infos.ptr[cd.di].sig.params.ptr[i] @cd.binds)
+            }
+            let row=callable_contract(decl_infos.ptr[cd.di].sig.params.ptr[i])
+            if row not=? 0 and effect_contracts.ptr[row].variables.length not=? 0 {pt=mk_callable_contract(callable_base(pt) row)}
+            check_expr(a pt);
+            add_flag(a NF_CHECKED)
+            let matched:CRWord=match_type(decl_infos.ptr[cd.di].sig.params.ptr[i] ntype(a) @cd.binds 0)
+            if matched <? 0 and callable_contract(decl_infos.ptr[cd.di].sig.params.ptr[i]) not=? 0 {call_resolve_error(1 a name decl 0 partial)}
+        }
+    }
+    if not partial and expected not=? 0 and decl_infos.ptr[cd.di].sig.ret not=? 0 {
+        let rb=cd.binds
+        if match_type(CRWord(decl_infos.ptr[cd.di].sig.ret) expected @rb 0) >=? 0 {cd.binds = rb}
+    }
+    loop i in [0..targs_here.length) {
+        if not type_eq(cd.binds.ptr[i] targs_here.ptr[i]) {call_resolve_error(2 n name decl 0 partial)}
+    }
+    # A missing generic parameter can get its type from its default expression.
+    if cd.missing {
+        loop i in [0..np) {
+            if cd.args.ptr[i] not=? 0 {continue}
+            let p:CRWord=prune(decl_infos.ptr[cd.di].sig.params.ptr[i])
+            if types.ptr[p].kind not=? 'param' or cd.binds.ptr[CRWord(types.ptr[p].id)] not=? 0 {continue}
+            let dv:CRWord=CRWord(nodes.ptr[kid(decl i)].b)
+            if dv =? 0 {continue}
+            let dk=nodes.ptr[dv].kind
+            if is_lit(dv) {cd.binds.ptr[CRWord(types.ptr[p].id)] = lit_default(dv)}
+            else if dk =? 'bool_lit' {cd.binds.ptr[CRWord(types.ptr[p].id)] = T_BOOL}
+            else if dk =? 'str_lit' {cd.binds.ptr[CRWord(types.ptr[p].id)] = T_STR}
+            else if dk =? 'ident' and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+                loop j in [0..i) {
+                    if nodes.ptr[dv].name not=? nodes.ptr[kid(decl j)].name {continue}
+                    let earlier:CRWord=subst_partial(decl_infos.ptr[cd.di].sig.params.ptr[j] @cd.binds)
+                    if not has_var(earlier) {cd.binds.ptr[CRWord(types.ptr[p].id)] = earlier}
+                }
+            }
+            if cd.binds.ptr[CRWord(types.ptr[p].id)] =? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and (closure not=? 0 or not default_uses_params(dv decl i)) {
+                let ready=true
+                loop j in [0..nkids2(decl)) {
+                    if cd.binds.ptr[j] =? 0 or has_var(cd.binds.ptr[j]) {ready=false}
+                }
+                if ready {
+                    let inferred=if closure not=? 0 {poly_default_type(decl i cd.binds)} else {default_arg(decl i 0 targs = cd.binds)}
+                    cd.binds.ptr[CRWord(types.ptr[p].id)] = ntype(inferred)
+                }
+            }
+        }
+    }
+    let ntp=CRWord(decl_infos.ptr[cd.di].sig.ntp)
+    loop i in [0..ntp) {
+        let b=cd.binds.ptr[i]
+        if b =? 0 {
+            let nsp=decl_infos.ptr[cd.di].sig.params.length
+            loop pi in [0..nsp) {
+                if param_in_union(decl_infos.ptr[cd.di].sig.params.ptr[pi] i) {cd.binds.ptr[i] = T_NEVER}
+            }
+            b=cd.binds.ptr[i]
+        }
+        if b =? 0 or tkind(b) =? 'var' {call_resolve_error(5 n name decl i partial)}
+        # (the library's `sum` adds plain numbers: `array<Level>` sums to an int64, which
+        # its elements' contract need not admit)
+        if refine_active and tkind(b) =? 'refined' and library_sum(decl) {
+            sum_refined_elements[n]=b
+            cd.binds.ptr[i]=representation_type(b)
+        }
+    }
+    if closure not=? 0 {
+        let variant=poly_default_variant(decl cd.args)
+        if variant not=? decl {
+            cd.decl=variant
+            let vdi:CRWord=decl_info(variant)
+            if not decl_infos.ptr[vdi].sig.done {fn_sig(variant);}
+            cd.di=vdi
+            let supplied:array<int64>=[]
+            loop arg in cd.args {
+                if arg not=? 0 {supplied.push(arg)}
+            }
+            cd.args = supplied
+        }
+    }
+}
+
+rfc_finish_missing=(n:CRWord name:CRWord decl:CRWord f:CRWord partial:bool @cd:Cand args:array<int64> @fin:array<int64> @statements:array<int64> @refined_array:RefArrayCall):>bool=>$unsafe {
+    let np=CRWord(cd.args.length)
+    let mutmask=CRWord(decl_infos.ptr[cd.di].sig.mutmask)
+    let capture_defaults=false
+    let dewy_call=files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy
+    if not partial and dewy_call {
+        loop i in [0..np) {
+            if cd.args.ptr[i] =? 0 and default_uses_params(CRWord(nodes.ptr[kid(decl i)].b) decl i) {capture_defaults=true}
+        }
+    }
+    if capture_defaults and mutmask not=? 0 {call_resolve_error(3 n name decl 0 partial)}
+    if refine_active and not partial and not capture_defaults and mutmask =? 1 {
+        if fns.ptr[f].ret =? T_VOID {refined_array=ref_array_call_prepare(decl @cd.args fns.ptr[f].ptypes args)}
+        ref_sib_dict_call(decl @cd.args fns.ptr[f].ptypes)
+    }
+    let captured:array<int64>=[]
+    if capture_defaults {
+        captured=fill(0 np)
+        loop source in args {
+            let a=unnamed(source)
+            loop i in [0..np) {
+                if cd.args.ptr[i] not=? a {continue}
+                finish_arg(a representation_type(fns.ptr[f].ptypes.ptr[i]) false)
+                captured.ptr[i] = capture_value(a representation_type(fns.ptr[f].ptypes.ptr[i]) @statements)
+                break
+            }
+        }
+    }
+    loop i in [0..np) {
+        let a=cd.args.ptr[i]
+        let is_mut=if i <? 31 {mutmask & (CRWord(1) << CRWord(i)) not=? 0} else {has_flag(kid(decl i) NF_MUT)}
+        if a =? 0 {
+            let earlier=if dewy_call and not capture_defaults {[]} else {fin}
+            let pt=fns.ptr[f].ptypes.ptr[i]
+            if capture_defaults {pt=representation_type(pt)}
+            # (a metatag read in a default reads the caller's setting: expr.jo's __setting_read)
+            let outer_site=setting_site
+            if outer_site =? 0 {setting_site=nodes.ptr[n].pos}
+            a=default_arg(decl i pt earlier capture_defaults fns.ptr[f].targs)
+            setting_site=outer_site
+            if capture_defaults {
+                a=capture_value(a representation_type(fns.ptr[f].ptypes.ptr[i]) @statements)
+                finish_arg(a fns.ptr[f].ptypes.ptr[i] false)
+            }
+            fin.push(a)
+            continue
+        }
+        if capture_defaults {
+            finish_arg(captured.ptr[i] fns.ptr[f].ptypes.ptr[i] false)
+            fin.push(captured.ptr[i])
+            continue
+        }
+        if i =? 0 and is_mut and dewy_is_method(decl) and place_method =? 0 {
+            place_method=if nodes.ptr[decl].kind =? 'fn_' {CRWord(nodes.ptr[decl].name)} else {dewy_literal_method_name}
+            finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)
+            place_method=0
+        }
+        else {finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)}
+        fin.push(a)
+    }
+    capture_defaults
+}
+
 resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expected:CRWord closure:CRWord ufcs:bool targs_here:array<int64>):>CRWord=>$unsafe {
     let positional=true
     let n_args=CRWord(args.length)
@@ -201,7 +445,6 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
     let nfit:CRWord=0
     let failure=CallFailure[]
     let recv_fits=false
-    let best:CRWord=-1
     # A settled numeric argument can rule out overloads before signature work.
     let a0t:CRWord=0
     let a0i:CRWord=0
@@ -241,7 +484,7 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
             recv_fits=true
             continue
         }
-        let cd=Cand[decl = d sig = decl_infos.ptr[di].sig]
+        let cd=Cand[decl = d di = di]
         if positional and n_args =? np and not has_kinds {
             cd.args = args
         }
@@ -249,7 +492,8 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
             let kinds:array<int64>=if has_kinds {dewy_param_kinds.get(d) ?? []} else {[]}
             if not call_map_candidate(d args @cd kinds ufcs @recv_fits @failure) {continue}
         }
-        if cd.sig.ntp >? 0 {cd.binds = fill(0 CRWord(cd.sig.ntp))}
+        let sntp=CRWord(decl_infos.ptr[di].sig.ntp)
+        if sntp >? 0 {cd.binds = fill(0 sntp)}
         if targs_here.length >? 0 {
             if nkids2(d) not=? targs_here.length {
                 if nfit =? 0 {call_type_arity(name d targs_here @failure)}
@@ -275,259 +519,68 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
         call_targs=targs_here
         return resolve_fn_call(n name decls args expected closure ufcs)
     }
-    if nfit =? 0 and failure.rejected.length >? 0 {call_rejection_text(@failure)}
-    # (overloads told apart by their constant checks: the argument chooses, constant_checks.dewy)
-    if nfit >? 1 and cc_any {
-        let ds:array<int64>=[]
-        let xs:array<array<int64>>=[]
-        let ps:array<array<int64>>=[]
-        loop cd in cands {
-            ds.push(cd.decl)
-            xs.push(cd.args)
-            ps.push(cd.sig.params)
-        }
-        let kept=cc_choose(n ds xs ps)
-        if kept.length >? 0 {
-            let chosen:array<Cand>=[]
-            loop i in kept {chosen.push(cands[i])}
-            cands=chosen
-            nfit=chosen.length
-            first=chosen[0]
-        }
-    }
-    if nfit =? 1 {best=0}
-    else {
-        loop ci in [0..cands.length) and cd in cands {
-            if best <? 0 or cd.cost <? cands.ptr[best].cost {best=ci}
-            else if cd.cost =? cands.ptr[best].cost {
-                let bc=cands.ptr[best]
-                # (after a function that is not generic, one written for the count beats one with a
-                # rest parameter)
-                let rest_b=rest_bundles.length >? 0 and decl_has_rest(bc.decl)
-                if bc.sig.generic and not cd.sig.generic {best=ci}
-                else if bc.sig.generic =? cd.sig.generic and rest_bundles.length >? 0 and rest_b not=? decl_has_rest(cd.decl) {
-                    if rest_b {best=ci}
-                }
-                else if bc.sig.generic =? cd.sig.generic and decl_in_prelude(bc.decl) and not decl_in_prelude(cd.decl) {best=ci}
-                else if bc.sig.generic =? cd.sig.generic and decl_in_prelude(bc.decl) and decl_in_prelude(cd.decl) and exact_args(cd) >? exact_args(bc) {best=ci}
-                else if bc.sig.generic and cd.sig.generic and decl_in_prelude(bc.decl) =? decl_in_prelude(cd.decl) and generic_specificity(cd) >? generic_specificity(bc) {best=ci}
-            }
-        }
-    }
-    if nfit >? 1 and not decl_in_prelude(cands.ptr[best].decl) {call_tie_error(n name args cands best)}
-    if best <? 0 {
+    if nfit =? 0 {
+        if failure.rejected.length >? 0 {call_rejection_text(@failure)}
         call_targs=targs_here
         return call_no_candidate(n name decls args expected ufcs recv_fits @failure)
     }
-    let cd=if nfit =? 1 {first} else {cands.ptr[best]}
-    let decl=cd.decl
+    if nfit >? 1 {rfc_pick_best(n name args @cands @first @nfit);}
+    let decl=first.decl
     let np:CRWord=nkids(decl)
-    call_decl_checks(n name decl args cd.args np ufcs)
-    # Bind holes, context-dependent arguments and expected result types.
-    let partial=(not cd.plain and has_hole(args)) or node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL)
-    if partial and expected not=? 0 and tkind(expected) =? 'fn_' {
-        let rb=cd.binds
-        let ok=true
-        let j:CRWord=0
-        loop i in [0..np) {
-            let a=cd.args.ptr[i]
-            if a =? 0 or nodes.ptr[a].kind not=? 'hole' {continue}
-            if j >=? CRWord(types.ptr[prune(expected)].nargs) or match_type(cd.sig.params.ptr[i] targ(prune(expected) j) @rb 0) <? 0 {ok=false}
-            j += 1
-        }
-        if ok and cd.sig.ret not=? 0 and match_type(CRWord(cd.sig.ret) CRWord(types.ptr[prune(expected)].elem) @rb 0) <? 0 {ok=false}
-        if ok {cd.binds = rb}
-    }
-    # (a text literal is typed when it is read, so its call needs the expected result asked)
-    if expected not=? 0 and cd.plain and cd.sig.ret not=? 0 and cd.sig.ntp >? 0 {
-        loop a in cd.args {
-            if a not=? 0 and nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux not=? 1 {cd.plain=false}
-        }
-    }
-    if not cd.plain and not partial and expected not=? 0 and cd.sig.ret not=? 0 and cd.sig.ntp >? 0 {expected_binds(@cd expected targs_here)}
-    if not cd.plain {
-        loop i in [0..np) {
-            let a=cd.args.ptr[i]
-            if a =? 0 or not is_lit(a) {continue}
-            let p:CRWord=prune(cd.sig.params.ptr[i])
-            if types.ptr[p].kind =? 'param' and cd.binds.ptr[CRWord(types.ptr[p].id)] =? 0 {cd.binds.ptr[CRWord(types.ptr[p].id)] = lit_default(a)}
-        }
-        loop i in [0..np) {
-            let a=cd.args.ptr[i]
-            if a =? 0 or not ctx_dependent(a) or nodes.ptr[a].kind =? 'hole' {continue}
-            let pt:CRWord=subst_partial(cd.sig.params.ptr[i] @cd.binds)
-            if has_var(pt) and expected not=? 0 and cd.sig.ret not=? 0 {
-                let rb=cd.binds
-                if match_type(CRWord(cd.sig.ret) expected @rb 0) >=? 0 {
-                    cd.binds = rb
-                    pt=subst_partial(cd.sig.params.ptr[i] @cd.binds)
-                }
-            }
-            # (nothing gives the type of `[button("Play" "P")]`: its literals do, and then its
-            # other elements take that)
-            if has_var(pt) and nodes.ptr[a].kind =? 'array' {
-                loop e in [0..nkids(a)) {
-                    let element=kid(a e)
-                    if nodes.ptr[element].type =? 0 and nodes.ptr[element].kind =? 'call' and call_waits_hook(element) =? 2 {
-                        check_expr(element 0);
-                        add_flag(element NF_CHECKED)
-                        match_type(CRWord(types.ptr[prune(cd.sig.params.ptr[i])].elem) ntype(element) @cd.binds 1);
+    call_decl_checks(n name decl args first.args np ufcs)
+    let partial=(not first.plain and has_hole(args)) or node_aux2(nodes.ptr[n].op_ext) =? int32(AUX2_PARTIAL)
+    if not first.plain or partial or first.missing or closure not=? 0 or targs_here.length >? 0 or (expected not=? 0 and decl_infos.ptr[first.di].sig.ret not=? 0) {
+        rfc_resolve_binds(n name @first expected closure targs_here partial)
+        decl=first.decl
+        np=CRWord(first.args.length)
+    } else {
+        let ntp=CRWord(decl_infos.ptr[first.di].sig.ntp)
+        if ntp >? 0 {
+            loop i in [0..ntp) {
+                let b=first.binds.ptr[i]
+                if b =? 0 {
+                    let nsp=decl_infos.ptr[first.di].sig.params.length
+                    loop pi in [0..nsp) {
+                        if param_in_union(decl_infos.ptr[first.di].sig.params.ptr[pi] i) {first.binds.ptr[i] = T_NEVER}
                     }
+                    b=first.binds.ptr[i]
                 }
-                pt=subst_partial(cd.sig.params.ptr[i] @cd.binds)
-            }
-            let row=callable_contract(cd.sig.params.ptr[i])
-            if row not=? 0 and effect_contracts.ptr[row].variables.length not=? 0 {pt=mk_callable_contract(callable_base(pt) row)}
-            check_expr(a pt);
-            add_flag(a NF_CHECKED)
-            let matched:CRWord=match_type(cd.sig.params.ptr[i] ntype(a) @cd.binds 0)
-            if matched <? 0 and callable_contract(cd.sig.params.ptr[i]) not=? 0 {call_resolve_error(1 a name decl 0 partial)}
-        }
-    }
-    if not partial and expected not=? 0 and cd.sig.ret not=? 0 {
-        let rb=cd.binds
-        if match_type(CRWord(cd.sig.ret) expected @rb 0) >=? 0 {cd.binds = rb}
-    }
-    loop i in [0..targs_here.length) {
-        if not type_eq(cd.binds.ptr[i] targs_here.ptr[i]) {call_resolve_error(2 n name decl 0 partial)}
-    }
-    # A missing generic parameter can get its type from its default expression.
-    if cd.missing {
-        loop i in [0..np) {
-            if cd.args.ptr[i] not=? 0 {continue}
-            let p:CRWord=prune(cd.sig.params.ptr[i])
-            if types.ptr[p].kind not=? 'param' or cd.binds.ptr[CRWord(types.ptr[p].id)] not=? 0 {continue}
-            let dv:CRWord=CRWord(nodes.ptr[kid(decl i)].b)
-            if dv =? 0 {continue}
-            let dk=nodes.ptr[dv].kind
-            if is_lit(dv) {cd.binds.ptr[CRWord(types.ptr[p].id)] = lit_default(dv)}
-            else if dk =? 'bool_lit' {cd.binds.ptr[CRWord(types.ptr[p].id)] = T_BOOL}
-            else if dk =? 'str_lit' {cd.binds.ptr[CRWord(types.ptr[p].id)] = T_STR}
-            else if dk =? 'ident' and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
-                loop j in [0..i) {
-                    if nodes.ptr[dv].name not=? nodes.ptr[kid(decl j)].name {continue}
-                    let earlier:CRWord=subst_partial(cd.sig.params.ptr[j] @cd.binds)
-                    if not has_var(earlier) {cd.binds.ptr[CRWord(types.ptr[p].id)] = earlier}
-                }
-            }
-            if cd.binds.ptr[CRWord(types.ptr[p].id)] =? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and (closure not=? 0 or not default_uses_params(dv decl i)) {
-                let ready=true
-                loop j in [0..nkids2(decl)) {
-                    if cd.binds.ptr[j] =? 0 or has_var(cd.binds.ptr[j]) {ready=false}
-                }
-                if ready {
-                    let inferred=if closure not=? 0 {poly_default_type(decl i cd.binds)} else {default_arg(decl i 0 targs = cd.binds)}
-                    cd.binds.ptr[CRWord(types.ptr[p].id)] = ntype(inferred)
+                if b =? 0 or tkind(b) =? 'var' {call_resolve_error(5 n name decl i partial)}
+                if refine_active and tkind(b) =? 'refined' and library_sum(decl) {
+                    sum_refined_elements[n]=b
+                    first.binds.ptr[i]=representation_type(b)
                 }
             }
         }
     }
-    loop i in [0..CRWord(cd.sig.ntp)) {
-        let b=cd.binds.ptr[i]
-        if b =? 0 {
-            loop pt in cd.sig.params {
-                if param_in_union(pt i) {cd.binds.ptr[i] = T_NEVER}
-            }
-            b=cd.binds.ptr[i]
-        }
-        if b =? 0 or tkind(b) =? 'var' {call_resolve_error(5 n name decl i partial)}
-        # (the library's `sum` adds plain numbers: `array<Level>` sums to an int64, which
-        # its elements' contract need not admit)
-        if refine_active and tkind(b) =? 'refined' and library_sum(decl) {
-            sum_refined_elements[n]=b
-            cd.binds.ptr[i]=representation_type(b)
-        }
-    }
-    if closure not=? 0 {
-        let variant=poly_default_variant(decl cd.args)
-        if variant not=? decl {
-            decl=variant
-            cd.sig = fn_sig(decl)
-            let supplied:array<int64>=[]
-            loop arg in cd.args {
-                if arg not=? 0 {supplied.push(arg)}
-            }
-            cd.args = supplied
-            np=supplied.length
-        }
-    }
-    let inst_binds=if rest_bundles.length >? 0 {rest_inst_binds(decl cd.args cd.sig.params cd.binds)} else {cd.binds}
+    let inst_binds=if rest_bundles.length >? 0 {rest_inst_binds(decl first.args decl_infos.ptr[first.di].sig.params first.binds)} else {first.binds}
     let f:CRWord=get_fn_inst(decl inst_binds nodes.ptr[n].pos)
     if ide_on {call_ide_ref(n name args decl f)}
-    # Defaults referring to earlier parameters capture values in written order.
+    let mutmask=CRWord(decl_infos.ptr[first.di].sig.mutmask)
     let capture_defaults=false
-    let dewy_call=files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy
-    if not partial and dewy_call and cd.missing {
-        loop i in [0..np) {
-            if cd.args.ptr[i] =? 0 and default_uses_params(CRWord(nodes.ptr[kid(decl i)].b) decl i) {capture_defaults=true}
-        }
-    }
-    if capture_defaults and cd.sig.mutmask not=? 0 {call_resolve_error(3 n name decl 0 partial)}
     let refined_array=RefArrayCall[]
-    if refine_active and not partial and not capture_defaults and cd.sig.mutmask =? 1 and fns.ptr[f].ret =? T_VOID {refined_array=ref_array_call_prepare(decl @cd.args fns.ptr[f].ptypes args)}
-    if refine_active and not partial and not capture_defaults and cd.sig.mutmask =? 1 {ref_sib_dict_call(decl @cd.args fns.ptr[f].ptypes)}
-    let captured:array<int64>=[]
     let statements:array<int64>=[]
-    if capture_defaults {
-        captured=fill(0 np)
-        loop source in args {
-            let a=unnamed(source)
-            loop i in [0..np) {
-                if cd.args.ptr[i] not=? a {continue}
-                finish_arg(a representation_type(fns.ptr[f].ptypes.ptr[i]) false)
-                captured.ptr[i] = capture_value(a representation_type(fns.ptr[f].ptypes.ptr[i]) @statements)
-                break
-            }
-        }
-    }
-    # Finish each parameter in order, restoring the mutable method context.
-    let fin:array<int64>=if not cd.missing and not capture_defaults {cd.args} else {[]}
-    if not cd.missing and not capture_defaults {
-        loop i in [0..np) {
-            let a=cd.args.ptr[i]
-            let is_mut=if i <? 31 {CRWord(cd.sig.mutmask) & (CRWord(1) << CRWord(i)) not=? 0} else {has_flag(kid(decl i) NF_MUT)}
-            if i =? 0 and is_mut and dewy_is_method(decl) and place_method =? 0 {
-                place_method=if nodes.ptr[decl].kind =? 'fn_' {CRWord(nodes.ptr[decl].name)} else {dewy_literal_method_name}
-                finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)
-                place_method=0
-            }
-            else {finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)}
-        }
+    let fin:array<int64>=[]
+    if first.missing {
+        capture_defaults=rfc_finish_missing(n name decl f partial @first args @fin @statements @refined_array)
     } else {
+        if refine_active and not partial and mutmask =? 1 {
+            if fns.ptr[f].ret =? T_VOID {refined_array=ref_array_call_prepare(decl @first.args fns.ptr[f].ptypes args)}
+            ref_sib_dict_call(decl @first.args fns.ptr[f].ptypes)
+        }
         loop i in [0..np) {
-            let a=cd.args.ptr[i]
-            let is_mut=if i <? 31 {CRWord(cd.sig.mutmask) & (CRWord(1) << CRWord(i)) not=? 0} else {has_flag(kid(decl i) NF_MUT)}
-            if a =? 0 {
-                let earlier=if dewy_call and not capture_defaults {[]} else {fin}
-                let pt=fns.ptr[f].ptypes.ptr[i]
-                if capture_defaults {pt=representation_type(pt)}
-                # (a metatag read in a default reads the caller's setting: expr.jo's __setting_read)
-                let outer_site=setting_site
-                if outer_site =? 0 {setting_site=nodes.ptr[n].pos}
-                a=default_arg(decl i pt earlier capture_defaults fns.ptr[f].targs)
-                setting_site=outer_site
-                if capture_defaults {
-                    a=capture_value(a representation_type(fns.ptr[f].ptypes.ptr[i]) @statements)
-                    finish_arg(a fns.ptr[f].ptypes.ptr[i] false)
-                }
-                fin.push(a)
-                continue
-            }
-            if capture_defaults {
-                finish_arg(captured.ptr[i] fns.ptr[f].ptypes.ptr[i] false)
-                fin.push(captured.ptr[i])
-                continue
-            }
+            let a=first.args.ptr[i]
+            let is_mut=if i <? 31 {mutmask & (CRWord(1) << CRWord(i)) not=? 0} else {has_flag(kid(decl i) NF_MUT)}
             if i =? 0 and is_mut and dewy_is_method(decl) and place_method =? 0 {
                 place_method=if nodes.ptr[decl].kind =? 'fn_' {CRWord(nodes.ptr[decl].name)} else {dewy_literal_method_name}
                 finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)
                 place_method=0
             }
             else {finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)}
-            fin.push(a)
         }
+        fin=first.args
     }
-    if CRWord(cd.sig.mutmask) not=? 0 and (CRWord(cd.sig.mutmask) & (CRWord(cd.sig.mutmask) - 1)) not=? 0 {check_mutable_arguments(fin CRWord(cd.sig.mutmask) nodes.ptr[n].pos)}
+    if mutmask not=? 0 and (mutmask & (mutmask - 1)) not=? 0 {check_mutable_arguments(fin mutmask nodes.ptr[n].pos)}
     let nfin=fin.length
     let same_fin=CRWord(nodes.ptr[n].nlist) =? nfin
     if same_fin and nfin >? 0 {
@@ -555,9 +608,9 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
     if proof_active or wi_any or dir_floats_any {call_note_contracts(n f decl partial closure)}
     if partial {
         nodes.ptr[n].op_ext=node_with_aux2(nodes.ptr[n].op_ext 0)
-        return finish_partial(n fns.ptr[f].ptypes CRWord(cd.sig.mutmask) CRWord(fns.ptr[f].ret))
+        return finish_partial(n fns.ptr[f].ptypes mutmask CRWord(fns.ptr[f].ret))
     }
-    if not capture_defaults and not (positional and not cd.missing) {save_call_order(n args fin)}
+    if not capture_defaults and not (positional and not first.missing) {save_call_order(n args fin)}
     let r0=CRWord(fns.ptr[f].ret)
     let result_type:CRWord=if refine_active {refine_read_type(r0)} else if (CRWord(types.ptr[r0].flags) & 1) =? 0 {r0} else {prune(r0)}
     nodes.ptr[n].type = int32<overflow='wrap'>(result_type)

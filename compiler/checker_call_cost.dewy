@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"checker_state.dewy" import FnSig
+from p"check.jo" import (decl_infos)
 from p"ast.jo" import nodes
 from p"types.jo" import (types)
 from p"type_inference.dewy" import tu_prune
@@ -13,7 +13,7 @@ from p"checker_call_convert.dewy" import (arg_cost_rest call_mutable_cost)
 CCWord:type=int64<overflow='wrap'>
 Cand:type=[
     decl:int64=0
-    sig:FnSig=FnSig[]
+    di:int64=0
     args:array<int64>=[]
     binds:array<int64>=[]
     cost:int64=0
@@ -66,17 +66,17 @@ call_candidate_cost=(@cd:Cand @recv_fits:bool):>CCWord=>$unsafe {
     # T. Only refined generic mutable candidates need an ordering vector;
     # construction and scoring remain O(arguments).
     let order:array<int64>=[]
-    if refine_active and cd.binds.length >? 0 and cd.sig.mutmask not=? 0 {
+    let mutmask=CCWord(decl_infos.ptr[cd.di].sig.mutmask)
+    if refine_active and cd.binds.length >? 0 and mutmask not=? 0 {
         loop mutable_pass in [0..2) {
             loop i in [0..np) {
-                let mutable_arg=(CCWord(cd.sig.mutmask) & (CCWord(1) << CCWord(i))) not=? 0
+                let mutable_arg=(mutmask & (CCWord(1) << CCWord(i))) not=? 0
                 if mutable_arg =? (mutable_pass =? 0) {order.push(i)}
             }
         }
     }
     let cost:CCWord=0
-    let params_p=cd.sig.params.ptr
-    let mutmask=CCWord(cd.sig.mutmask)
+    let params_p=decl_infos.ptr[cd.di].sig.params.ptr
     loop phase0 in [0..3) {
         let phase=CCWord(phase0)
         if phase >? 0 and (later & phase) =? 0 {continue}

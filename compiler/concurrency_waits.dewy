@@ -20,7 +20,7 @@ from p"ownership_hooks.dewy" import (ownership_literal_print)
 from p"lower_helpers.dewy" import (value_helper_calls)
 from p"concurrency_parsafe.dewy" import (parsafe_is_param parsafe_vouched_nonblocking)
 from p"lower_races.dewy" import (local_literal_fn)
-from p"node_store.dewy" import (node_sval)
+from p"node_store.dewy" import (NK Node node_sval)
 # Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
 WaitingWord:type=int64<overflow='wrap'>
 let cw_file_class:array<int8>=[]
@@ -155,11 +155,37 @@ concurrency_given_blocks=(n:WaitingWord @seen:dict<int64 bool>):>bool=>$unsafe {
     }
     return false
 }
-concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bool=>$unsafe {
-    if n =? 0 {return false}
+cw_build_act_tab=():>array<uint8>=>$unsafe {
+    let tab=fill(uint8(0) 128)
+    loop i in [0..128) {
+        let m=int64(iso_child_p[i])
+        if m >? 0 {tab.ptr[i]=uint8(m)}
+    }
+    let tmp=[Node[kind='nil']]
+    let tagp=tmp.ptr as ptr<uint32>
+    let skips:array<NK>=['lambda' 'fnref' 'partial']
+    loop k in skips {
+        tmp.ptr[0].kind=k
+        tab.ptr[int64(tagp[0])]=uint8(0)
+    }
+    tmp.ptr[0].kind='parallel_region'
+    tab.ptr[int64(tagp[0])]=uint8(1)
+    let specials:array<NK>=['ident' 'call' 'intrinsic' 'binary' 'pair']
+    loop k in specials {
+        tmp.ptr[0].kind=k
+        let idx=int64(tagp[0])
+        tab.ptr[idx]=uint8(int64(tab.ptr[idx]) | 128)
+    }
+    tab
+}
+let cw_act_tab:array<uint8>=cw_build_act_tab()
+let cw_act_p:ptr<uint8>=$unsafe cw_act_tab.ptr
+let cw_stack:array<int32>=[]
+let cw_sp:WaitingWord=0
+
+cw_check_special=(n:WaitingWord @seen:dict<int64 bool> sharing:bool):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
     match k {
-        <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'hole'|'break_'|'continue_'|'pwild'|'lambda'|'fnref'|'partial'> => {return false}
         <'ident'> => {
             if sharing and nodes.ptr[n].aux =? int32(2) {
                 let held:dict<int64 bool>=dict<int64 bool>()
@@ -167,7 +193,6 @@ concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false
             }
             return false
         }
-        <'parallel_region'> => {return concurrency_blocks_node(WaitingWord(nodes.ptr[n].a) @seen sharing)}
         <'call'> => {
             if ownership_literal_print(n) {return true}
             # (walking a parallel body: what a call gives answers here for its callee's call through that parameter)
@@ -186,6 +211,7 @@ concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false
                 }
                 if contract =? 0 or effect_allows(contract EffectAtom['block']) or effect_contracts.ptr[contract].atoms.contains(EffectAtom['opaque']) {return true}
             }
+            return false
         }
         <'intrinsic'> => {
             if nodes.ptr[n].aux =? int32(9) {
@@ -197,6 +223,7 @@ concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false
             loop f in value_helper_calls(n) {
                 if concurrency_blocks(f @seen sharing) {return true}
             }
+            return false
         }
         <'binary'> => {
             if nodes.ptr[n].aux not=? 0 {
@@ -204,30 +231,125 @@ concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false
                     if concurrency_blocks(f @seen sharing) {return true}
                 }
             }
+            return false
         }
         <'pair'> => {
             if nodes.ptr[n].sym >? 0 and concurrency_blocks(WaitingWord(nodes.ptr[n].sym) @seen sharing) {return true}
+            return false
         }
-        _ => {}
+        _ => {return false}
     }
-    let mask=int64(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
-    if mask <=? 0 {return false}
-    if mask & 1 not=? 0 and concurrency_blocks_node(WaitingWord(nodes.ptr[n].a) @seen sharing) {return true}
-    if mask & 2 not=? 0 and concurrency_blocks_node(WaitingWord(nodes.ptr[n].b) @seen sharing) {return true}
-    if mask & 4 not=? 0 and concurrency_blocks_node(WaitingWord(nodes.ptr[n].c) @seen sharing) {return true}
-    if mask & 16 not=? 0 {
-        let nk=WaitingWord(nodes.ptr[n].nlist)
-        let l0=WaitingWord(nodes.ptr[n].list)
-        loop i in [WaitingWord(0)..nk) {
-            let c=WaitingWord(lists.ptr[l0 + i])
-            if c not=? 0 and concurrency_blocks_node(c @seen sharing) {return true}
+}
+
+concurrency_blocks_node=(n0:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bool=>$unsafe {
+    if n0 =? 0 {return false}
+    let sp0=cw_sp
+    if WaitingWord(cw_stack.length) <? sp0 + 64 {cw_stack.resize(sp0 + 256)}
+    let sp=sp0
+    let cap:WaitingWord=WaitingWord(cw_stack.length)
+    let st=cw_stack.ptr
+    let np=nodes.ptr
+    let ap=cw_act_p
+    let n=n0
+    loop true {
+        if n =? 0 {
+            if sp <=? sp0 {break}
+            sp -= 1
+            n=WaitingWord(st[sp])
+            continue
         }
-    }
-    if mask & 32 not=? 0 {
-        loop i in [0..nkids2(n)) {
-            let c=kid2(n i)
-            if concurrency_blocks_node(c @seen sharing) {return true}
+        let act:WaitingWord=WaitingWord(ap[WaitingWord(((np + n) as ptr<uint32>)[0])])
+        if act =? 0 {
+            if sp <=? sp0 {break}
+            sp -= 1
+            n=WaitingWord(st[sp])
+            continue
         }
+        if (act & 128) not=? 0 {
+            let k=np[n].kind
+            let need_check=true
+            if k =? 'ident' {need_check=sharing and np[n].aux =? int32(2)}
+            else if k =? 'binary' {need_check=np[n].aux not=? 0}
+            else if k =? 'pair' {need_check=np[n].sym >? 0}
+            if need_check {
+                cw_sp=sp
+                if cw_check_special(n @seen sharing) {
+                    cw_sp=sp0
+                    return true
+                }
+                cap=WaitingWord(cw_stack.length)
+                st=cw_stack.ptr
+                np=nodes.ptr
+            }
+            act &= 63
+            if act =? 0 {
+                if sp <=? sp0 {break}
+                sp -= 1
+                n=WaitingWord(st[sp])
+                continue
+            }
+        }
+        let next:WaitingWord=0
+        if (act & 32) not=? 0 {
+            let nk2:WaitingWord=WaitingWord(nkids2(n))
+            if nk2 >? 0 {
+                if sp + nk2 >? cap {cap=(sp + nk2) * 2 + 64; cw_stack.resize(cap); st=cw_stack.ptr}
+                let j:WaitingWord=nk2 - 1
+                loop j >=? 0 {
+                    let ch=WaitingWord(kid2(n j))
+                    if ch not=? 0 {st[sp]=int32<overflow='wrap'>(ch); sp += 1}
+                    j -= 1
+                }
+            }
+        }
+        if (act & 16) not=? 0 {
+            let nk:WaitingWord=WaitingWord(np[n].nlist)
+            if nk >? 0 {
+                let l0:WaitingWord=WaitingWord(np[n].list)
+                let lp=lists.ptr
+                if (act & 7) =? 0 {
+                    if nk >? 1 {
+                        if sp + nk >? cap {cap=(sp + nk) * 2 + 64; cw_stack.resize(cap); st=cw_stack.ptr}
+                        let j:WaitingWord=nk - 1
+                        loop j >? 0 {
+                            let ch=lp[l0 + j]
+                            if ch not=? 0 {st[sp]=ch; sp += 1}
+                            j -= 1
+                        }
+                    }
+                    n=WaitingWord(lp[l0])
+                    continue
+                }
+                if sp + nk >? cap {cap=(sp + nk) * 2 + 64; cw_stack.resize(cap); st=cw_stack.ptr}
+                let j:WaitingWord=nk - 1
+                loop j >=? 0 {
+                    let ch=lp[l0 + j]
+                    if ch not=? 0 {st[sp]=ch; sp += 1}
+                    j -= 1
+                }
+            }
+        }
+        if (act & 4) not=? 0 {
+            let c:WaitingWord=WaitingWord(np[n].c)
+            if c not=? 0 {
+                if sp >=? cap {cap=cap * 2 + 64; cw_stack.resize(cap); st=cw_stack.ptr}
+                st[sp]=int32<overflow='wrap'>(c); sp += 1
+            }
+        }
+        if (act & 2) not=? 0 {
+            let b:WaitingWord=WaitingWord(np[n].b)
+            if b not=? 0 {
+                if (act & 1) =? 0 {
+                    n=b
+                    continue
+                }
+                if sp >=? cap {cap=cap * 2 + 64; cw_stack.resize(cap); st=cw_stack.ptr}
+                st[sp]=int32<overflow='wrap'>(b); sp += 1
+            }
+        }
+        if (act & 1) not=? 0 {next=WaitingWord(np[n].a)}
+        n=next
     }
-    return false
+    cw_sp=sp0
+    false
 }

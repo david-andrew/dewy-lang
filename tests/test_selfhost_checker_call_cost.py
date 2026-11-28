@@ -36,7 +36,9 @@ cost_node = (kind: NK, t: int, score: int = 4, literal: bool = false, context: b
     if context: nodes[a].aux = 2
     a
 score = (ns: int[], ps: int[], mask: int = 0):
-    cd = Cand(args=ns, sig=FnSig(params=ps, mutmask=i32(mask)), binds=[0])
+    di = decl_infos.len()
+    decl_infos.push(DeclInfo(sig=FnSig(params=ps, mutmask=i32(mask))))
+    cd = Cand(args=ns, di=di, binds=[0])
     recv = false
     failure = call_candidate_cost(cd, recv)
     print("score:{failure}:{cd.cost}:{cd.ok}:{cd.plain}:{recv}:{cd.binds}")
@@ -105,7 +107,8 @@ JO = jo_doubles({name: {} for name in ('ast.jo', 'types.jo', 'units.jo')}, {
 # Empty Jo stand-ins still re-export the driver's arenas.
 JO['ast.jo'] = "use 'node_store.dewy'\nnodes: Node[] = [Node()]\n"
 JO['types.jo'] = "use 'checker_types.dewy'\ntypes: TypeInfo[] = [TypeInfo()]\nhas_var = (t: int) -> bool: int(types[t].flags) & 1 != 0\n"
-DRIVER = ("use 'ast.jo'\nuse 'types.jo'\n" + DRIVER.replace('nodes: Node[] = [Node()]', '')
+JO['check.jo'] = "use 'checker_state.dewy'\ndecl_infos: DeclInfo[] = [DeclInfo()]\n"
+DRIVER = ("use 'ast.jo'\nuse 'types.jo'\nuse 'check.jo'\n" + DRIVER.replace('nodes: Node[] = [Node()]', '')
           .replace('types: TypeInfo[] = [TypeInfo()]', ''))
 
 # A module boundary double isolates the scoring/resolver leaf from conversion.

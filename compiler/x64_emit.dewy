@@ -4012,25 +4012,59 @@ x_emit_call=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
         # inline: x's refcount one more while more than zero; f(x) through the stub
         # keeping every register when threads run (atomically there)
         ld(RAX  XWord(xe_arguments[a]))
-        let base=XWord(x_code[0].length)
-        let p=x_bytes(40)
-        let q=p as ptr<uint64>
-        q[0]=0x3883482374C08548
-        q[1]=0x00000D8D481D7E00
-        q[2]=0x4805750039800000
-        q[3]=0x000D8D480CEB00FF
-        q[4]=0x00000000E8000000
-        x_data_fix[0].push([base + 14  1  xe_mt_active])
-        call_fix.push([base + 31  XWord(ins[0].imm)])
-        stub_fix.push([base + 36  x_ensure_rc_stub()])
-        if ipos not=? 0 {call_sites.push(XWord(x_code[0].length)); call_sites.push(ipos)}
+        if xe_mt_active <? 0 {
+            let p=x_bytes(14)
+            let q=p as ptr<uint64>
+            q[0]=0x3883480974C08548
+            let q4=(p + 8) as ptr<uint32>
+            q4[0]=uint32(0x48037E00)
+            let q2=(p + 12) as ptr<uint16>
+            q2[0]=uint16(0x00FF)
+        } else {
+            let base=XWord(x_code[0].length)
+            let p=x_bytes(40)
+            let q=p as ptr<uint64>
+            q[0]=0x3883482374C08548
+            q[1]=0x00000D8D481D7E00
+            q[2]=0x4805750039800000
+            q[3]=0x000D8D480CEB00FF
+            q[4]=0x00000000E8000000
+            x_data_fix[0].push([base + 14  1  xe_mt_active])
+            call_fix.push([base + 31  XWord(ins[0].imm)])
+            stub_fix.push([base + 36  x_ensure_rc_stub()])
+            if ipos not=? 0 {call_sites.push(XWord(x_code[0].length)); call_sites.push(ipos)}
+        }
     }
     else if ins[0].c =? CALL_RC_DEC {
         # inline: x's refcount one less while more than one is left; f(x) through the
         # stub keeping every register when threads run or for the last reference (freeing)
         ld(RAX  XWord(xe_arguments[a]))
         let base=XWord(x_code[0].length)
-        if xe_free_lf >=? 0 and XWord(ins[0].imm) =? xe_rc_dec_lf {
+        if xe_mt_active <? 0 {
+            if xe_free_lf >=? 0 and XWord(ins[0].imm) =? xe_rc_dec_lf {
+                let p=x_bytes(28)
+                let q=p as ptr<uint64>
+                q[0]=0x3883481774C08548
+                q[1]=0x0C7508FF48117E00
+                q[2]=0xE8000000000D8D48
+                let q4=(p + 24) as ptr<uint32>
+                q4[0]=uint32(0)
+                call_fix.push([base + 19  xe_free_lf])
+                stub_fix.push([base + 24  x_ensure_rc_stub()])
+            } else {
+                let p=x_bytes(30)
+                let q=p as ptr<uint64>
+                q[0]=0x3883481974C08548
+                q[1]=0x08FF480574137C01
+                q[2]=0x0000000D8D480CEB
+                let q4=(p + 24) as ptr<uint32>
+                q4[0]=uint32(0x0000E800)
+                let q2=(p + 28) as ptr<uint16>
+                q2[0]=uint16(0)
+                call_fix.push([base + 21  XWord(ins[0].imm)])
+                stub_fix.push([base + 26  x_ensure_rc_stub()])
+            }
+        } else if xe_free_lf >=? 0 and XWord(ins[0].imm) =? xe_rc_dec_lf {
             let p=x_bytes(49)
             let q=p as ptr<uint64>
             q[0]=0x3883482C74C08548

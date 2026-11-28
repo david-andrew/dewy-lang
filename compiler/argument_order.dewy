@@ -6,6 +6,7 @@ from p"type_ops.dewy" import (mk_fixed)
 from p"checker_type_entries.dewy" import (subst)
 from p"expression_types.dewy" import (ntype)
 from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag dewy_param_kinds has_flag kid mk nodes rest_bundles set_list)
+from p"check.jo" import (decl_infos)
 from p"checker_call_cost.dewy" import (Cand)
 from p"call_argument_checks.dewy" import (unnamed)
 from p"literal_context.dewy" import (is_lit)
@@ -18,10 +19,11 @@ ArgOrderWord:type=int64<overflow='wrap'>
 # how many of a candidate's arguments (not literals) have exactly their parameter's type
 exact_args=(cd:Cand):>int64=>$unsafe {
     let count:ArgOrderWord=0
+    let nsp=decl_infos.ptr[cd.di].sig.params.length
     loop i in 0.. and a in cd.args {
-        if i >=? cd.sig.params.length {break}
+        if i >=? nsp {break}
         if a =? 0 or is_lit(a) or nodes.ptr[a].type =? 0 {continue}
-        if type_eq(prune(ntype(a)) prune(subst(cd.sig.params[i] cd.binds))) {count += 1}
+        if type_eq(prune(ntype(a)) prune(subst(decl_infos.ptr[cd.di].sig.params.ptr[i] cd.binds))) {count += 1}
     }
     count
 }

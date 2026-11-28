@@ -4,7 +4,7 @@ from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_module_lookup.dewy" import (module_lookup)
 from p"expression_types.dewy" import (ntype)
 from p"ast.jo" import (decl_has_rest kid nkids nodes rest_bundles)
-from p"check.jo" import (syms universe)
+from p"check.jo" import (decl_infos syms universe)
 from p"checker_call_cost.dewy" import (Cand)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"expr.jo" import (AUX2_PARTIAL)
@@ -21,9 +21,10 @@ OverloadDiagWord:type=int64<overflow='wrap'>
 # How much fixed structure a generic signature's parameter types have around its type
 # parameters: of two generic overloads that both fit, the more specific one is chosen
 # (`<T>(d:Named<array<T>>)` over `<T>(d:Named<T>)`). O(the types' size); ties only.
-generic_specificity=(cd:Cand):>OverloadDiagWord=>{
+generic_specificity=(cd:Cand):>OverloadDiagWord=>$unsafe {
     let total:OverloadDiagWord=0
-    loop t in cd.sig.params {total += pattern_size(t 0)}
+    let nsp=decl_infos.ptr[cd.di].sig.params.length
+    loop i in [0..nsp) {total += pattern_size(decl_infos.ptr[cd.di].sig.params.ptr[i] 0)}
     total
 }
 pattern_size=(t0:OverloadDiagWord depth:OverloadDiagWord):>OverloadDiagWord=>$unsafe {
@@ -40,8 +41,10 @@ pattern_size=(t0:OverloadDiagWord depth:OverloadDiagWord):>OverloadDiagWord=>$un
 }
 call_tie_error=(n:OverloadDiagWord name:OverloadDiagWord args:array<int64> cands:array<Cand> best:OverloadDiagWord):>void=>$unsafe {
     loop index in 0.. and cd in cands {
-        if index =? best or cd.cost not=? cands[best].cost or cd.sig.generic not=? cands[best].sig.generic {continue}
-        if cd.sig.generic and generic_specificity(cd) not=? generic_specificity(cands[best]) {continue}
+        let cd_gen=decl_infos.ptr[cd.di].sig.generic
+        let best_gen=decl_infos.ptr[cands[best].di].sig.generic
+        if index =? best or cd.cost not=? cands[best].cost or cd_gen not=? best_gen {continue}
+        if cd_gen and generic_specificity(cd) not=? generic_specificity(cands[best]) {continue}
         if decl_in_prelude(cd.decl) not=? decl_in_prelude(cands[best].decl) or rest_bundles.length not=? 0 and decl_has_rest(cd.decl) not=? decl_has_rest(cands[best].decl) {continue}
         let ats=""
         loop ai in 0.. and a0 in args {

@@ -669,157 +669,256 @@ effect_scan_begin=(f:EffectScanWord):>void=>$unsafe {
         }
     }
 }
-effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
-    if n =? 0 or effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {return}
-    if n =? es_fuse_root {
-        es_fuse_root=0
-        let saved_caps:array<int64>=[]
-        loop cl in es_fuse_plan.fused_only_captured {
-            let fl=EffectScanWord(locals.ptr[cl].flags)
-            if fl & LF_CAPTURED not=? 0 {
-                saved_caps.push(cl)
-                locals[cl].flags=int32<overflow='wrap'>(fl & ~LF_CAPTURED)
-            }
+let es_stack:array<int32>=[]
+let es_sp:EffectScanWord=0
+
+es_push=(x:EffectScanWord):>void=>$unsafe {
+    if x =? 0 {return}
+    let sp=es_sp
+    if sp >=? es_stack.length {es_stack.resize(if es_stack.length >? 0 {es_stack.length * 2} else {256})}
+    es_stack.ptr[sp]=int32<overflow='wrap'>(x)
+    es_sp=sp + 1
+}
+
+effect_scan_fuse_root=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
+    es_fuse_root=0
+    let saved_caps:array<int64>=[]
+    loop cl in es_fuse_plan.fused_only_captured {
+        let fl=EffectScanWord(locals.ptr[cl].flags)
+        if fl & LF_CAPTURED not=? 0 {
+            saved_caps.push(cl)
+            locals[cl].flags=int32<overflow='wrap'>(fl & ~LF_CAPTURED)
         }
-        es_fuse_active=true
-        effect_scan_node(f n);
-        es_fuse_active=false
-        es_fuse_depth=0
-        if es_fuse_up_caps.length >? 0 {es_fuse_up_caps.clear()}
-        if es_fuse_val_caps.length >? 0 {es_fuse_val_caps.clear()}
-        loop cl in saved_caps {
-            locals[cl].flags=int32<overflow='wrap'>(EffectScanWord(locals.ptr[cl].flags) | LF_CAPTURED)
-        }
-        return
     }
-    let stamp:EffectScanWord=(es_seen_gen << 24) | f
-    if effect_seen.ptr[n] =? stamp {return}
-    effect_seen.ptr[n]=stamp
+    es_fuse_active=true
+    effect_scan_node(f n);
+    es_fuse_active=false
+    es_fuse_depth=0
+    if es_fuse_up_caps.length >? 0 {es_fuse_up_caps.clear()}
+    if es_fuse_val_caps.length >? 0 {es_fuse_val_caps.clear()}
+    loop cl in saved_caps {
+        locals[cl].flags=int32<overflow='wrap'>(EffectScanWord(locals.ptr[cl].flags) | LF_CAPTURED)
+    }
+}
+
+effect_scan_fuse_step=(f:EffectScanWord n:EffectScanWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
-    if es_fuse_active {
-        if k =? 'vardecl' {
-            if es_fuse_plan.skip_k_decls.has(n) {return}
-            if es_fuse_plan.decls_map.has(n) {
-                let fl_l=es_fuse_plan.decls_map[n]
-                effect_scan_fused_args(f es_fuse_plan.locals_map[fl_l]);
-                return
+    if k =? 'vardecl' {
+        if es_fuse_plan.skip_k_decls.has(n) {return true}
+        if es_fuse_plan.decls_map.has(n) {
+            let fl_l=es_fuse_plan.decls_map[n]
+            effect_scan_fused_args(f es_fuse_plan.locals_map[fl_l]);
+            return true
+        }
+    } else if k =? 'for_' and nodes.ptr[n].aux =? 5 {
+        let fsidx:int64=-1
+        if es_fuse_depth =? 0 and es_fuse_plan.for_sources.has(n) {
+            fsidx=es_fuse_plan.for_sources[n]
+        } else if es_fuse_depth >? 0 {
+            let it=EffectScanWord(nodes.ptr[n].a)
+            if it >? 0 and nodes.ptr[it].kind =? 'ident' and nodes.ptr[it].aux =? int32(1) {
+                let il=EffectScanWord(nodes.ptr[it].sym)
+                if es_fuse_up_caps.has(il) {fsidx=es_fuse_up_caps[il]}
             }
-        } else if k =? 'for_' and nodes.ptr[n].aux =? 5 {
-            let fsidx:int64=-1
-            if es_fuse_depth =? 0 and es_fuse_plan.for_sources.has(n) {
-                fsidx=es_fuse_plan.for_sources[n]
-            } else if es_fuse_depth >? 0 {
-                let it=EffectScanWord(nodes.ptr[n].a)
-                if it >? 0 and nodes.ptr[it].kind =? 'ident' and nodes.ptr[it].aux =? int32(1) {
-                    let il=EffectScanWord(nodes.ptr[it].sym)
-                    if es_fuse_up_caps.has(il) {fsidx=es_fuse_up_caps[il]}
-                }
-            }
-            if fsidx >=? 0 {
-                let el_l=EffectScanWord(nodes.ptr[n].sym)
-                if el_l >? 0 and not effect_share(representation_type(EffectScanWord(locals.ptr[el_l].type))) {
-                    effect_opaque(f n);
-                }
-                effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
-                effect_scan_fused_producer(f fsidx);
-                return
-            }
-        } else if k =? 'while_' and es_fuse_depth =? 0 and es_fuse_plan.while_sources.has(n) {
-            let fsidx=es_fuse_plan.while_sources[n]
-            let wi=es_fuse_plan.while_infos[n]
-            if wi.el_l >? 0 and not effect_share(representation_type(EffectScanWord(locals.ptr[wi.el_l].type))) {
+        }
+        if fsidx >=? 0 {
+            let el_l=EffectScanWord(nodes.ptr[n].sym)
+            if el_l >? 0 and not effect_share(representation_type(EffectScanWord(locals.ptr[el_l].type))) {
                 effect_opaque(f n);
             }
-            loop bs in wi.before_stmts {effect_scan_node(f bs);}
-            loop as_ in wi.after_stmts {effect_scan_node(f as_);}
+            effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
             effect_scan_fused_producer(f fsidx);
-            return
-        } else if k =? 'yield_' and es_fuse_depth >? 0 {
-            let a=EffectScanWord(nodes.ptr[n].a)
-            if a not=? 0 {effect_scan_node(f a);}
-            return
-        } else if k =? 'ident' and es_fuse_depth >? 0 and nodes.ptr[n].aux =? int32(1) {
-            let il=EffectScanWord(nodes.ptr[n].sym)
-            if es_fuse_val_caps.has(il) {
-                let it=representation_type(ntype(n))
-                if tkind(it) =? 'array' and effect_scalar(telem(it)) {return}
-            }
+            return true
+        }
+    } else if k =? 'while_' and es_fuse_depth =? 0 and es_fuse_plan.while_sources.has(n) {
+        let fsidx=es_fuse_plan.while_sources[n]
+        let wi=es_fuse_plan.while_infos[n]
+        if wi.el_l >? 0 and not effect_share(representation_type(EffectScanWord(locals.ptr[wi.el_l].type))) {
+            effect_opaque(f n);
+        }
+        loop bs in wi.before_stmts {effect_scan_node(f bs);}
+        loop as_ in wi.after_stmts {effect_scan_node(f as_);}
+        effect_scan_fused_producer(f fsidx);
+        return true
+    } else if k =? 'yield_' and es_fuse_depth >? 0 {
+        let a=EffectScanWord(nodes.ptr[n].a)
+        if a not=? 0 {es_push(a)}
+        return true
+    } else if k =? 'ident' and es_fuse_depth >? 0 and nodes.ptr[n].aux =? int32(1) {
+        let il=EffectScanWord(nodes.ptr[n].sym)
+        if es_fuse_val_caps.has(il) {
+            let it=representation_type(ntype(n))
+            if tkind(it) =? 'array' and effect_scalar(telem(it)) {return true}
         }
     }
-    let exact_rep=effect_exact_rep
-    if not exact_rep and ownership_decls.length =? 0 {
+    false
+}
+
+effect_scan_node=(f:EffectScanWord n0:EffectScanWord):>void=>$unsafe {
+    if n0 =? 0 or (effect_footprints_only and effect_summaries.ptr[f].footprint_opaque) {return}
+    if n0 =? es_fuse_root {
+        effect_scan_fuse_root(f n0)
+        return
+    }
+    let sp0=es_sp
+    if EffectScanWord(es_stack.length) <? sp0 + 64 {es_stack.resize(sp0 + 256)}
+    let sp=sp0
+    let cap:EffectScanWord=EffectScanWord(es_stack.length)
+    let st=es_stack.ptr
+    let np=nodes.ptr
+    let seen_p=effect_seen.ptr
+    let stamp:EffectScanWord=(es_seen_gen << 24) | f
+    let n=n0
+    loop true {
+        if n =? 0 {
+            if sp <=? sp0 {break}
+            sp -= 1
+            n=EffectScanWord(st[sp])
+            continue
+        }
+        if seen_p[n] =? stamp {
+            if sp <=? sp0 {break}
+            sp -= 1
+            n=EffectScanWord(st[sp])
+            continue
+        }
+        seen_p[n]=stamp
+        if es_fuse_active {
+            es_sp=sp
+            let handled=effect_scan_fuse_step(f n)
+            sp=es_sp; cap=EffectScanWord(es_stack.length); st=es_stack.ptr; np=nodes.ptr; seen_p=effect_seen.ptr
+            if handled {
+                if effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {break}
+                if sp <=? sp0 {break}
+                sp -= 1; n=EffectScanWord(st[sp]); continue
+            }
+        }
+        let k=np[n].kind
         match k {
             <'block'> => {
-                let nk=EffectScanWord(nodes.ptr[n].nlist)
-                let l0=EffectScanWord(nodes.ptr[n].list)
-                loop j in [EffectScanWord(0)..nk) {
-                    let ch=EffectScanWord(lists.ptr[l0 + j])
-                    if ch not=? 0 {effect_scan_node(f ch)}
+                if ownership_decls.length not=? 0 {effect_body_moves_out(n 0 false); np=nodes.ptr}
+                let nk=EffectScanWord(np[n].nlist)
+                if nk =? 0 {
+                    if sp <=? sp0 {break}
+                    sp -= 1; n=EffectScanWord(st[sp]); continue
                 }
-                return
+                let l0=EffectScanWord(np[n].list)
+                let lp=lists.ptr
+                if nk >? 1 {
+                    if sp + nk >? cap {cap=(sp + nk) * 2 + 64; es_stack.resize(cap); st=es_stack.ptr}
+                    let j:EffectScanWord=nk - 1
+                    loop j >? 0 {
+                        let ch=lp[l0 + j]
+                        if ch not=? 0 {st[sp]=ch; sp += 1}
+                        j -= 1
+                    }
+                }
+                n=EffectScanWord(lp[l0])
+                continue
             }
             <'exprstmt'|'not_'|'defer_'> => {
-                let a=EffectScanWord(nodes.ptr[n].a)
-                if a not=? 0 {effect_scan_node(f a)}
-                return
+                n=EffectScanWord(np[n].a)
+                continue
             }
             <'and_'|'or_'|'while_'> => {
-                let a=EffectScanWord(nodes.ptr[n].a)
-                if a not=? 0 {effect_scan_node(f a)}
-                let b=EffectScanWord(nodes.ptr[n].b)
-                if b not=? 0 {effect_scan_node(f b)}
-                return
+                let b=EffectScanWord(np[n].b)
+                if b not=? 0 {
+                    if sp >=? cap {cap=cap * 2 + 64; es_stack.resize(cap); st=es_stack.ptr}
+                    st[sp]=int32<overflow='wrap'>(b); sp += 1
+                }
+                n=EffectScanWord(np[n].a)
+                continue
             }
             <'if_'> => {
-                let a=EffectScanWord(nodes.ptr[n].a)
-                if a not=? 0 {effect_scan_node(f a)}
-                let b=EffectScanWord(nodes.ptr[n].b)
-                if b not=? 0 {effect_scan_node(f b)}
-                let c=EffectScanWord(nodes.ptr[n].c)
-                if c not=? 0 {effect_scan_node(f c)}
-                return
+                let c=EffectScanWord(np[n].c)
+                let b=EffectScanWord(np[n].b)
+                if sp + 2 >? cap {cap=cap * 2 + 64; es_stack.resize(cap); st=es_stack.ptr}
+                if c not=? 0 {st[sp]=int32<overflow='wrap'>(c); sp += 1}
+                if b not=? 0 {st[sp]=int32<overflow='wrap'>(b); sp += 1}
+                n=EffectScanWord(np[n].a)
+                continue
             }
-            <'break_'|'continue_'> => {return}
+            <'break_'|'continue_'> => {
+                if sp <=? sp0 {break}
+                sp -= 1; n=EffectScanWord(st[sp]); continue
+            }
+            <'str_lit'> => {
+                if np[n].nlist =? 0 {
+                    if sp <=? sp0 {break}
+                    sp -= 1; n=EffectScanWord(st[sp]); continue
+                }
+            }
             <'int_lit'|'bool_lit'> => {
-                let t=prune(ntype(n))
+                let t0:EffectScanWord=EffectScanWord(np[n].type)
+                let t:EffectScanWord=if types.ptr[t0].kind =? 'var' {prune(t0)} else {t0}
                 let tk=types.ptr[t].kind
-                if (tk =? 'int_' and t not=? T_MATH_INT) or tk =? 'bool_' {return}
+                if (tk =? 'int_' and t not=? T_MATH_INT) or tk =? 'bool_' {
+                    if sp <=? sp0 {break}
+                    sp -= 1; n=EffectScanWord(st[sp]); continue
+                }
             }
             <'float_lit'> => {
-                if types.ptr[prune(ntype(n))].kind =? 'float_' {return}
+                let t0:EffectScanWord=EffectScanWord(np[n].type)
+                let t:EffectScanWord=if types.ptr[t0].kind =? 'var' {prune(t0)} else {t0}
+                if types.ptr[t].kind =? 'float_' {
+                    if sp <=? sp0 {break}
+                    sp -= 1; n=EffectScanWord(st[sp]); continue
+                }
             }
             <'ident'> => {
-                if nodes.ptr[n].aux =? int32(1) {
-                    let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+                if np[n].aux =? int32(1) {
+                    let l:EffectScanWord=EffectScanWord(np[n].sym)
                     let fl:EffectScanWord=EffectScanWord(locals.ptr[l].flags)
                     if fl & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED | LF_ALIAS | LF_MUTPARAM | LF_ADDR) =? 0 {
-                        let t=prune(ntype(n))
+                        let t0:EffectScanWord=EffectScanWord(np[n].type)
+                        let t:EffectScanWord=if types.ptr[t0].kind =? 'var' {prune(t0)} else {t0}
                         let tk=types.ptr[t].kind
-                        if (tk =? 'int_' and t not=? T_MATH_INT) or tk =? 'bool_' or tk =? 'float_' {return}
+                        if (tk =? 'int_' and t not=? T_MATH_INT) or tk =? 'bool_' or tk =? 'float_' {
+                            if sp <=? sp0 {break}
+                            sp -= 1; n=EffectScanWord(st[sp]); continue
+                        }
                     }
                 }
             }
             <'binary'> => {
-                if nodes.ptr[n].aux =? 0 {
-                    let op=node_op(nodes.ptr[n].op_ext)
+                if not effect_exact_rep and np[n].aux =? 0 {
+                    let op=node_op(np[n].op_ext)
                     if (op >=? int32(58) and op <=? int32(60)) or (op >=? int32(63) and op <=? int32(65)) or (op >=? int32(69) and op <=? int32(74)) or op =? int32(82) {
-                        let a=EffectScanWord(nodes.ptr[n].a)
-                        let b=EffectScanWord(nodes.ptr[n].b)
-                        let ta=prune(ntype(a))
-                        let tb=prune(ntype(b))
+                        let a=EffectScanWord(np[n].a)
+                        let b=EffectScanWord(np[n].b)
+                        let ta0:EffectScanWord=EffectScanWord(np[a].type)
+                        let tb0:EffectScanWord=EffectScanWord(np[b].type)
+                        let ta:EffectScanWord=if types.ptr[ta0].kind =? 'var' {prune(ta0)} else {ta0}
+                        let tb:EffectScanWord=if types.ptr[tb0].kind =? 'var' {prune(tb0)} else {tb0}
                         let tka=types.ptr[ta].kind
                         let tkb=types.ptr[tb].kind
                         if ((tka =? 'int_' and ta not=? T_MATH_INT) or tka =? 'bool_') and ((tkb =? 'int_' and tb not=? T_MATH_INT) or tkb =? 'bool_') {
-                            if a not=? 0 {effect_scan_node(f a)}
-                            if b not=? 0 {effect_scan_node(f b)}
-                            return
+                            if b not=? 0 {
+                                if sp >=? cap {cap=cap * 2 + 64; es_stack.resize(cap); st=es_stack.ptr}
+                                st[sp]=int32<overflow='wrap'>(b); sp += 1
+                            }
+                            n=a
+                            continue
                         }
                     }
                 }
             }
             _ => {}
         }
+        es_sp=sp
+        effect_scan_slow(f n stamp)
+        if effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {break}
+        sp=es_sp; cap=EffectScanWord(es_stack.length); st=es_stack.ptr; np=nodes.ptr; seen_p=effect_seen.ptr
+        if sp <=? sp0 {break}
+        sp -= 1
+        n=EffectScanWord(st[sp])
     }
+    es_sp=sp0
+}
+
+effect_scan_slow=(f:EffectScanWord n:EffectScanWord stamp:EffectScanWord):>void=>$unsafe {
+    let k=nodes.ptr[n].kind
+    let exact_rep=effect_exact_rep
     if exact_rep and (k =? 'vardecl' or k =? 'assign' or k =? 'binary' or k =? 'conv') {
         exact_effect_representation(n)
     }
@@ -897,7 +996,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     # (an interpolated part: its formatter writes the interpolation's own buffer)
     if k =? 'pair' and nodes.ptr[n].sym >? 0 and nodes.ptr[n].b =? 0 {
         effect_summaries.ptr[f].edges.push(EffectEdge[EffectScanWord(nodes.ptr[n].sym) n [PlaceIdentity['local' f n]]]);
-        effect_scan_node(f EffectScanWord(nodes.ptr[n].a));
+        es_push(EffectScanWord(nodes.ptr[n].a));
         return
     }
     if k =? 'lambda' and nodes.ptr[n].sym >? 0 and fns.ptr[EffectScanWord(nodes.ptr[n].sym)].caps.length not=? 0 {
@@ -1010,7 +1109,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             loop j in [0..nkids(target)) {effect_scan_node(f kid(target j));}
             effect_bounds(f target);
             effect_plan_cost(f n (1 << 2) | (1 << 3));
-            effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
+            es_push(EffectScanWord(nodes.ptr[n].b));
             return
         }
     }
@@ -1023,7 +1122,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             # (an `int` shifted by a signed count fails for a negative one: facts.jo)
             else if fact_shift_obliged(n) and not effect_count_literal(EffectScanWord(nodes.ptr[n].b)) {effect_failure(f n);}
         }
-        effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
+        es_push(EffectScanWord(nodes.ptr[n].b));
         return
     }
     if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
@@ -1074,7 +1173,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         }
     }
     if k =? 'field' and effect_temporary_field(n) {
-        effect_scan_node(f effect_field_root(n));
+        es_push(effect_field_root(n));
         return
     }
     if k =? 'ident' or k =? 'field' {
@@ -1162,8 +1261,8 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             let b=effect_unwidened(EffectScanWord(nodes.ptr[n].b))
             if (a not=? EffectScanWord(nodes.ptr[n].a) or b not=? EffectScanWord(nodes.ptr[n].b)) and effect_word(a) and effect_word(b) {
                 loop g in hidden {effect_summaries.ptr[f].edges.push(EffectEdge[g n []]);}
-                effect_scan_node(f a);
-                effect_scan_node(f b);
+                es_push(b);
+                es_push(a);
                 return
         # (text compares by reading both, and the library's `+` on text
         # allocates; `int`s compare as words or by reading a big payload, and
@@ -1318,28 +1417,32 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     }
     let mask:EffectScanWord=int64(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return}
-    if mask & 1 not=? 0 {
-        let a=EffectScanWord(nodes.ptr[n].a)
-        if a not=? 0 {effect_scan_node(f a);}
-    }
-    if mask & 2 not=? 0 {
-        let b=EffectScanWord(nodes.ptr[n].b)
-        if b not=? 0 {effect_scan_node(f b);}
-    }
-    if mask & 4 not=? 0 {
-        let c=EffectScanWord(nodes.ptr[n].c)
-        if c not=? 0 {effect_scan_node(f c);}
+    if mask & 32 not=? 0 {
+        let nk2:EffectScanWord=EffectScanWord(nkids2(n))
+        let j:EffectScanWord=nk2 - 1
+        loop j >=? 0 {es_push(EffectScanWord(kid2(n j))); j -= 1}
     }
     if mask & 16 not=? 0 {
         let nk=EffectScanWord(nodes.ptr[n].nlist)
         let l0=EffectScanWord(nodes.ptr[n].list)
-        loop j in [EffectScanWord(0)..nk) {
+        let j:EffectScanWord=nk - 1
+        loop j >=? 0 {
             let ch=EffectScanWord(lists.ptr[l0 + j])
-            if ch not=? 0 {effect_scan_node(f ch);}
+            if ch not=? 0 {es_push(ch)}
+            j -= 1
         }
     }
-    if mask & 32 not=? 0 {
-        loop j in [0..nkids2(n)) {effect_scan_node(f kid2(n j));}
+    if mask & 4 not=? 0 {
+        let c=EffectScanWord(nodes.ptr[n].c)
+        if c not=? 0 {es_push(c)}
+    }
+    if mask & 2 not=? 0 {
+        let b=EffectScanWord(nodes.ptr[n].b)
+        if b not=? 0 {es_push(b)}
+    }
+    if mask & 1 not=? 0 {
+        let a=EffectScanWord(nodes.ptr[n].a)
+        if a not=? 0 {es_push(a)}
     }
 }
 
