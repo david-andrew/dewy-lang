@@ -45,6 +45,8 @@
   - D49 Q3: bare literal arms (`"look" =>`), and a bare name hiding a value becomes an error.
   - D50 Q1: `max(xs default=d)`, `min(xs default=d)` and `default=` on `min_by`/`max_by`.
   - D51 Q1: `...args` ends a variadic C function's parameters (`printf = (format:string ...args):>int32`).
+  - D52 Q1: refinements on times (`Duration<(>? 0s)>`), so division by a proven nonzero time has no `OutOfRange`.
+  - D53 Q1: `.length` and `.reversed` on integer ranges.
 - **(c) Names only:**
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
@@ -2260,6 +2262,42 @@ Let `...args` (no type) end an `$extern` declaration's parameters, as C's `...`?
 - **Unblocks:** `printf`, `snprintf`, `open` with a mode, `ioctl`, `fcntl`, and C logging and formatting libraries.
 
 Names tested cold (one round, three readers, all read every candidate correctly). Not dogfooded. Candidates and the cold-read table: [proposals/ffi-variadic/round1.md](proposals/ffi-variadic/round1.md).
+
+---
+
+### D52. Refinements on times, and division by a proven nonzero time
+
+```dewy
+Policy:type = [count:int64<(>=? 1)> per:Duration<(>? 0s)> burst:int64<(>=? 1)>]
+refill = (elapsed:Duration p:Policy):>rational => (elapsed / p.per) * p.count   # today: `?? 0`
+```
+
+#### Q1 (b). `Duration<(>? 0s)>`, and `/`, `//`, `%` by a time proven nonzero
+
+Let `Duration` and `Instant` take the refinement spelling integers have, with time constants as bounds (`Duration<(>? 0s)>`, `Instant<(>=? launch)>`), and let a divisor proven nonzero (by its type, a constant, or a guard such as `if per <=? 0s return ...`) give `/`, `//` and `%` no `OutOfRange`? Today `elapsed / per` is `rational | OutOfRange` even after `per >? 0s`, because refinements are integer bounds only (`unsupported refinement term`) and a guard on a time proves nothing; ladder 154 writes `/ p.per ?? 0` over a period it already checked. Facts also carry through the exact arithmetic (`d / 1s` of a `d >? 0s` is `>? 0`, `t - c` keeps bounds). A divisor that is not proven keeps `OutOfRange`; this does not make that division an obligation (a user-typed period stays a value to handle, `?? 0` still works).
+
+- **Rec:** yes. Peers trap or return `inf` at the division and none lets an earlier check remove it; here the check already written does. Rejected: making a run-time-divisor `/` a compile error unless proven (turns working `?? 0` code into errors, and the union already says it). Bounds are constants only; `rational` and `float64` refinements are a separate question. **Reversible:** yes, an extension of an existing spelling.
+- **Unblocks:** ladder 154's `?? 0` and its comment; any rate, progress or schedule arithmetic over a checked period or timeout.
+
+Dogfooded (13 programs, 65 of 65 marks at 5 after one change: the proof carries through `d / 1s`, found when a guard-only window-rate program scored 3 and 4). Programs and grades: [proposals/time/refinements-round1.md](proposals/time/refinements-round1.md).
+
+---
+
+### D53. `.length` and `.reversed` on integer ranges
+
+```dewy
+loop p in [0..pieces.length).reversed { ... }     # today: [pieces.length - 1, pieces.length - 2..0]
+let pages = [0, size..total).length               # 10 for size 10, total 95
+```
+
+#### Q1 (b). Members of a stored integer range
+
+Give an integer range (`[0..n)`, `[a, b..c]`, `(0..n]`, a stored `IntRange`) `r.length`, the number of elements, and `r.reversed`, the same elements in the opposite order? `.length` is an exact `int` (the full signed-word range has 2^64 elements, which no 64-bit count holds) and 0 for an empty range such as `[5..0]`. `.reversed` is itself a range, lazy like any other (`[0..5)` gives 4 3 2 1 0, `[0, 3..10)` gives 9 6 3 0, `(0..3]` gives 3 2 1, and a descending range ascends), so it still works in `and` headers, `xs[r]` and `r:IntRange` parameters. Today `[0..5).length` and `[0..5).reversed` are "IntRange has no field"; arrays already have both (`xs.reversed` as a new array), and no design doc or discussion note gives ranges members.
+
+- **Rec:** yes, with `.reversed` a range. An array result would allocate and lose `xs[r]`, `and` headers and a common type for `if down r.reversed else r`; Python, Rust and Swift all return a lazy reversed range. Rejected: `.first`/`.last`/`.is_empty` here (an empty range's `first` is an optional; no program needed them). **Reversible:** yes, additive.
+- **Unblocks:** ladder 153's `[pieces.length - 1, pieces.length - 2..0]` and `[n, n - 1..0]`; page and frame counts without the ceiling-division idiom.
+
+Dogfooded (13 programs, 65 of 65 marks at 5 after two changes: `.length` is an exact `int` rather than `uint64`, and `.reversed` is a range rather than an array, found when programs 4, 6, 8 and 12 scored 2 to 4). Programs and grades: [proposals/ranges/members-round1.md](proposals/ranges/members-round1.md).
 
 ---
 
