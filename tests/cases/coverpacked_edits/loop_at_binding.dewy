@@ -1,0 +1,16 @@
+# Small records edited through a loop's `@` binding, beside a saved copy.
+$runtime_checks
+
+Unit:type = [hp:uint8<b => b <=? 100> team:uint8 alive:bool x:int16 y:int16]
+
+main = ():>void => {
+    let units:array<Unit> = [Unit[100 1 true 0 0] Unit[30 2 true -5 7] Unit[5 1 true 300 -300]]
+    let start = units
+    loop @u in units {
+        u.x = u.x + 1
+        if u.hp >? 10 { u.hp = u.hp - 10 } else { u.hp = 0; u.alive = false }
+    }
+    printl([loop u in units u.hp])
+    printl([loop u in units u.alive])
+    printl"{units[2].x} {start[2].x} {start[2].hp}"
+}

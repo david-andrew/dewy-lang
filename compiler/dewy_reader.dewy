@@ -6580,6 +6580,11 @@ rd_dc_in_mistake=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64)
     if ((binder >? 0) and (reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].kind =? 'identifier') and (rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)]) =? "for")) {
         rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].start) "Dewy has no `for`: write `loop x in xs \{ ... }`, or key and value with `loop [key value] in m \{ ... }`");
     }
+    # (`loop mut x in xs`, Rust's or Jo's: Dewy edits each element through `@x`)
+    else if ((binder >? 1) and (reader_ctx.tokens[binder].kind =? 'identifier') and (reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].kind =? 'identifier') and (rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 2)]) =? "loop") and (rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)]) in? ["mut" "var" "ref"])) {
+        let name:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[binder])
+        rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].start) "a loop edits each element through an `@` binding: write `loop @{name} in ...`, not `{rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)])} {name}`");
+    }
     # (`loop key value in m`: two names where the loop takes one binding)
     else if ((binder >? 1) and (reader_ctx.tokens[binder].kind =? 'identifier') and (reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].kind =? 'identifier') and (rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 2)]) =? "loop")) {
         rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].start) "a loop takes one binding before `in`: unpack a key and value, or any pair, in brackets, as in `loop [key value] in m \{ ... }`");

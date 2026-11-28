@@ -1,0 +1,7 @@
+# modes: native
+Unit:type = [hp:uint8 x:int16]
+main = ():>void => {
+    let units:array<Unit> = [Unit[10 1] Unit[20 2]]
+    loop mut u in units { u.x = u.x + 1 }
+    printl(units)
+}
