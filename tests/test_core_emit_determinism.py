@@ -20,7 +20,9 @@ pytestmark = pytest.mark.skipif(
     reason='emission workers are x86-64 Linux only')
 pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 
-PROGRAMS = [('dunes', []), ('paddle', ['--release']), ('controls', [])]
+# Default builds align functions to 64 bytes, so only release builds can land a run off its
+# 32-byte phase; two release programs keep that from depending on one program's cut sizes.
+PROGRAMS = [('dunes', []), ('paddle', ['--release']), ('controls', []), ('controls', ['--release'])]
 
 
 def build(compiler, name, flags, output, workers):
@@ -52,9 +54,9 @@ def test_ungated_program_one_and_four_workers(compiler, tmp_path):
 def test_ungated_programs_any_worker_count(compiler, tmp_path):
     again = 0
     for name, flags in PROGRAMS:
-        one, _ = build(compiler, name, flags, tmp_path / f'{name}1', 1)
+        one, _ = build(compiler, name, flags, tmp_path / f'{name}{len(flags)}-1', 1)
         for workers in (2, 3, 4):
-            got, log = build(compiler, name, flags, tmp_path / f'{name}{workers}', workers)
+            got, log = build(compiler, name, flags, tmp_path / f'{name}{len(flags)}-{workers}', workers)
             again += workers_ran(log, workers)
             assert got == one, f'{name} {flags}, {workers} workers: binary differs from one process'
     # (not vacuous: some run landed off its 32-byte phase and had functions made again)
